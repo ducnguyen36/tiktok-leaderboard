@@ -11,3 +11,14 @@ body {
   -moz-osx-font-smoothing: grayscale;
   background-color: #181a3e;
 }
+
+/* Hide React error overlay - used for TV browsers with compatibility issues */
+body.hide-error-overlay iframe[style*="position: fixed"],
+body.hide-error-overlay #webpack-dev-server-client-overlay,
+body.hide-error-overlay [id*="error-overlay"],
+body.hide-error-overlay [class*="error-overlay"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}

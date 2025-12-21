@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const puppeteer = require('puppeteer'); // Requires: npm install puppeteer
 // Note: In Node v18+, fetch is built-in. If using older Node, uncomment the line below:
 // const fetch = require('node-fetch'); 
@@ -7,6 +8,11 @@ const app = express();
 const PORT = 5000;
 
 app.use(cors());
+
+// Serve static files from the React build folder (for production/Docker deployment)
+if (process.env.NODE_ENV === 'production') {
+    app.use(express.static(path.join(__dirname, 'build')));
+}
 
 // --- CONFIGURATION ---
 const ALLOWED_CREATOR_IDS = {
@@ -87,12 +93,12 @@ const HEADERS = {
     'x-csrf-token': 'undefined',
     'x-language': 'en',
     'Cookie': '_tt_enable_cookie=1; d_ticket_backstage=9eeea309e3d084424d282c62453a49c1ad737; living_device_id=53974713026; _ga_LWWPCY99PB=GS1.1.1745711106.4.0.1745711106.0.0.468963034; ttcsid=1757152821896::dGYUuRGwSFZ6Au3HBaIz.3.1757153161666; ttcsid_CQ6FR3RC77U6L0AM21H0=1757152821895::LcyqtFwwYCe4AzSTg31j.3.1757153161880; _ga_GZB380RXJX=GS2.1.s1757152821$o4$g1$t1757154275$j60$l0$h1146909479; _ga=GA1.1.GA1.1.1579992134.1737330652; _ga_GR6VLNH8D4=GS1.1.1758019820.2.1.1758019890.0.0.842071688; _ttp=33NmYLgRM2umpIAazOGsbA7U0QU; ttwid=1%7CKpigazRsSJg_axGf_WUHx6yJUS5mxacBtoqD095joCA%7C1761965283%7C04b5c1c018115a478a29e210137e033677dc707f59acae42ef08a6c31e40198b; uid_tt_backstage=0e95dd739a276318b0ffd6e5f6a82a5f86d57448a6cf0b8dc8e9a14e5160299b; uid_tt_ss_backstage=0e95dd739a276318b0ffd6e5f6a82a5f86d57448a6cf0b8dc8e9a14e5160299b; sid_tt_backstage=de82f03f829b2fc4ac0eb136f7bb6e80; sessionid_backstage=de82f03f829b2fc4ac0eb136f7bb6e80; sessionid_ss_backstage=de82f03f829b2fc4ac0eb136f7bb6e80; tt_session_tlb_tag_backstage=sttt%7C3%7C3oLwP4KbL8SsDrE297tugP_________kkU9vZWHyZaTww883BV0QHKg246K9WSsnc_d1G6aMAnM%3D; sid_ucp_v1_backstage=1.0.1-KGFhMTdhN2RhMTc3YmE1MTEzOWMyZTI3ZmU1ZWIwYzVlZTA2NjJkYWQKIAiCiKuotPSYzmEQqIXKyQYYwTUgDDD9u-LHBjgCQO8HEAMaAm15IiBkZTgyZjAzZjgyOWIyZmM0YWMwZWIxMzZmN2JiNmU4MDJOCiD7nfgvwxfHUowqUJgL0uYZqNKOG6mEDe-3HM5-iiVhixIgnAHuSNxG3T_5qNVC9dG8oJgQE6G-Ogg8VwrQpSLosvUYAyIGdGlrdG9r; ssid_ucp_v1_backstage=1.0.1-KGFhMTdhN2RhMTc3YmE1MTEzOWMyZTI3ZmU1ZWIwYzVlZTA2NjJkYWQKIAiCiKuotPSYzmEQqIXKyQYYwTUgDDD9u-LHBjgCQO8HEAMaAm15IiBkZTgyZjAzZjgyOWIyZmM0YWMwZWIxMzZmN2JiNmU4MDJOCiD7nfgvwxfHUowqUJgL0uYZqNKOG6mEDe-3HM5-iiVhixIgnAHuSNxG3T_5qNVC9dG8oJgQE6G-Ogg8VwrQpSLosvUYAyIGdGlrdG9r; tt_chain_token=2jll77Jy0QQFNSpHHxR+EA==; multi_sids=7400790728513307666%3Adbbd730b5e17766956bfa22ced794c84; cmpl_token=AgQYAPOF_hfkTtK2ig1TVjidK_21gnQlCz-WDmCij08; sid_guard=dbbd730b5e17766956bfa22ced794c84%7C1765904372%7C15551999%7CSun%2C+14-Jun-2026+16%3A59%3A31+GMT; uid_tt=0b2b3553c0b1bfaa28d5dab7cbd0b381da111ee10ff78a9d2c5a97aa2a38a39e; uid_tt_ss=0b2b3553c0b1bfaa28d5dab7cbd0b381da111ee10ff78a9d2c5a97aa2a38a39e; sid_tt=dbbd730b5e17766956bfa22ced794c84; sessionid=dbbd730b5e17766956bfa22ced794c84; sessionid_ss=dbbd730b5e17766956bfa22ced794c84; tt_session_tlb_tag=sttt%7C5%7C271zC14XdmlWv6Is7XlMhP_________xlXaCQ5jTG8Tsbr7bR7qSHwxEkzqDt8r7zaoIpkYRjxA%3D; sid_ucp_v1=1.0.1-KDhjMTg3Y2ZjZTVhMGVkNWExZTIwNTQ0OTE3ZWM2ZTBlNDM5OTlhZmIKIgiSiKnwzf642mYQ9J-GygYYswsgDDDsyNO1BjgHQPQHSAQQAxoGbWFsaXZhIiBkYmJkNzMwYjVlMTc3NjY5NTZiZmEyMmNlZDc5NGM4NDJOCiBHNWH8-OWD5R3lHaL5CwF4hnp0nMN8fZ_URlIV0YvusBIg7O3tgXuhO6gGphtOP63EQyQG0dTvwyVepWUUNwgYgd0YAiIGdGlrdG9r; ssid_ucp_v1=1.0.1-KDhjMTg3Y2ZjZTVhMGVkNWExZTIwNTQ0OTE3ZWM2ZTBlNDM5OTlhZmIKIgiSiKnwzf642mYQ9J-GygYYswsgDDDsyNO1BjgHQPQHSAQQAxoGbWFsaXZhIiBkYmJkNzMwYjVlMTc3NjY5NTZiZmEyMmNlZDc5NGM4NDJOCiBHNWH8-OWD5R3lHaL5CwF4hnp0nMN8fZ_URlIV0YvusBIg7O3tgXuhO6gGphtOP63EQyQG0dTvwyVepWUUNwgYgd0YAiIGdGlrdG9r; store-idc=alisg; store-country-code=vn; store-country-code-src=uid; tt-target-idc=alisg; tt-target-idc-sign=FfysjRNNGhb2QnCbXOTYGND5dVuo23gPJztwgOrPAnWm4zqRp2UoBnzjrOx86VCWTekbdNdCdXmOFrxqzVMO5LyyhxQ4XvdomnKtOG0XgNMFkwpQD9yxCIWY0ntWCSxZCt8Blx-UWVmdgdBEdFSxP5ZGeb5Z9AyRsza0O_-N_0icZiVZcgVLAeQHKZKaWcsX4kuuWMb90CmaBL11q30u-LAwLY6hpWZXGqlRxWlqMjTfUcj9VcF5kkk5UbrLt-XV52IYqiYxpqtXnxFHCtaYQ6UQ53gl6US_XPTxMnZnACqitMLu0Ert58HPMZfxpy-T9OwdScsw3bLJiLgrrqd3nvgogpr6ADBn1IeMtuqVd1RSIdZChroR0M4hZm4xzBWi7qwPdb3ubo0-k_LpVzuvZddgpwKw_zoqGg9G8pkKjE84yKvv4Nhzs23yXq8i_DlG3zOMk2_DYkrsqFimftv3dWQVTWHiFwxYnuFFkzQ_wKKlB5MpicOCLnXym40N6BgL; store-country-sign=MEIEDHDsvhQxJ8-s4_2X3wQgz5LyTBM71UHtbBQwIHKCcvw2j9b6GM8ZnF1pt-3xvzUEECxq9Nxm1aKUOYQBjOvYHzE; odin_tt=fbd86986b06447d07266a168b5b3e2baa5a7c51ba53e004aec15dec498c40c2e12348e6e8b0b47919bb78052be6d94b569892cf15f1a1fd8da34f44f2868ff82; s_v_web_id=verify_mj9ora8v_xHHNImus_TLsw_4xMC_AjEo_qajhcbxYJ4xN; tcn-target-idc=alisg; csrf_session_id=59d12384e8e417d791f00d7bef6ceb0b; passport_fe_beating_status=true; msToken=mJGgajzGJTnAPMrHtAwLs4dCa0Ww41YaS7p-JxZe1VGTnkbF5gMCDC4LgPvoKnMh61UOqGy40I_Axb1oTXvFuysdw1RiyyR2NRoQRULm_UeTGfr6mMUTTfmd4-FO-IDX2RL8wZotQw==; msToken=rR-UbasvHymQhcO7eqMxWthN3XmwUgGaRIhcUW6d9MFkRZlRqNJ99Wc4xtkbvdic_MUEdIFBCLYAkcLvy5GdKhxxqoPPfVM3RdCIeuWQFCLUhnXzmEPE5mnf2d3jd19wunXkD4jkwQ==; msToken=GWAq2EbgFyLG8KAUs3KlPJ1hWFmvadmPyVxF_ouwZOgfkvx-7W22i1ePtgAgm6ZYljuvXywG6nMsyVHYUFqO1XKGFSmr2PwtNmqNjv6zXKdhNeKPiTaJzPJ8SODVnBM='
-  };
+};
 
 // --- CACHE & TIMERS ---
 // GLOBAL_CACHE stores the data for all creators to serve requests instantly.
 // Structure: { [displayId]: { id, name, username, avatar, monthlyScore, dailyScore } }
-const GLOBAL_CACHE = {}; 
+const GLOBAL_CACHE = {};
 
 const REFRESH_SCORES_INTERVAL = 30 * 60 * 1000; // 30 minutes
 const REFRESH_PROFILES_INTERVAL = 12 * 60 * 60 * 1000; // 12 hours
@@ -112,19 +118,19 @@ let dailyState = {
 // dayStart: Current "Daily" start at {resetHour}:00 today (or yesterday if currently before {resetHour})
 const getTimestampsGMT7 = (resetHour = 6) => {
     const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }));
-    
+
     // Start of Month (For Monthly) - Stays standard 1st of month 00:00
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
-    
+
     // Start of Day (For Daily) - Resets at resetHour:00 AM
     let startOfDay = new Date(now);
-    startOfDay.setHours(resetHour, 0, 0, 0); 
-    
+    startOfDay.setHours(resetHour, 0, 0, 0);
+
     // If current time is before reset hour, the "day" started yesterday
     if (now < startOfDay) {
         startOfDay.setDate(startOfDay.getDate() - 1);
     }
-    
+
     return {
         monthStart: Math.floor(startOfMonth.getTime() / 1000),
         dayStart: Math.floor(startOfDay.getTime() / 1000),
@@ -136,7 +142,7 @@ const getTimestampsGMT7 = (resetHour = 6) => {
 const getLogicalDailyDate = (resetHour = 6) => {
     // Current time in VN
     const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }));
-    
+
     // If before resetHour, count as previous date string
     if (now.getHours() < resetHour) {
         now.setDate(now.getDate() - 1);
@@ -149,12 +155,12 @@ const getLogicalDailyDate = (resetHour = 6) => {
 const initializeDailyHistory = () => {
     console.log(`[${new Date().toLocaleTimeString()}] 🧹 Initializing/Resetting Daily History...`);
     dailyState.history = {}; // Clear old data
-    
+
     // Loop through all configured creators
     for (const [displayId, creatorId] of Object.entries(ALLOWED_CREATOR_IDS)) {
         // Try to grab existing profile info from global cache if available
         const cachedProfile = GLOBAL_CACHE[displayId];
-        
+
         dailyState.history[creatorId] = {
             profile: {
                 id: creatorId,
@@ -204,22 +210,22 @@ const scrapeUserProfile = async (username) => {
     let browser;
     try {
         console.log(`[DEBUG] Launching Puppeteer for ${username} at ${profileUrl}...`);
-        
+
         browser = await puppeteer.launch({
             headless: 'new', // Use new headless mode
             args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--window-size=1920,1080'],
             ignoreHTTPSErrors: true
         });
-        
+
         const page = await browser.newPage();
-        
+
         // Set standard browser User Agent
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
         // Set cookies if available
         if (HEADERS.Cookie) {
             const cookies = parseCookieString(HEADERS.Cookie);
-            if(cookies.length > 0) await page.setCookie(...cookies);
+            if (cookies.length > 0) await page.setCookie(...cookies);
         }
 
         // Navigate to the profile page
@@ -252,11 +258,11 @@ const scrapeUserProfile = async (username) => {
 
             // 2. Fallback: Open Graph tags
             const ogImage = document.querySelector('meta[property="og:image"]')?.content;
-            const title = document.title; 
-            
+            const title = document.title;
+
             let name = null;
             let username = null;
-            
+
             if (title) {
                 const nameMatch = title.match(/^(.*?)\s\(@(.*?)\)/);
                 if (nameMatch) {
@@ -264,15 +270,15 @@ const scrapeUserProfile = async (username) => {
                     username = nameMatch[2];
                 }
             }
-            
+
             if (ogImage && (name || username)) {
-                 return {
+                return {
                     name: name || "Unknown",
                     username: username || "Unknown",
                     avatar: ogImage
                 };
             }
-            
+
             return null;
         });
 
@@ -281,12 +287,12 @@ const scrapeUserProfile = async (username) => {
             return {
                 name: data.name,
                 username: data.username,
-                avatar: data.avatar 
+                avatar: data.avatar
             };
         } else {
             console.warn(`[WARN] Failed to extract profile data for ${username}`);
         }
-        
+
         return null;
 
     } catch (e) {
@@ -307,7 +313,7 @@ const fetchCreatorStats = async (displayId, urls, resetHour = 6) => {
 
     let monthlyTotal = 0;
     let dailyTotal = 0;
-    
+
     // Initialize profile placeholder
     let profile = {
         id: ALLOWED_CREATOR_IDS[displayId] || 'unknown-id',
@@ -322,15 +328,15 @@ const fetchCreatorStats = async (displayId, urls, resetHour = 6) => {
 
         try {
             const response = await fetch(url, { method: 'GET', headers: HEADERS });
-            
+
             if (!response.ok) {
                 console.error(`[ERROR] Failed to fetch ${displayId} Page ${index + 1}: ${response.status}`);
                 continue;
             }
-            
+
             const text = await response.text();
             if (!text) continue;
-            
+
             let json;
             try {
                 json = JSON.parse(text);
@@ -352,7 +358,7 @@ const fetchCreatorStats = async (displayId, urls, resetHour = 6) => {
 
             // 2. Process Rooms
             const rooms = json.data?.RoomIndicatorInfo || [];
-            
+
             for (const room of rooms) {
                 const startTime = parseInt(room.StartTime, 10);
                 const diamonds = parseInt(room.room_live_income_diamond_1d?.Value || '0', 10);
@@ -360,7 +366,7 @@ const fetchCreatorStats = async (displayId, urls, resetHour = 6) => {
                 // Accumulate Monthly
                 if (startTime >= monthStart) {
                     monthlyTotal += diamonds;
-                } 
+                }
 
                 // Accumulate Daily using the passed resetHour logic (dayStart)
                 if (startTime >= dayStart) {
@@ -385,26 +391,26 @@ const fetchCreatorStats = async (displayId, urls, resetHour = 6) => {
 // 1. Update Scores (Runs every 30 mins) with DEFAULT reset hour (6)
 const updateAllScores = async () => {
     console.log(`[${new Date().toLocaleTimeString()}] 🔄 Starting Scheduled Score Update...`);
-    
+
     // We can run these in parallel as they are lightweight API calls
     const promises = Object.entries(CREATOR_URLS).map(async ([displayId, urls]) => {
         const data = await fetchCreatorStats(displayId, urls, 6); // Default 6 AM reset for cache
-        
+
         // Initialize cache entry if needed
         if (!GLOBAL_CACHE[displayId]) GLOBAL_CACHE[displayId] = {};
-        
+
         // Update stats
         GLOBAL_CACHE[displayId].monthlyScore = data.monthlyScore;
         GLOBAL_CACHE[displayId].dailyScore = data.dailyScore;
-        
+
         // Update basic info ONLY if we don't have it yet
         if (!GLOBAL_CACHE[displayId].id) {
-             GLOBAL_CACHE[displayId].id = data.profile.id;
-             GLOBAL_CACHE[displayId].username = data.profile.username;
+            GLOBAL_CACHE[displayId].id = data.profile.id;
+            GLOBAL_CACHE[displayId].username = data.profile.username;
         }
         // Name is safe to update from API, avatar is NOT (to avoid low res overwrite)
         if (!GLOBAL_CACHE[displayId].name) {
-             GLOBAL_CACHE[displayId].name = data.profile.name;
+            GLOBAL_CACHE[displayId].name = data.profile.name;
         }
     });
 
@@ -414,42 +420,42 @@ const updateAllScores = async () => {
 
 // 2. Update Profiles (Runs every 12 hours)
 const updateAllProfiles = async () => {
-     console.log(`[${new Date().toLocaleTimeString()}] 📸 Starting Scheduled Profile Scrape...`);
-     const creators = Object.keys(CREATOR_URLS);
-     
-     // Process sequentially to save memory/CPU since Puppeteer is heavy
-     for (const displayId of creators) {
-         try {
-             const profileData = await scrapeUserProfile(displayId);
-             
-             if (profileData) {
-                 if (!GLOBAL_CACHE[displayId]) GLOBAL_CACHE[displayId] = {};
-                 
-                 // Overwrite with high-quality data
-                 GLOBAL_CACHE[displayId].name = profileData.name;
-                 GLOBAL_CACHE[displayId].username = profileData.username;
-                 GLOBAL_CACHE[displayId].avatar = profileData.avatar; // High Res!
-                 
-                 // Ensure ID is present (fallback to config if API update hasn't run)
-                 if (!GLOBAL_CACHE[displayId].id) GLOBAL_CACHE[displayId].id = ALLOWED_CREATOR_IDS[displayId];
-                 
-                 console.log(`[INFO] Cache updated for ${displayId} (High-Res Avatar)`);
-             }
-         } catch (e) {
-             console.error(`[ERROR] Failed to scrape ${displayId}:`, e.message);
-         }
-         
-         // Small delay between scrapes to be polite
-         await new Promise(resolve => setTimeout(resolve, 2000));
-     }
-     console.log(`[${new Date().toLocaleTimeString()}] ✅ Profile Scrape Complete.`);
+    console.log(`[${new Date().toLocaleTimeString()}] 📸 Starting Scheduled Profile Scrape...`);
+    const creators = Object.keys(CREATOR_URLS);
+
+    // Process sequentially to save memory/CPU since Puppeteer is heavy
+    for (const displayId of creators) {
+        try {
+            const profileData = await scrapeUserProfile(displayId);
+
+            if (profileData) {
+                if (!GLOBAL_CACHE[displayId]) GLOBAL_CACHE[displayId] = {};
+
+                // Overwrite with high-quality data
+                GLOBAL_CACHE[displayId].name = profileData.name;
+                GLOBAL_CACHE[displayId].username = profileData.username;
+                GLOBAL_CACHE[displayId].avatar = profileData.avatar; // High Res!
+
+                // Ensure ID is present (fallback to config if API update hasn't run)
+                if (!GLOBAL_CACHE[displayId].id) GLOBAL_CACHE[displayId].id = ALLOWED_CREATOR_IDS[displayId];
+
+                console.log(`[INFO] Cache updated for ${displayId} (High-Res Avatar)`);
+            }
+        } catch (e) {
+            console.error(`[ERROR] Failed to scrape ${displayId}:`, e.message);
+        }
+
+        // Small delay between scrapes to be polite
+        await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    console.log(`[${new Date().toLocaleTimeString()}] ✅ Profile Scrape Complete.`);
 };
 
 // 2. Process Daily Data (Accumulation Logic for 'daily' type endpoint)
 const processDailyData = (rawData, resetHour = 6) => {
     // Check for Day Reset using passed Reset Hour Logic
     const currentLogicalDate = getLogicalDailyDate(resetHour);
-    
+
     // If it's a new "logical" day (past resetHour), reset history
     // NOTE: This global reset might affect other users if multiple people use different hours.
     // For single-user deployment, this is acceptable.
@@ -458,7 +464,7 @@ const processDailyData = (rawData, resetHour = 6) => {
         initializeDailyHistory();
         dailyState.lastDate = currentLogicalDate;
     }
-    
+
     // Safety check: if history is empty (e.g. first run), fill it
     if (Object.keys(dailyState.history).length === 0) {
         initializeDailyHistory();
@@ -526,7 +532,7 @@ const processDailyData = (rawData, resetHour = 6) => {
 const generateDailyListFromHistory = () => {
     const list = Object.keys(dailyState.history).map(creatorId => {
         const entry = dailyState.history[creatorId];
-        
+
         // Calculate total across all rooms seen today
         const totalScore = Object.values(entry.rooms).reduce((sum, val) => sum + val, 0);
 
@@ -540,7 +546,7 @@ const generateDailyListFromHistory = () => {
         // 2. Existing History Avatar (from API/Init)
         // 3. Null
         const finalAvatar = cachedProfile?.avatar || entry.profile.avatar || null;
-        
+
         // Also sync name if cache is newer
         const finalName = cachedProfile?.name || entry.profile.name;
 
@@ -548,7 +554,7 @@ const generateDailyListFromHistory = () => {
             id: creatorId,
             name: finalName,
             username: entry.profile.username,
-            avatar: finalAvatar, 
+            avatar: finalAvatar,
             score: totalScore,
             trend: 'flat'
         };
@@ -564,7 +570,7 @@ app.get('/api/leaderboard', async (req, res) => {
     const type = req.query.type || 'monthly';
     // Get optional resetHour from query, default to 6
     const resetHour = parseInt(req.query.resetHour) || 6;
-    
+
     // --- NEW MONTHLY LOGIC (SERVED FROM CACHE OR FETCH IF CUSTOM HOUR) ---
     if (type === 'monthly') {
         try {
@@ -587,12 +593,12 @@ app.get('/api/leaderboard', async (req, res) => {
                 // (Note: Monthly score itself doesn't change based on daily reset, but dailyScore field does)
                 // Since user asked for "Refresh daily leaderboard", they might be looking at daily tab.
                 // But for completeness, let's fetch fresh stats if needed.
-                const promises = Object.entries(CREATOR_URLS).map(([displayId, urls]) => 
+                const promises = Object.entries(CREATOR_URLS).map(([displayId, urls]) =>
                     fetchCreatorStats(displayId, urls, resetHour)
                 );
-                
+
                 const results = await Promise.all(promises);
-                
+
                 // Merge with profile info from cache to get avatars
                 const processedData = results
                     .filter(item => item && item.profile)
@@ -609,7 +615,7 @@ app.get('/api/leaderboard', async (req, res) => {
                     })
                     .sort((a, b) => b.score - a.score);
 
-                 return res.json({ data: processedData });
+                return res.json({ data: processedData });
             }
 
         } catch (error) {
@@ -644,7 +650,7 @@ app.get('/api/leaderboard', async (req, res) => {
         });
 
         const text = await response.text();
-        
+
         if (!response.ok) {
             console.error(`TikTok API Error (${type}):`, response.status);
             return res.status(response.status).json({ error: 'Upstream API Error', details: text });
@@ -660,7 +666,7 @@ app.get('/api/leaderboard', async (req, res) => {
 
         if (type === 'daily') {
             processedData = processDailyData(json, resetHour);
-        } 
+        }
 
         res.json({ data: processedData });
 
@@ -676,12 +682,22 @@ console.log(`[${new Date().toLocaleTimeString()}] 🚀 Server Starting... Initia
 initializeDailyHistory(); // Ensure initial daily list is populated
 updateAllScores().then(() => console.log('✅ Initial Score Update Done.'));
 // Profile scrape takes longer, run it in background
-updateAllProfiles(); 
+updateAllProfiles();
 
 // Set Intervals for Periodic Updates
 setInterval(updateAllScores, REFRESH_SCORES_INTERVAL); // Every 30 mins
 setInterval(updateAllProfiles, REFRESH_PROFILES_INTERVAL); // Every 12 hours
 
-app.listen(PORT, () => {
-    console.log(`✅ Backend Server running at http://localhost:${PORT}`);
+// Catch-all route for React app (must be after API routes)
+if (process.env.NODE_ENV === 'production') {
+    app.get('*', (req, res) => {
+        res.sendFile(path.join(__dirname, 'build', 'index.html'));
+    });
+}
+
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`✅ Backend Server running at http://0.0.0.0:${PORT}`);
+    if (process.env.NODE_ENV === 'production') {
+        console.log(`📦 Serving React build from /build folder`);
+    }
 });
