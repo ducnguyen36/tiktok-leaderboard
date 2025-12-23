@@ -23,7 +23,7 @@ class ErrorBoundary extends React.Component {
                     <div className="text-center">
                         <h1 className="text-white text-2xl font-bold mb-4">Error Loading App</h1>
                         <p className="text-red-200 mb-6">{this.state.error?.message}</p>
-                        <button 
+                        <button
                             onClick={() => {
                                 this.setState({ hasError: false, error: null });
                                 window.location.reload();
@@ -68,7 +68,7 @@ const Leaderboard = () => {
     const [error, setError] = useState(null);
     const [rotation, setRotation] = useState(0);
     const [currentTime, setCurrentTime] = useState(new Date());
-    
+
     // --- SETTINGS STATE ---
     const [showSettings, setShowSettings] = useState(false);
     const [config, setConfig] = useState({
@@ -86,7 +86,7 @@ const Leaderboard = () => {
     });
 
     // --- VIEW STATE ---
-    const [timeframe, setTimeframe] = useState('monthly'); 
+    const [timeframe, setTimeframe] = useState('monthly');
     const [isInteracting, setIsInteracting] = useState(false);
     const [timeLeft, setTimeLeft] = useState(10);
 
@@ -102,8 +102,8 @@ const Leaderboard = () => {
         try {
             const url = new URL(window.location.href);
             if (url.hostname) return url.hostname;
-        } catch (e) {}
-        
+        } catch (e) { }
+
         return 'localhost';
     };
 
@@ -121,10 +121,10 @@ const Leaderboard = () => {
         if (Array.isArray(rawData.data)) return rawData.data;
 
         if (rawData.data.anchorAnalysisDataInfos) {
-             const filtered = rawData.data.anchorAnalysisDataInfos.filter(item => 
-                 ALLOWED_CREATOR_IDS.includes(item.anchorBaseInfo?.user_base_info?.CreatorID)
-             );
-             return filtered.map(item => ({
+            const filtered = rawData.data.anchorAnalysisDataInfos.filter(item =>
+                ALLOWED_CREATOR_IDS.includes(item.anchorBaseInfo?.user_base_info?.CreatorID)
+            );
+            return filtered.map(item => ({
                 id: item.anchorBaseInfo.user_base_info.CreatorID,
                 name: item.anchorBaseInfo.user_base_info.nickname,
                 username: item.anchorBaseInfo.user_base_info.display_id,
@@ -137,10 +137,17 @@ const Leaderboard = () => {
     };
 
     const fetchSingleType = async (type) => {
-        const hostname = getSafeHostname();
-        // Pass the resetHour to the server
-        const serverUrl = `http://${hostname}:5000/api/leaderboard?type=${type}&resetHour=${config.resetHour}`;
-        
+        // In production (served by Express), use relative URL
+        // In development (CRA dev server), use the hostname:5000
+        let serverUrl;
+        if (process.env.NODE_ENV === 'production') {
+            // Relative URL works because Express serves both frontend and API
+            serverUrl = `/api/leaderboard?type=${type}&resetHour=${config.resetHour}`;
+        } else {
+            const hostname = getSafeHostname();
+            serverUrl = `http://${hostname}:5000/api/leaderboard?type=${type}&resetHour=${config.resetHour}`;
+        }
+
         const response = await fetch(serverUrl);
         if (!response.ok) throw new Error(`Server Error ${response.status}`);
         const json = await response.json();
@@ -162,7 +169,7 @@ const Leaderboard = () => {
             ]);
 
             const hasData = (Array.isArray(dailyData) && dailyData.length > 0) || (Array.isArray(monthlyData) && monthlyData.length > 0);
-            
+
             if (hasData) {
                 setDataCache({
                     daily: Array.isArray(dailyData) ? dailyData : [],
@@ -194,15 +201,15 @@ const Leaderboard = () => {
             const userAgent = navigator.userAgent.toLowerCase();
             const tvKeywords = ['webos', 'tizen', 'smarttv', 'nexus player', 'viera', 'bravia', 'fios', 'hbbtv', 'opera tv', 'samsung', 'lg tv', 'philips', 'sony', 'panasonic'];
             const isTv = tvKeywords.some(keyword => userAgent.includes(keyword));
-            
+
             console.log('User Agent:', userAgent);
             console.log('Is TV:', isTv);
-            
+
             if (isTv) {
                 setRotation(90);
             }
         };
-        
+
         detectTV();
     }, []);
 
@@ -211,11 +218,11 @@ const Leaderboard = () => {
         const timer = setTimeout(() => {
             refreshAllData().catch(err => console.error("Initial refresh error:", err));
         }, 500);
-        
+
         const intervalId = setInterval(() => {
             refreshAllData().catch(err => console.error("Interval refresh error:", err));
         }, 60000);
-        
+
         return () => {
             clearTimeout(timer);
             clearInterval(intervalId);
@@ -252,8 +259,8 @@ const Leaderboard = () => {
     useEffect(() => {
         const handleKeyPress = (e) => {
             const key = e.key;
-            
-            switch(key) {
+
+            switch (key) {
                 case '0':
                     // Rotate 90 degrees
                     setRotation(prev => (prev + 90) % 360);
@@ -313,10 +320,10 @@ const Leaderboard = () => {
 
     useEffect(() => {
         if (isInteracting) return;
-        
+
         const { daily, monthly } = config.visibleTabs;
         if (!daily && !monthly) return;
-        
+
         if (daily && !monthly && timeframe !== 'daily') {
             setTimeframe('daily');
             return;
@@ -352,7 +359,7 @@ const Leaderboard = () => {
             [category]: { ...prev[category], [key]: !prev[category][key] }
         }));
     };
-    
+
     const toggleFooterMaster = () => {
         setConfig(prev => ({ ...prev, footer: { ...prev.footer, enabled: !prev.footer.enabled } }));
     };
@@ -371,7 +378,7 @@ const Leaderboard = () => {
                 bg-[#181a3e] text-white flex flex-col items-center p-4 overflow-y-auto
                 transition-all duration-500 ease-in-out
             `}
-            style={{ transform: `translate(-50%, -50%) rotate(${rotation}deg)` }}
+                style={{ transform: `translate(-50%, -50%) rotate(${rotation}deg)` }}
             >
                 {/* Settings Modal */}
                 {showSettings && (
@@ -416,7 +423,7 @@ const Leaderboard = () => {
                                     <div className="flex items-center gap-3">
                                         <RefreshCw className="w-5 h-5 text-gray-400" />
                                         <input type="number" min="1" value={config.cycleDuration}
-                                            onChange={(e) => setConfig(prev => ({...prev, cycleDuration: Math.max(1, parseInt(e.target.value) || 10)}))}
+                                            onChange={(e) => setConfig(prev => ({ ...prev, cycleDuration: Math.max(1, parseInt(e.target.value) || 10) }))}
                                             className="w-full bg-[#181a3e] border border-gray-600 rounded-lg p-2 text-white focus:border-cyan-400 outline-none text-center font-mono"
                                         />
                                     </div>
@@ -426,7 +433,7 @@ const Leaderboard = () => {
                                     <div className="flex items-center gap-3">
                                         <Clock className="w-5 h-5 text-gray-400" />
                                         <input type="number" min="0" max="23" value={config.resetHour}
-                                            onChange={(e) => setConfig(prev => ({...prev, resetHour: Math.max(0, Math.min(23, parseInt(e.target.value) || 0))}))}
+                                            onChange={(e) => setConfig(prev => ({ ...prev, resetHour: Math.max(0, Math.min(23, parseInt(e.target.value) || 0)) }))}
                                             className="w-full bg-[#181a3e] border border-gray-600 rounded-lg p-2 text-white focus:border-cyan-400 outline-none text-center font-mono"
                                         />
                                         <span className="text-gray-400 text-sm">h</span>
@@ -454,7 +461,7 @@ const Leaderboard = () => {
                         </div>
                     </div>
                 )}
-                
+
                 {/* --- HEADER (Conditional Sizing) --- */}
                 <div className={`w-full flex justify-between items-center ${isPortrait ? 'max-w-3xl mb-6 mt-8' : 'max-w-lg mb-4 mt-2'}`}>
                     <div className="flex gap-4">
@@ -495,59 +502,59 @@ const Leaderboard = () => {
 
                 {/* --- PODIUM (Conditional Sizing) --- */}
                 {currentList.length > 0 ? (
-                <div className={`w-full flex justify-center items-end relative px-4 ${isPortrait ? 'max-w-4xl gap-6 mb-12' : 'max-w-lg gap-2 mb-6'}`}>
-                    {/* Rank 2 */}
-                    {topThree[1] && (
-                        <div className={`flex flex-col items-center z-10 w-1/3 ${isPortrait ? '-mb-8' : '-mb-4'}`}>
-                            <div className="relative group">
-                                <div className={`rounded-full border-cyan-400 bg-[#181a3e] overflow-hidden shadow-[0_0_20px_rgba(34,211,238,0.3)] transition-transform group-hover:scale-105 duration-300 ${isPortrait ? 'w-52 h-52 border-[6px] p-2' : 'w-24 h-24 border-4 p-1'}`}>
-                                    <img src={topThree[1].avatar} alt="" className="w-full h-full object-cover rounded-full" />
+                    <div className={`w-full flex justify-center items-end relative px-4 ${isPortrait ? 'max-w-4xl gap-6 mb-12' : 'max-w-lg gap-2 mb-6'}`}>
+                        {/* Rank 2 */}
+                        {topThree[1] && (
+                            <div className={`flex flex-col items-center z-10 w-1/3 ${isPortrait ? '-mb-8' : '-mb-4'}`}>
+                                <div className="relative group">
+                                    <div className={`rounded-full border-cyan-400 bg-[#181a3e] overflow-hidden shadow-[0_0_20px_rgba(34,211,238,0.3)] transition-transform group-hover:scale-105 duration-300 ${isPortrait ? 'w-52 h-52 border-[6px] p-2' : 'w-24 h-24 border-4 p-1'}`}>
+                                        <img src={topThree[1].avatar} alt="" className="w-full h-full object-cover rounded-full" />
+                                    </div>
+                                    <div className={`absolute left-1/2 transform -translate-x-1/2 bg-cyan-500 rounded-full flex items-center justify-center font-bold shadow-xl border-[#181a3e] text-black ${isPortrait ? '-bottom-5 w-12 h-12 text-2xl border-[5px]' : '-bottom-3 w-6 h-6 text-xs border-2'}`}>2</div>
                                 </div>
-                                <div className={`absolute left-1/2 transform -translate-x-1/2 bg-cyan-500 rounded-full flex items-center justify-center font-bold shadow-xl border-[#181a3e] text-black ${isPortrait ? '-bottom-5 w-12 h-12 text-2xl border-[5px]' : '-bottom-3 w-6 h-6 text-xs border-2'}`}>2</div>
-                            </div>
-                            <div className={`text-center w-full ${isPortrait ? 'mt-8' : 'mt-2'}`}>
-                                <p className={`font-bold truncate w-full px-2 text-white drop-shadow-md ${isPortrait ? 'text-3xl' : 'text-sm'}`}>{topThree[1].name}</p>
-                                {currentIncomeVisible && <p className={`text-cyan-400 font-bold mt-1 ${isPortrait ? 'text-2xl' : 'text-xs'}`}>{formatScore(topThree[1].score)}</p>}
-                                <p className={`text-gray-400 truncate mt-1 ${isPortrait ? 'text-xl' : 'text-[10px]'}`}>@{topThree[1].username}</p>
-                            </div>
-                        </div>
-                    )}
-                    {/* Rank 1 */}
-                    {topThree[0] && (
-                        <div className={`flex flex-col items-center z-20 w-1/3 ${isPortrait ? 'mb-16' : 'mb-2'}`}>
-                            <div className="relative group">
-                                <div className={`absolute left-1/2 transform -translate-x-1/2 drop-shadow-[0_0_15px_rgba(234,179,8,0.8)] ${isPortrait ? '-top-14' : '-top-8'}`}>
-                                    <Trophy className={`${isPortrait ? 'w-20 h-20' : 'w-8 h-8'} text-yellow-400 fill-current animate-bounce`} />
+                                <div className={`text-center w-full ${isPortrait ? 'mt-8' : 'mt-2'}`}>
+                                    <p className={`font-bold truncate w-full px-2 text-white drop-shadow-md ${isPortrait ? 'text-3xl' : 'text-sm'}`}>{topThree[1].name}</p>
+                                    {currentIncomeVisible && <p className={`text-cyan-400 font-bold mt-1 ${isPortrait ? 'text-2xl' : 'text-xs'}`}>{formatScore(topThree[1].score)}</p>}
+                                    <p className={`text-gray-400 truncate mt-1 ${isPortrait ? 'text-xl' : 'text-[10px]'}`}>@{topThree[1].username}</p>
                                 </div>
-                                <div className={`rounded-full border-yellow-400 bg-[#181a3e] overflow-hidden shadow-[0_0_50px_rgba(250,204,21,0.4)] transition-transform group-hover:scale-105 duration-300 ${isPortrait ? 'w-72 h-72 border-[8px] p-2' : 'w-32 h-32 border-4 p-1'}`}>
-                                    <img src={topThree[0].avatar} alt="" className="w-full h-full object-cover rounded-full" />
+                            </div>
+                        )}
+                        {/* Rank 1 */}
+                        {topThree[0] && (
+                            <div className={`flex flex-col items-center z-20 w-1/3 ${isPortrait ? 'mb-16' : 'mb-2'}`}>
+                                <div className="relative group">
+                                    <div className={`absolute left-1/2 transform -translate-x-1/2 drop-shadow-[0_0_15px_rgba(234,179,8,0.8)] ${isPortrait ? '-top-14' : '-top-8'}`}>
+                                        <Trophy className={`${isPortrait ? 'w-20 h-20' : 'w-8 h-8'} text-yellow-400 fill-current animate-bounce`} />
+                                    </div>
+                                    <div className={`rounded-full border-yellow-400 bg-[#181a3e] overflow-hidden shadow-[0_0_50px_rgba(250,204,21,0.4)] transition-transform group-hover:scale-105 duration-300 ${isPortrait ? 'w-72 h-72 border-[8px] p-2' : 'w-32 h-32 border-4 p-1'}`}>
+                                        <img src={topThree[0].avatar} alt="" className="w-full h-full object-cover rounded-full" />
+                                    </div>
+                                    <div className={`absolute left-1/2 transform -translate-x-1/2 bg-yellow-500 rounded-full flex items-center justify-center font-bold border-[#181a3e] shadow-xl text-black ${isPortrait ? '-bottom-8 w-16 h-16 text-3xl border-[6px]' : '-bottom-3 w-8 h-8 text-sm border-2'}`}>1</div>
                                 </div>
-                                <div className={`absolute left-1/2 transform -translate-x-1/2 bg-yellow-500 rounded-full flex items-center justify-center font-bold border-[#181a3e] shadow-xl text-black ${isPortrait ? '-bottom-8 w-16 h-16 text-3xl border-[6px]' : '-bottom-3 w-8 h-8 text-sm border-2'}`}>1</div>
-                            </div>
-                            <div className={`text-center w-full ${isPortrait ? 'mt-10' : 'mt-4'}`}>
-                                <p className={`font-black truncate w-full px-2 text-yellow-100 drop-shadow-lg ${isPortrait ? 'text-4xl' : 'text-lg'}`}>{topThree[0].name}</p>
-                                {currentIncomeVisible && <p className={`text-yellow-400 font-black mt-2 drop-shadow-md ${isPortrait ? 'text-3xl' : 'text-base'}`}>{formatScore(topThree[0].score)}</p>}
-                                <p className={`text-gray-400 truncate mt-1 ${isPortrait ? 'text-2xl' : 'text-xs'}`}>@{topThree[0].username}</p>
-                            </div>
-                        </div>
-                    )}
-                    {/* Rank 3 */}
-                    {topThree[2] && (
-                        <div className={`flex flex-col items-center z-10 w-1/3 ${isPortrait ? '-mb-8' : '-mb-4'}`}>
-                            <div className="relative group">
-                                <div className={`rounded-full border-green-400 bg-[#181a3e] overflow-hidden shadow-[0_0_20px_rgba(74,222,128,0.3)] transition-transform group-hover:scale-105 duration-300 ${isPortrait ? 'w-52 h-52 border-[6px] p-2' : 'w-24 h-24 border-4 p-1'}`}>
-                                    <img src={topThree[2].avatar} alt="" className="w-full h-full object-cover rounded-full" />
+                                <div className={`text-center w-full ${isPortrait ? 'mt-10' : 'mt-4'}`}>
+                                    <p className={`font-black truncate w-full px-2 text-yellow-100 drop-shadow-lg ${isPortrait ? 'text-4xl' : 'text-lg'}`}>{topThree[0].name}</p>
+                                    {currentIncomeVisible && <p className={`text-yellow-400 font-black mt-2 drop-shadow-md ${isPortrait ? 'text-3xl' : 'text-base'}`}>{formatScore(topThree[0].score)}</p>}
+                                    <p className={`text-gray-400 truncate mt-1 ${isPortrait ? 'text-2xl' : 'text-xs'}`}>@{topThree[0].username}</p>
                                 </div>
-                                <div className={`absolute left-1/2 transform -translate-x-1/2 bg-green-500 rounded-full flex items-center justify-center font-bold shadow-xl border-[#181a3e] text-black ${isPortrait ? '-bottom-5 w-12 h-12 text-2xl border-[5px]' : '-bottom-3 w-6 h-6 text-xs border-2'}`}>3</div>
                             </div>
-                            <div className={`text-center w-full ${isPortrait ? 'mt-8' : 'mt-2'}`}>
-                                <p className={`font-bold truncate w-full px-2 text-white drop-shadow-md ${isPortrait ? 'text-3xl' : 'text-sm'}`}>{topThree[2].name}</p>
-                                {currentIncomeVisible && <p className={`text-green-400 font-bold mt-1 ${isPortrait ? 'text-2xl' : 'text-xs'}`}>{formatScore(topThree[2].score)}</p>}
-                                <p className={`text-gray-400 truncate mt-1 ${isPortrait ? 'text-xl' : 'text-[10px]'}`}>@{topThree[2].username}</p>
+                        )}
+                        {/* Rank 3 */}
+                        {topThree[2] && (
+                            <div className={`flex flex-col items-center z-10 w-1/3 ${isPortrait ? '-mb-8' : '-mb-4'}`}>
+                                <div className="relative group">
+                                    <div className={`rounded-full border-green-400 bg-[#181a3e] overflow-hidden shadow-[0_0_20px_rgba(74,222,128,0.3)] transition-transform group-hover:scale-105 duration-300 ${isPortrait ? 'w-52 h-52 border-[6px] p-2' : 'w-24 h-24 border-4 p-1'}`}>
+                                        <img src={topThree[2].avatar} alt="" className="w-full h-full object-cover rounded-full" />
+                                    </div>
+                                    <div className={`absolute left-1/2 transform -translate-x-1/2 bg-green-500 rounded-full flex items-center justify-center font-bold shadow-xl border-[#181a3e] text-black ${isPortrait ? '-bottom-5 w-12 h-12 text-2xl border-[5px]' : '-bottom-3 w-6 h-6 text-xs border-2'}`}>3</div>
+                                </div>
+                                <div className={`text-center w-full ${isPortrait ? 'mt-8' : 'mt-2'}`}>
+                                    <p className={`font-bold truncate w-full px-2 text-white drop-shadow-md ${isPortrait ? 'text-3xl' : 'text-sm'}`}>{topThree[2].name}</p>
+                                    {currentIncomeVisible && <p className={`text-green-400 font-bold mt-1 ${isPortrait ? 'text-2xl' : 'text-xs'}`}>{formatScore(topThree[2].score)}</p>}
+                                    <p className={`text-gray-400 truncate mt-1 ${isPortrait ? 'text-xl' : 'text-[10px]'}`}>@{topThree[2].username}</p>
+                                </div>
                             </div>
-                        </div>
-                    )}
-                </div>
+                        )}
+                    </div>
                 ) : (
                     <div className="h-64 flex items-center justify-center">
                         <p className="text-gray-400 text-xl animate-pulse">{isLoading ? 'Loading data...' : 'No data available'}</p>
@@ -587,7 +594,7 @@ const Leaderboard = () => {
                         ))}
                     </div>
                 </div>
-                
+
                 {/* --- FOOTER (Conditional Sizing) --- */}
                 {config.footer.enabled && (
                     <div className={`flex items-center gap-6 fixed bottom-4 bg-[#181a3e]/95 rounded-full backdrop-blur-md border border-gray-600 shadow-2xl z-40 ${isPortrait ? 'mt-6 text-lg px-8 py-3' : 'mt-2 text-[10px] px-4 py-1.5'}`}>
@@ -605,7 +612,7 @@ const Leaderboard = () => {
                         )}
                         {config.footer.showLastUpdate && lastUpdated && (
                             <div className="hidden sm:flex items-center gap-2 border-l border-gray-600 pl-6">
-                                <span>Updated: {lastUpdated.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                <span>Updated: {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                             </div>
                         )}
                         {config.footer.showClock && (
