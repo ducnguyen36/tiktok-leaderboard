@@ -1,8 +1,8 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
-const puppeteer = require('puppeteer'); // Requires: npm install puppeteer
 // Note: In Node v18+, fetch is built-in. If using older Node, uncomment the line below:
 // const fetch = require('node-fetch'); 
 const app = express();
@@ -249,122 +249,110 @@ dailyState.lastDate = getLogicalDailyDate(6);
 
 
 
-// --- HELPER: Parse Cookie String for Puppeteer ---
-const parseCookieString = (cookieString) => {
-    return cookieString.split(';').map(pair => {
-        const parts = pair.trim().split('=');
-        if (parts.length < 2) return null;
-        const name = parts[0];
-        const value = parts.slice(1).join('=');
-        return {
-            name,
-            value,
-            domain: '.tiktok.com',
-            path: '/',
-        };
-    }).filter(c => c !== null);
-};
-
-// --- HELPER: Scrape User Profile using Puppeteer (Public Page) ---
+// --- HELPER: Scrape User Profile using Fetch (Public Page) ---
 const scrapeUserProfile = async (username) => {
-    const profileUrl = `https://www.tiktok.com/@${username}`;
-    let browser;
-    try {
-        console.log(`[DEBUG] Launching Puppeteer for ${username} at ${profileUrl}...`);
+    const cleanUsername = username.replace('@', '');
+    const profileUrl = `https://www.tiktok.com/@${cleanUsername}`;
 
-        browser = await puppeteer.launch({
-            headless: 'new', // Use new headless mode
-            // Explicitly tell Puppeteer where Chromium is (for Alpine Linux on NAS)
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--window-size=1920,1080', '--disable-gpu'],
-            ignoreHTTPSErrors: true
+    try {
+        console.log(`[DEBUG] Fetching profile for ${cleanUsername} at ${profileUrl}...`);
+
+        const response = await fetch(profileUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Cookie': `sessionid=${process.env.TIKTOK_SESSION_ID || ''}`
+            }
         });
 
-        const page = await browser.newPage();
-
-        // Set standard browser User Agent
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-
-        // Set cookies if available
-        if (HEADERS.Cookie) {
-            const cookies = parseCookieString(HEADERS.Cookie);
-            if (cookies.length > 0) await page.setCookie(...cookies);
+        if (!response.ok) {
+            console.error(`[ERROR] TikTok responded with ${response.status} for ${cleanUsername}`);
+            return null;
         }
 
-        // Navigate to the profile page
-        await page.goto(profileUrl, { waitUntil: 'networkidle2', timeout: 45000 });
+        const html = await response.text();
+        let targetUser = null;
 
-        // Extract data from the hydration script
-        const data = await page.evaluate(() => {
-            // 1. Try extracting from __UNIVERSAL_DATA_FOR_REHYDRATION__ (Preferred)
-            const script = document.getElementById('__UNIVERSAL_DATA_FOR_REHYDRATION__');
-            if (script) {
+        // Strategy 1: Try to parse from __UNIVERSAL_DATA_FOR_REHYDRATION__ script
+        const rehydrationMatch = html.match(/<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)<\/script>/s);
+        if (rehydrationMatch && rehydrationMatch[1]) {
+            try {
+                const rehydrationData = JSON.parse(rehydrationMatch[1]);
+                const defaultScope = rehydrationData["__DEFAULT_SCOPE__"];
+                if (defaultScope) {
+                    const userDetail = defaultScope["webapp.user-detail"];
+                    if (userDetail && userDetail.userInfo && userDetail.userInfo.user) {
+                        targetUser = userDetail.userInfo.user;
+                    }
+                }
+            } catch (e) {
+                console.log('[TikTokAPI] Failed to parse __UNIVERSAL_DATA_FOR_REHYDRATION__', e.message);
+            }
+        }
+
+        // Strategy 2: Try SIGI_STATE script
+        if (!targetUser) {
+            const sigiMatch = html.match(/<script id="SIGI_STATE" type="application\/json">(.*?)<\/script>/s);
+            if (sigiMatch && sigiMatch[1]) {
                 try {
-                    const json = JSON.parse(script.textContent);
-                    const defaultScope = json["__DEFAULT_SCOPE__"];
-                    if (defaultScope) {
-                        const userDetail = defaultScope["webapp.user-detail"];
-                        if (userDetail && userDetail.userInfo && userDetail.userInfo.user) {
-                            const user = userDetail.userInfo.user;
-                            // Prioritize avatarLarger for 1080x1080
-                            return {
-                                name: user.nickname,
-                                username: user.uniqueId,
-                                avatar: user.avatarLarger || user.avatarMedium || user.avatarThumb
-                            };
-                        }
+                    const sigiData = JSON.parse(sigiMatch[1]);
+                    const userModule = sigiData.UserModule;
+                    if (userModule && userModule.users && userModule.users[cleanUsername]) {
+                        targetUser = userModule.users[cleanUsername];
                     }
                 } catch (e) {
-                    // console.log("JSON parse error inside evaluate", e);
+                    console.log('[TikTokAPI] Failed to parse SIGI_STATE', e.message);
                 }
             }
-
-            // 2. Fallback: Open Graph tags
-            const ogImage = document.querySelector('meta[property="og:image"]')?.content;
-            const title = document.title;
-
-            let name = null;
-            let username = null;
-
-            if (title) {
-                const nameMatch = title.match(/^(.*?)\s\(@(.*?)\)/);
-                if (nameMatch) {
-                    name = nameMatch[1];
-                    username = nameMatch[2];
-                }
-            }
-
-            if (ogImage && (name || username)) {
-                return {
-                    name: name || "Unknown",
-                    username: username || "Unknown",
-                    avatar: ogImage
-                };
-            }
-
-            return null;
-        });
-
-        if (data) {
-            console.log(`[INFO] Scrape Success ${username} -> Name: ${data.name}`);
-            return {
-                name: data.name,
-                username: data.username,
-                avatar: data.avatar
-            };
-        } else {
-            console.warn(`[WARN] Failed to extract profile data for ${username}`);
         }
 
-        return null;
+        // Strategy 3: Regex search for userInfo structure
+        if (!targetUser) {
+            const userMatch = html.match(/"userInfo"\s*:\s*\{\s*"user"\s*:\s*(\{.+?\})\s*,\s*"stats"/s);
+            if (userMatch && userMatch[1]) {
+                try {
+                    targetUser = JSON.parse(userMatch[1]);
+                } catch (e) {
+                    console.log('[TikTokAPI] Failed to parse userInfo regex match', e.message);
+                }
+            }
+        }
+
+        // Strategy 4: Try webapp.user-detail pattern
+        if (!targetUser) {
+            const hydrationMatch = html.match(/"webapp\.user-detail"\s*:\s*(\{.+?"userInfo".+?\})(?=,\s*"webapp)/s);
+            if (hydrationMatch && hydrationMatch[1]) {
+                try {
+                    const detail = JSON.parse(hydrationMatch[1]);
+                    if (detail.userInfo && detail.userInfo.user) {
+                        targetUser = detail.userInfo.user;
+                    }
+                } catch (e) {
+                    console.log('[TikTokAPI] Failed to parse webapp.user-detail', e.message);
+                }
+            }
+        }
+
+        if (!targetUser) {
+            console.warn(`[WARN] Failed to extract profile data for ${cleanUsername}`);
+            return null;
+        }
+
+        // Extract info - prioritize avatarLarger for high resolution
+        const { uniqueId, nickname, avatarLarger, avatarMedium, avatarThumb } = targetUser;
+        const avatar = avatarLarger || avatarMedium || avatarThumb;
+
+        console.log(`[INFO] Scrape Success ${cleanUsername} -> Name: ${nickname}`);
+        return {
+            name: nickname,
+            username: uniqueId || cleanUsername,
+            avatar: avatar
+        };
 
     } catch (e) {
         console.error(`[ERROR] Error scraping profile for ${username}:`, e.message);
         return null;
-    } finally {
-        if (browser) {
-            await browser.close();
-        }
     }
 };
 

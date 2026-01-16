@@ -3,47 +3,31 @@ version: '3.8'
 services:
   leaderboard:
     build: .
-    container_name: tiktok-leaderboard
+    container_name: helios-leaderboard
     restart: unless-stopped
     ports:
       # Map container port 5000 to host port 5050 (Avoids Synology DSM port 5000 conflict)
       - "5050:5000"
     environment:
       - NODE_ENV=production
+      - TIKTOK_SESSION_ID=${TIKTOK_SESSION_ID}
     healthcheck:
       test: [ "CMD", "wget", "-q", "--spider", "http://localhost:5000/api/leaderboard?type=monthly" ]
       interval: 30s
       timeout: 10s
       retries: 3
   # ============================================
-  # CLOUDFLARE TUNNEL - Access from anywhere!
+  # NGROK TUNNEL - Access from anywhere!
   # Free, secure, no port forwarding needed
   # ============================================
-  # Uncomment below after getting your tunnel token from Cloudflare
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: cloudflare-tunnel
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: ngrok-tunnel
     restart: unless-stopped
-    # Run Quick Tunnel (No token needed, works through CGNAT)
-    command: tunnel --url http://leaderboard:5000
+    command:
+      - "http"
+      - "http://leaderboard:5000"
+      - "--authtoken=2dGpnm3LNfraYUpRrpy7N20Kb76_61mGyUrC4HGyxGowQTXFJ"
+      - "--domain=uncorroborative-tachygraphic-kalyn.ngrok-free.dev"
     depends_on:
       - leaderboard
-  # ============================================
-  # SETUP INSTRUCTIONS FOR CLOUDFLARE TUNNEL:
-  # ============================================
-  # 1. Go to https://one.dash.cloudflare.com
-  # 2. Sign up for free (you need a domain, or use their free subdomain)
-  # 3. Go to: Networks → Tunnels → Create a tunnel
-  # 4. Select "Cloudflared" connector
-  # 5. Name your tunnel (e.g., "leaderboard")
-  # 6. Copy the tunnel token shown
-  # 7. Replace YOUR_CLOUDFLARE_TUNNEL_TOKEN_HERE above with your token
-  # 8. In tunnel config, add a public hostname:
-  #    - Subdomain: leaderboard (or any name)
-  #    - Domain: yourdomain.com
-  #    - Service Type: HTTP
-  #    - URL: leaderboard:5000
-  # 9. Save and run: docker-compose up -d --build
-  #
-  # Your app will be available at https://leaderboard.yourdomain.com

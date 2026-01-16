@@ -213,6 +213,47 @@ const Leaderboard = () => {
         detectTV();
     }, []);
 
+    // --- SCREEN WAKE LOCK (Prevents TV/Screen from sleeping) ---
+    useEffect(() => {
+        let wakeLock = null;
+
+        const requestWakeLock = async () => {
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    console.log('Wake Lock is active - screen will stay awake');
+
+                    wakeLock.addEventListener('release', () => {
+                        console.log('Wake Lock was released');
+                    });
+                } else {
+                    console.log('Wake Lock API not supported');
+                }
+            } catch (err) {
+                console.log('Wake Lock request failed:', err.message);
+            }
+        };
+
+        // Request wake lock on mount
+        requestWakeLock();
+
+        // Re-acquire wake lock when page becomes visible again
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                requestWakeLock();
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            if (wakeLock) {
+                wakeLock.release();
+            }
+        };
+    }, []);
+
     useEffect(() => {
         // Delay the initial fetch to avoid race conditions on mount
         const timer = setTimeout(() => {
