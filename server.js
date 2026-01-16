@@ -72,7 +72,7 @@ const downloadAndSaveAvatar = async (displayId, avatarUrl) => {
 
 // --- CONFIGURATION ---
 const ALLOWED_CREATOR_IDS = {
-    'novix.ht': '7444395575895719953',
+    'novix.ht2': '7592510945700806673',
     'dopamine.ht': '7539826902857515009',
     'lunarknight.ht': '7514557708314542081',
     'huntera.ht': '7529074048186220545',
@@ -83,7 +83,7 @@ const ALLOWED_CREATOR_IDS = {
 // Default creator info with capitalized names
 // Avatar paths are now resolved dynamically via getAvatarPath()
 const DEFAULT_CREATOR_INFO = {
-    'novix.ht': { name: 'NOVIX' },
+    'novix.ht2': { name: 'NOVIX' },
     'dopamine.ht': { name: 'DOPAMINE' },
     'lunarknight.ht': { name: 'LUNARKNIGHT' },
     'huntera.ht': { name: 'HUNTERA' },
@@ -92,13 +92,21 @@ const DEFAULT_CREATOR_INFO = {
 };
 
 const CREATOR_URLS = {
-    'novix.ht': [
+    // 'novix.ht': [
+    //     // Page 1 (Offset 0)
+    //     "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=novix.ht&Offset=0&Limit=20&HostID=7441833017436308501&msToken=yl8ipGjDJdb8LFgS6JfZj-OhPMvBjHGxAFKE2yBUrH8MkSgauwmLd3D-BBdMy6EJfYvu2E439s7PtuNNM7CBPhFnDqhwMHwH2gVqwJUBfTdI_atRURML9JdxbSC_hQE=&X-Bogus=DFSzswVLY1XANjMQCFdMBvpJlh0V&X-Gnarly=M5J8g9Hbouf8PsJp1skym-SbvvXJmve06nqDwaxoe67Clm4qFPRYOH3JqFQmRKAyrISamuJut7rL/Bb8T7FBKsP1Jh02O6TW-ZdK50jOUYf9aNMGqqNJC0SqoiF1hWxm88TlitdjVD3XbKGZz6fcPWd-mv/QNaEZB3zaHt3HP6iMOWPxm5A99mrdtyM75/P4a5L/4lUe7UgJQiRivei41sFMGALmoGg2bYusUbHwoa7O80Vj/UhHRCs26-Cwu2WGDa/lwBX0B0Smd1p1O-Hjx9pQJryZxsuwyjoXsULdMFEk",
+    //     // Page 2 (Offset 20)
+    //     "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=novix.ht&Offset=20&Limit=20&HostID=7441833017436308501&msToken=U6IEjudyVW59xiwEfSkEAMasIk6ePYcUsIQx7G_qFda8oz-gdlf4txx4NJPc00B-6fPWgLOg1IzkRRvdviiF6MW9k73dtYMdJMdjFSxlZSv7OUBxmQrtHe8jNxdY4uQ=&X-Bogus=DFSzswVLaYxANjMQCFdK9ipJlh8e&X-Gnarly=MJyDIPYMuxES009xmvNbfKFTaWFbnFuzL-Ve/FAgyJznbY8e3XmXRAfmYrUv2nDoPuP2UfYxQmigxpckqC2z7UJAf2NgBfua2b4iBFk9DFqifoMmZb-vYmFbpKuBGSJ-L98sfqCwNdbwjO8-cfy7LHBiGM-wTmi5hAjZKHHxIIEpZnKrsRVa7gBS5Z5IaU7xJprCRo9q6MfDMko4O0ew9CoIPeE0pu74gKxml1RHE5F899YpLfM5JUQcdm8KCmvZxIVEQPz/Vl8ZSuF/plPrHGIezG-f/AtCZCTjZodk8-Yz",
+    //     // Page 3 (Offset 40)
+    //     "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=novix.ht&Offset=40&Limit=20&HostID=7441833017436308501&msToken=8yVQwNriDYfdmmd_w4dcxi-AtaxBLQvRDjWpxbyhqBgg1FKruokd9TCssxiS9w2NtIwjHiai77bNA6xRji_wKUZeZM-39Oh9Q0RfSa3Utx_ksIb1cQihDXMWMG7Ik8o=&X-Bogus=DFSzswVLa00ANjMQCFdKuvpJlh8K&X-Gnarly=MxDZnFeCaP9kf6C7AmcdLePNU/ZwFCFdbKJKiEmqdBY/oF05mN0G4ZLPcu9az9QjwUG6QBwEBeathXiA02RB7saTvDGSQ98EHMLjs0JccduO6qjMBBOAWpwyniGokTnUMLO6Ptrf3ejtTIbUAesC2F--C4g94IHRB/kAtbU7Nat-mJb2EfMAIJGq19WMYl/0t8wgO/dZq6ZL-mF0oW7lpd5Dfx6IELbGVXx1ns00r6sIjEfUNLZB1UKFIeAT5EgkpZXz43mIQ099/vtj7DKsLDtoe8kHnWsJ78d3tzbOs3op"
+    // ],
+    'novix.ht2': [
         // Page 1 (Offset 0)
-        "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=novix.ht&Offset=0&Limit=20&HostID=7441833017436308501&msToken=yl8ipGjDJdb8LFgS6JfZj-OhPMvBjHGxAFKE2yBUrH8MkSgauwmLd3D-BBdMy6EJfYvu2E439s7PtuNNM7CBPhFnDqhwMHwH2gVqwJUBfTdI_atRURML9JdxbSC_hQE=&X-Bogus=DFSzswVLY1XANjMQCFdMBvpJlh0V&X-Gnarly=M5J8g9Hbouf8PsJp1skym-SbvvXJmve06nqDwaxoe67Clm4qFPRYOH3JqFQmRKAyrISamuJut7rL/Bb8T7FBKsP1Jh02O6TW-ZdK50jOUYf9aNMGqqNJC0SqoiF1hWxm88TlitdjVD3XbKGZz6fcPWd-mv/QNaEZB3zaHt3HP6iMOWPxm5A99mrdtyM75/P4a5L/4lUe7UgJQiRivei41sFMGALmoGg2bYusUbHwoa7O80Vj/UhHRCs26-Cwu2WGDa/lwBX0B0Smd1p1O-Hjx9pQJryZxsuwyjoXsULdMFEk",
+        "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=novix.ht2&Offset=0&Limit=20&HostID=7588012144228533249&msToken=SgDio30exhByQ8Zw-h7R4EwlFyfLOn_QhnYQnLk2U47j-58TDPTXsMVhhJtrDurmRUpkmZZkpNoQ5s4eMAuHaLIeMqoZGoXGrhO3OXF022hqCysbmNqwnw8k1zAO5gc=&X-Bogus=DFSzswVuIh6dUvHpCza3ZGVpMgh9&X-Gnarly=MHu2d-dichJkDLasscI/AlJhLocSWrLgWE657GVXe7Z4sD8fwXo47AHAtfUC6W5dWHkgqHOcEXLCSFmy8RWMiuDYHBXLu0ncuFPdhdobbl1q-wGuSHu3y2TSkeHrbeGAi0pz3uLRJ0MQEHG-F3tu4gRIucY8ndnnSMdhn4D0E4wxYmI2b2EVFAQoELB78N1IoNxbgw-/mKl8s38QAyoNNzQVPfctiTcWVsvKX3FFr/ZAnedI7HBR5zBU7qAPT0mL9Esk59bmxX9iPgCAp6Xiahm1vrXDJtRCPO9P/ApTIUdD",
         // Page 2 (Offset 20)
-        "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=novix.ht&Offset=20&Limit=20&HostID=7441833017436308501&msToken=U6IEjudyVW59xiwEfSkEAMasIk6ePYcUsIQx7G_qFda8oz-gdlf4txx4NJPc00B-6fPWgLOg1IzkRRvdviiF6MW9k73dtYMdJMdjFSxlZSv7OUBxmQrtHe8jNxdY4uQ=&X-Bogus=DFSzswVLaYxANjMQCFdK9ipJlh8e&X-Gnarly=MJyDIPYMuxES009xmvNbfKFTaWFbnFuzL-Ve/FAgyJznbY8e3XmXRAfmYrUv2nDoPuP2UfYxQmigxpckqC2z7UJAf2NgBfua2b4iBFk9DFqifoMmZb-vYmFbpKuBGSJ-L98sfqCwNdbwjO8-cfy7LHBiGM-wTmi5hAjZKHHxIIEpZnKrsRVa7gBS5Z5IaU7xJprCRo9q6MfDMko4O0ew9CoIPeE0pu74gKxml1RHE5F899YpLfM5JUQcdm8KCmvZxIVEQPz/Vl8ZSuF/plPrHGIezG-f/AtCZCTjZodk8-Yz",
+        "",
         // Page 3 (Offset 40)
-        "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=novix.ht&Offset=40&Limit=20&HostID=7441833017436308501&msToken=8yVQwNriDYfdmmd_w4dcxi-AtaxBLQvRDjWpxbyhqBgg1FKruokd9TCssxiS9w2NtIwjHiai77bNA6xRji_wKUZeZM-39Oh9Q0RfSa3Utx_ksIb1cQihDXMWMG7Ik8o=&X-Bogus=DFSzswVLa00ANjMQCFdKuvpJlh8K&X-Gnarly=MxDZnFeCaP9kf6C7AmcdLePNU/ZwFCFdbKJKiEmqdBY/oF05mN0G4ZLPcu9az9QjwUG6QBwEBeathXiA02RB7saTvDGSQ98EHMLjs0JccduO6qjMBBOAWpwyniGokTnUMLO6Ptrf3ejtTIbUAesC2F--C4g94IHRB/kAtbU7Nat-mJb2EfMAIJGq19WMYl/0t8wgO/dZq6ZL-mF0oW7lpd5Dfx6IELbGVXx1ns00r6sIjEfUNLZB1UKFIeAT5EgkpZXz43mIQ099/vtj7DKsLDtoe8kHnWsJ78d3tzbOs3op"
+        ""
     ],
     'huntera.ht': [
         // Page 1
