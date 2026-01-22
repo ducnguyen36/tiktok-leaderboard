@@ -17,17 +17,14 @@ services:
       timeout: 10s
       retries: 3
   # ============================================
-  # NGROK TUNNEL - Access from anywhere!
+  # CLOUDFLARE TUNNEL - Access from anywhere!
   # Free, secure, no port forwarding needed
   # ============================================
-  ngrok:
-    image: ngrok/ngrok:latest
-    container_name: ngrok-tunnel
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflare-tunnel
     restart: unless-stopped
-    command:
-      - "http"
-      - "http://leaderboard:5000"
-      - "--authtoken=2dGpnm3LNfraYUpRrpy7N20Kb76_61mGyUrC4HGyxGowQTXFJ"
-      - "--domain=uncorroborative-tachygraphic-kalyn.ngrok-free.dev"
+    # Run Quick Tunnel (No token needed, works through CGNAT)
+    command: tunnel --url http://leaderboard:5000
     depends_on:
       - leaderboard

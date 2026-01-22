@@ -17,7 +17,7 @@ if (process.env.NODE_ENV === 'production') {
 
 // --- HELPER: Get Avatar Path (checks JPEG first, falls back to SVG) ---
 const getAvatarPath = (displayId) => {
-    const baseName = displayId.replace('.ht', '');
+    const baseName = displayId.replace(/\.ht\d*$/, '');
     const jpegPath = `/avatars/${baseName}.jpeg`;
     const svgPath = `/avatars/${baseName}.svg`;
 
@@ -38,7 +38,7 @@ const getAvatarPath = (displayId) => {
 const downloadAndSaveAvatar = async (displayId, avatarUrl) => {
     if (!avatarUrl) return false;
 
-    const baseName = displayId.replace('.ht', '');
+    const baseName = displayId.replace(/\.ht\d*$/, '');
     const publicDir = path.join(__dirname, 'public');
     const jpegFullPath = path.join(publicDir, 'avatars', `${baseName}.jpeg`);
 
@@ -237,7 +237,7 @@ const initializeDailyHistory = () => {
         const cachedProfile = GLOBAL_CACHE[displayId];
         // Get default info (capitalized name)
         const defaultInfo = DEFAULT_CREATOR_INFO[displayId] || {
-            name: displayId.replace('.ht', '').toUpperCase()
+            name: displayId.replace(/\.ht\d*$/, '').toUpperCase()
         };
 
         dailyState.history[creatorId] = {
@@ -375,7 +375,7 @@ const fetchCreatorStats = async (displayId, urls, resetHour = 6) => {
 
     // Initialize profile placeholder with default info
     const defaultInfo = DEFAULT_CREATOR_INFO[displayId] || {
-        name: displayId.replace('.ht', '').toUpperCase()
+        name: displayId.replace(/\.ht\d*$/, '').toUpperCase()
     };
     let profile = {
         id: ALLOWED_CREATOR_IDS[displayId] || 'unknown-id',
@@ -459,7 +459,7 @@ const updateAllScores = async () => {
         const data = await fetchCreatorStats(displayId, urls, 6); // Default 6 AM reset for cache
 
         // Initialize cache entry if needed with default values
-        const defaultInfo = DEFAULT_CREATOR_INFO[displayId] || { name: displayId.toUpperCase().replace('.HT', ''), avatar: null };
+        const defaultInfo = DEFAULT_CREATOR_INFO[displayId] || { name: displayId.toUpperCase().replace(/\.HT\d*$/, ''), avatar: null };
         if (!GLOBAL_CACHE[displayId]) {
             GLOBAL_CACHE[displayId] = {
                 id: data.profile.id,
@@ -509,7 +509,7 @@ const updateAllProfiles = async () => {
                     const saved = await downloadAndSaveAvatar(displayId, profileData.avatar);
                     if (saved) {
                         // Update cache to use local path (not the CDN URL which expires)
-                        const baseName = displayId.replace('.ht', '');
+                        const baseName = displayId.replace(/\.ht\d*$/, '');
                         GLOBAL_CACHE[displayId].avatar = `/avatars/${baseName}.jpeg`;
                     }
                 }
@@ -632,7 +632,7 @@ const generateDailyListFromHistory = () => {
 
         // Get default info as ultimate fallback
         const defaultInfo = DEFAULT_CREATOR_INFO[entry.profile.username] || {
-            name: entry.profile.username.toUpperCase().replace('.HT', '')
+            name: entry.profile.username.toUpperCase().replace(/\.HT\d*$/i, '')
         };
 
         // Priority for Avatar: 
@@ -677,7 +677,7 @@ app.get('/api/leaderboard', async (req, res) => {
                     .map(([displayId, creatorId]) => {
                         const cached = GLOBAL_CACHE[displayId] || {};
                         const defaultInfo = DEFAULT_CREATOR_INFO[displayId] || {
-                            name: displayId.toUpperCase().replace('.HT', '')
+                            name: displayId.toUpperCase().replace(/\.HT\d*$/i, '')
                         };
                         return {
                             id: creatorId,
@@ -707,7 +707,7 @@ app.get('/api/leaderboard', async (req, res) => {
                     .map(item => {
                         const cached = GLOBAL_CACHE[item.profile.username] || {};
                         const defaultInfo = DEFAULT_CREATOR_INFO[item.profile.username] || {
-                            name: item.profile.username.toUpperCase().replace('.HT', '')
+                            name: item.profile.username.toUpperCase().replace(/\.HT\d*$/i, '')
                         };
                         return {
                             id: item.profile.id,
