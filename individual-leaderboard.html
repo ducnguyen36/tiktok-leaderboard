@@ -1,0 +1,1185 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Leaderboard</title>
+    <!-- Add FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-color: #0f1014;
+            --card-bg: #1e1f24;
+            --text-primary: #ffffff;
+            --text-secondary: #8a8b91;
+            --accent-color: #fe2c55;
+            /* TikTok Red */
+            --accent-blue: #25f4ee;
+            /* TikTok Blue */
+            --gold: #ffd700;
+            --silver: #c0c0c0;
+            --bronze: #cd7f32;
+            --rank4: #e066ff;
+            --rank5: #00bfff;
+            --mobile-card-bg: #1e1f24;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            /* Prevent horizontal scroll on mobile */
+            overflow: hidden;
+            /* Changed to hidden to prevent scroll during rotation */
+            font-size: 14px;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Rotation Wrapper */
+        #app-wrapper {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            transition: transform 0.5s ease-in-out, width 0.5s ease-in-out, height 0.5s ease-in-out;
+            transform-origin: center center;
+            background-color: var(--bg-color);
+            /* Ensure bg covers during rotation */
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #0f1014;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #2f3036;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        /* Header & Controls */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            margin: 0;
+            background: linear-gradient(to right, #25f4ee, #fe2c55);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        /* Tabs Container - Full Width Below Header */
+        .tabs-container {
+            width: 100%;
+            margin-bottom: 20px;
+        }
+
+        .tabs {
+            display: flex;
+            background: #252746;
+            padding: 4px;
+            border-radius: 12px;
+            gap: 5px;
+            width: 100%;
+            border: 1px solid #4b5563;
+        }
+
+        .tab-btn {
+            flex: 1;
+            /* Make tabs fill the width */
+            background: transparent;
+            border: none;
+            color: #9ca3af;
+            padding: 10px 0;
+            /* Slightly larger touch target */
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .tab-btn.active {
+            background: #3b3e5a;
+            color: white;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .tab-btn:hover:not(.active) {
+            color: white;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .icon-btn {
+            background: #252746;
+            border: 1px solid #4b5563;
+            color: #9ca3af;
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .icon-btn:hover {
+            color: white;
+            background: #3b3e5a;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 15px;
+            box-sizing: border-box;
+            flex: 1;
+            /* Allow container to grow in wrapper */
+        }
+
+        /* Top 5 Podium Area */
+        /* Mobile Top 5 Podium Area */
+        .top-three {
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            /* Center on desktop, but maybe scroll on tiny screens? */
+            gap: 10px;
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #2f3036;
+            flex-wrap: wrap;
+            /* Sticky Positioning */
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            background-color: var(--bg-color);
+            /* Ensure opaque background */
+            padding-top: 10px;
+            /* Add top padding when sticking */
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            /* Stronger shadow for depth */
+            /* Keep in one row for mobile if possible, or wrap if needed */
+            overflow-x: auto;
+            /* Allow scroll if it gets too tight */
+            padding-left: 5px;
+            padding-right: 5px;
+        }
+
+        .podium-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            position: relative;
+            min-width: 60px;
+            /* Ensure they don't squish too much */
+        }
+
+        /* Default (Mobile) Order & Size - Scaled Down */
+        .podium-card.rank-1 {
+            order: 3;
+            transform: scale(1.0);
+            z-index: 10;
+            margin-bottom: 15px;
+        }
+
+        .podium-card.rank-2 {
+            order: 2;
+            transform: scale(0.9);
+            margin-bottom: 5px;
+        }
+
+        .podium-card.rank-3 {
+            order: 4;
+            transform: scale(0.9);
+            margin-bottom: 5px;
+        }
+
+        .podium-card.rank-4 {
+            order: 1;
+            transform: scale(0.8);
+            opacity: 0.9;
+        }
+
+        .podium-card.rank-5 {
+            order: 5;
+            transform: scale(0.8);
+            opacity: 0.9;
+        }
+
+        @media (min-width: 768px) {
+            .top-three {
+                gap: 15px;
+                margin-bottom: 40px;
+                padding-bottom: 20px;
+                overflow-x: visible;
+            }
+
+            .podium-card.rank-1 {
+                transform: scale(1.2);
+                margin-bottom: 0;
+            }
+
+            .podium-card.rank-2 {
+                transform: scale(1.0);
+                margin-bottom: 0;
+            }
+
+            .podium-card.rank-3 {
+                transform: scale(1.0);
+                margin-bottom: 0;
+            }
+
+            .podium-card.rank-4 {
+                transform: scale(0.85);
+            }
+
+            .podium-card.rank-5 {
+                transform: scale(0.85);
+            }
+        }
+
+        .avatar-wrapper {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            padding: 2px;
+            margin-bottom: 5px;
+            position: relative;
+        }
+
+        .rank-1 .avatar-wrapper {
+            background: linear-gradient(45deg, var(--gold), #fff);
+            width: 70px;
+            /* Mobile size */
+            height: 70px;
+        }
+
+        .rank-2 .avatar-wrapper {
+            background: linear-gradient(45deg, var(--silver), #fff);
+        }
+
+        .rank-3 .avatar-wrapper {
+            background: linear-gradient(45deg, var(--bronze), #fff);
+        }
+
+        .rank-4 .avatar-wrapper {
+            background: linear-gradient(45deg, var(--rank4), #fff);
+            width: 45px;
+            height: 45px;
+        }
+
+        .rank-5 .avatar-wrapper {
+            background: linear-gradient(45deg, var(--rank5), #fff);
+            width: 45px;
+            height: 45px;
+        }
+
+        @media (min-width: 768px) {
+            .avatar-wrapper {
+                width: 80px;
+                height: 80px;
+                padding: 3px;
+                margin-bottom: 10px;
+            }
+
+            .rank-1 .avatar-wrapper {
+                width: 110px;
+                height: 110px;
+            }
+
+            /* Desktop size */
+            .rank-4 .avatar-wrapper,
+            .rank-5 .avatar-wrapper {
+                width: 65px;
+                height: 65px;
+            }
+        }
+
+        .avatar {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 4px solid var(--bg-color);
+            background-color: #333;
+        }
+
+        .rank-badge {
+            position: absolute;
+            bottom: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+            color: #000;
+        }
+
+        .rank-1 .rank-badge {
+            background: var(--gold);
+        }
+
+        .rank-2 .rank-badge {
+            background: var(--silver);
+        }
+
+        .rank-3 .rank-badge {
+            background: var(--bronze);
+        }
+
+        .rank-4 .rank-badge {
+            background: var(--rank4);
+        }
+
+        .rank-5 .rank-badge {
+            background: var(--rank5);
+        }
+
+        .idol-name {
+            font-weight: 700;
+            font-size: 14px;
+            margin-bottom: 4px;
+        }
+
+        .idol-value {
+            font-size: 13px;
+            color: var(--accent-color);
+            font-weight: 600;
+        }
+
+        /* List for Rank 6, 7, etc. */
+        .list-container {
+            display: grid;
+            /* Force 3 columns on mobile */
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            /* Slightly tighter gap to fit 3 cols comfortably */
+        }
+
+        @media (min-width: 768px) {
+            .list-container {
+                grid-template-columns: repeat(3, 1fr);
+                gap: 15px;
+            }
+        }
+
+        .list-item {
+            display: flex;
+            flex-direction: column;
+            /* Stack vertically on mobile */
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            background: var(--card-bg);
+            padding: 8px;
+            /* Reduced from 15px */
+            border-radius: 8px;
+            /* Slightly tighter radius */
+            transition: transform 0.2s;
+            gap: 4px;
+            /* Reduced from 8px */
+            min-height: 100px;
+            /* Ensure consistent height */
+        }
+
+        /* Desktop Row Layout */
+        @media (min-width: 768px) {
+            .list-item {
+                flex-direction: row;
+                text-align: left;
+                justify-content: flex-start;
+                padding: 15px;
+                border-radius: 12px;
+                gap: 0;
+            }
+        }
+
+        .list-item:hover {
+            transform: translateX(5px);
+            background: #26272c;
+        }
+
+        /* ===== Top 5 Emphasis (Ranks 4 & 5) ===== */
+        .list-item.top5 {
+            background: linear-gradient(135deg, #1e1f24 0%, #2a1a2e 50%, #1a1e2e 100%);
+            border: 1px solid rgba(254, 44, 85, 0.3);
+            padding: 18px;
+            border-radius: 16px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 0 15px rgba(254, 44, 85, 0.1), 0 0 30px rgba(37, 244, 238, 0.05);
+        }
+
+        .list-item.top5::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.03), transparent);
+            animation: shimmer 3s ease-in-out infinite;
+        }
+
+        @keyframes shimmer {
+            0% {
+                left: -100%;
+            }
+
+            100% {
+                left: 100%;
+            }
+        }
+
+        .list-item.top5:hover {
+            transform: translateX(5px) scale(1.01);
+            border-color: rgba(254, 44, 85, 0.5);
+            box-shadow: 0 0 20px rgba(254, 44, 85, 0.15), 0 0 40px rgba(37, 244, 238, 0.08);
+        }
+
+        .list-item.top5 .list-rank {
+            color: var(--accent-color);
+            font-size: 20px;
+            width: 36px;
+            text-shadow: 0 0 10px rgba(254, 44, 85, 0.4);
+        }
+
+        .list-item.top5 .list-avatar {
+            width: 50px;
+            height: 50px;
+            border: 2px solid rgba(254, 44, 85, 0.4);
+            font-size: 20px;
+        }
+
+        .list-item.top5 .list-name {
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        .list-item.top5 .list-value {
+            font-size: 16px;
+            background: linear-gradient(90deg, var(--accent-blue), var(--accent-color));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* Top 5 divider */
+        .top5-divider {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 8px 0;
+            color: var(--text-secondary);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            grid-column: 1 / -1;
+            /* Span full width in grid */
+            width: 100%;
+        }
+
+        .top5-divider::before,
+        .top5-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, #2f3036, transparent);
+        }
+
+        .list-rank {
+            font-weight: 700;
+            color: var(--text-secondary);
+            font-size: 12px;
+            /* Smaller rank */
+            margin-bottom: 0;
+        }
+
+        @media (min-width: 768px) {
+            .list-rank {
+                width: 30px;
+                font-size: 16px;
+                margin-bottom: 0;
+            }
+        }
+
+        .list-info {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            /* Tighter gap */
+            width: 100%;
+        }
+
+        @media (min-width: 768px) {
+            .list-info {
+                flex-direction: row;
+                flex: 1;
+                gap: 15px;
+                width: auto;
+            }
+        }
+
+        .list-avatar {
+            width: 32px;
+            /* Smaller avatar */
+            height: 32px;
+            border-radius: 50%;
+            background: #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            color: #666;
+            overflow: hidden;
+        }
+
+        @media (min-width: 768px) {
+            .list-avatar {
+                width: 40px;
+                height: 40px;
+                font-size: 18px;
+            }
+        }
+
+        .list-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .list-name {
+            font-weight: 600;
+            font-size: 12px;
+            /* Smaller name */
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+        }
+
+        @media (min-width: 768px) {
+            .list-name {
+                font-size: 15px;
+            }
+        }
+
+        .list-value {
+            font-weight: 700;
+            color: var(--accent-blue);
+            font-size: 12px;
+            /* Smaller score */
+        }
+
+        @media (min-width: 768px) {
+            .list-value {
+                font-size: 16px;
+                /* Default size for desktop? (inherited is usually 16px) */
+            }
+        }
+
+        /* Loading State */
+        #loading {
+            text-align: center;
+            padding: 50px;
+            color: var(--text-secondary);
+        }
+
+        .loader {
+            width: 40px;
+            height: 40px;
+            border: 4px solid var(--card-bg);
+            border-top: 4px solid var(--accent-color);
+            border-radius: 50%;
+            margin: 0 auto 15px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Utility to hide elements */
+        .hidden {
+            display: none !important;
+        }
+
+        /* Settings Modal */
+        #settings-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(5px);
+        }
+
+        .settings-content {
+            background: #252746;
+            padding: 25px;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 400px;
+            border: 1px solid #4b5563;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+            max-height: 90vh;
+            overflow-y: auto;
+            color: white;
+        }
+
+        .settings-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #4b5563;
+            padding-bottom: 10px;
+        }
+
+        .settings-header h2 {
+            margin: 0;
+            font-size: 1.25rem;
+            font-weight: bold;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            color: #9ca3af;
+            cursor: pointer;
+            font-size: 1.5rem;
+        }
+
+        .settings-section {
+            margin-bottom: 20px;
+        }
+
+        .settings-title {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: #22d3ee;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 10px;
+        }
+
+        .checkbox-group {
+            display: flex;
+            gap: 15px;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            text-transform: capitalize;
+            font-size: 0.9rem;
+        }
+
+        .custom-checkbox {
+            width: 20px;
+            height: 20px;
+            border: 1px solid #6b7280;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .custom-checkbox.checked {
+            background-color: #3b82f6;
+            border-color: #3b82f6;
+        }
+
+        .checkbox-check {
+            color: white;
+            font-size: 12px;
+            display: none;
+        }
+
+        .custom-checkbox.checked .checkbox-check {
+            display: block;
+        }
+
+        .input-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .settings-input {
+            background: #181a3e;
+            border: 1px solid #4b5563;
+            border-radius: 8px;
+            padding: 8px;
+            color: white;
+            width: 100%;
+            outline: none;
+            text-align: center;
+            font-family: monospace;
+        }
+
+        .settings-input:focus {
+            border-color: #22d3ee;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="hidden">
+        <div class="settings-content">
+            <div class="settings-header">
+                <h2>Settings</h2>
+                <button class="close-btn" onclick="toggleSettings()"><i class="fas fa-times"></i></button>
+            </div>
+
+            <div class="settings-section">
+                <div class="settings-title">Enabled Tabs</div>
+                <div class="checkbox-group">
+                    <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'daily')">
+                        <div class="custom-checkbox" id="check-tab-daily"><span class="checkbox-check">✓</span></div>
+                        Daily
+                    </label>
+                    <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'monthly')">
+                        <div class="custom-checkbox" id="check-tab-monthly"><span class="checkbox-check">✓</span></div>
+                        Monthly
+                    </label>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="settings-title">Show Income Numbers</div>
+                <div class="checkbox-group">
+                    <label class="checkbox-label" onclick="toggleConfig('showIncome', 'daily')">
+                        <div class="custom-checkbox" id="check-income-daily"><span class="checkbox-check">✓</span></div>
+                        Daily
+                    </label>
+                    <label class="checkbox-label" onclick="toggleConfig('showIncome', 'monthly')">
+                        <div class="custom-checkbox" id="check-income-monthly"><span class="checkbox-check">✓</span>
+                        </div>
+                        Monthly
+                    </label>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="settings-title">Cycle Time (Seconds)</div>
+                <div class="input-group">
+                    <i class="fas fa-sync-alt" style="color:#9ca3af"></i>
+                    <input type="number" class="settings-input" id="cycle-duration" min="1" value="10"
+                        onchange="updateConfigValue('cycleDuration', this.value)">
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="settings-title">Shortcuts</div>
+                <div style="font-size: 0.8rem; color: #9ca3af; line-height: 1.6;">
+                    0: Rotate Screen<br>
+                    1: Monthly Tab<br>
+                    2: Daily Tab<br>
+                    3: Toggle Monthly Income<br>
+                    4: Toggle Daily Income<br>
+                    5: Toggle Monthly Tab<br>
+                    6: Toggle Daily Tab<br>
+                    7: Settings<br>
+                    8: Force Refresh
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Wrapper for Rotation -->
+    <div id="app-wrapper">
+        <div class="container">
+            <header>
+                <h1>🏆 Leaderboard</h1>
+                <div class="controls">
+                    <button class="icon-btn" onclick="rotateScreen()" title="Rotate Screen (0)">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                    <button class="icon-btn" onclick="toggleSettings()" title="Settings (7)">
+                        <i class="fas fa-cog"></i>
+                    </button>
+                </div>
+            </header>
+
+            <div class="tabs-container">
+                <div class="tabs" id="tabs-group">
+                    <button class="tab-btn active" id="btn-monthly" onclick="switchTab('monthly')">Monthly</button>
+                    <button class="tab-btn" id="btn-daily" onclick="switchTab('daily')">Daily</button>
+                </div>
+            </div>
+
+            <div id="loading">
+                <div class="loader"></div>
+                <p>Fetching Data...</p>
+            </div>
+
+            <div id="content" class="hidden">
+                <!-- Top 5 Podium -->
+                <div id="podium" class="top-three">
+                    <!-- Injected via JS -->
+                </div>
+
+                <!-- The Rest of the List -->
+                <div id="list" class="list-container">
+                    <!-- Injected via JS -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // CONFIGURATION
+        // ==========================================
+        // PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL HERE
+        const API_URL = "https://script.google.com/macros/s/AKfycbxFgQE4JjOLw9QzQNjJeyNG6suXQRdFKHHdeWwL5BgNT5vnpp6aFyoJ4v1VaMLlKtb9/exec";
+        // ==========================================
+
+        // ==========================================
+        // STATE & CONFIG
+        // ==========================================
+        let rawData = { monthly: [], daily: [] };
+        let currentTab = 'monthly';
+        let rotation = 0;
+        let isInteracting = false;
+        let interactionTimer = null;
+        let cycleTimer = null;
+        let timeLeft = 10;
+
+        // Configuration State
+        let config = {
+            visibleTabs: { daily: true, monthly: true },
+            showIncome: { daily: true, monthly: false }, // Default: hide monthly income, show daily
+            cycleDuration: 10,
+            resetHour: 6
+        };
+
+        // ==========================================
+        // INITIALIZATION & EVENTS
+        // ==========================================
+        document.addEventListener('DOMContentLoaded', () => {
+            detectTV();
+            fetchData();
+            startClock();
+            startCycleTimer();
+            setupInteractionListeners();
+            updateUIFromConfig(); // Sync UI with default config
+
+            // Poll for updates every minute
+            setInterval(fetchData, 60000);
+        });
+
+        // Keyboard Shortcuts
+        window.addEventListener('keydown', (e) => {
+            // Reset interaction timer on keypress
+            handleInteraction();
+
+            const key = e.key;
+            switch (key) {
+                case '0': rotateScreen(); break;
+                case '1': switchTab('monthly'); break;
+                case '2': switchTab('daily'); break;
+                case '3': toggleConfig('showIncome', 'monthly'); break;
+                case '4': toggleConfig('showIncome', 'daily'); break;
+                case '5': toggleConfig('visibleTabs', 'monthly'); break;
+                case '6': toggleConfig('visibleTabs', 'daily'); break;
+                case '7': toggleSettings(); break;
+                case '8': fetchData(); break;
+            }
+        });
+
+        function setupInteractionListeners() {
+            const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+            events.forEach(event => window.addEventListener(event, handleInteraction));
+        }
+
+        function handleInteraction() {
+            isInteracting = true;
+            if (interactionTimer) clearTimeout(interactionTimer);
+            interactionTimer = setTimeout(() => {
+                isInteracting = false;
+            }, 5000); // Resume auto-cycle after 5s of no interaction
+        }
+
+        // ==========================================
+        // CORE FUNCTIONS
+        // ==========================================
+
+        function detectTV() {
+            const userAgent = navigator.userAgent.toLowerCase();
+            const tvKeywords = ['webos', 'tizen', 'smarttv', 'nexus player', 'viera', 'bravia', 'fios', 'hbbtv', 'opera tv', 'samsung', 'lg tv', 'philips', 'sony', 'panasonic'];
+            const isTv = tvKeywords.some(keyword => userAgent.includes(keyword));
+
+            if (isTv) {
+                console.log("TV Detected - Auto Rotating");
+                rotateScreen(90); // Default to 90deg on TV
+            }
+        }
+
+        function rotateScreen(setDeg) {
+            if (setDeg !== undefined) {
+                rotation = setDeg;
+            } else {
+                rotation = (rotation + 90) % 360;
+            }
+
+            const wrapper = document.getElementById('app-wrapper');
+            const isPortrait = rotation % 180 !== 0;
+
+            // Apply rotation
+            wrapper.style.transform = `rotate(${rotation}deg)`;
+
+            // Adjust width/height logic for rotation
+            if (isPortrait) {
+                wrapper.style.width = '100vh';
+                wrapper.style.height = '100vw';
+                document.body.classList.add('portrait-mode');
+            } else {
+                wrapper.style.width = '100vw';
+                wrapper.style.height = '100vh';
+                document.body.classList.remove('portrait-mode');
+            }
+        }
+
+        function toggleSettings() {
+            const modal = document.getElementById('settings-modal');
+            modal.classList.toggle('hidden');
+        }
+
+        function startClock() {
+            // Clock removed from UI but keeping function structure if reusable later
+            // setInterval(() => {
+            //     const el = document.getElementById('clock-display');
+            //     if(el) el.innerText = new Date().toLocaleTimeString();
+            // }, 1000);
+        }
+
+        function startCycleTimer() {
+            if (cycleTimer) clearInterval(cycleTimer);
+
+            cycleTimer = setInterval(() => {
+                if (isInteracting) return;
+                // Only cycle if both tabs are visible
+                if (!config.visibleTabs.daily || !config.visibleTabs.monthly) return;
+
+                timeLeft--;
+                if (timeLeft <= 0) {
+                    // Toggle Tab
+                    const newTab = currentTab === 'monthly' ? 'daily' : 'monthly';
+                    switchTab(newTab);
+                    timeLeft = config.cycleDuration;
+                }
+            }, 1000);
+        }
+
+        // ==========================================
+        // CONFIG & LOGIC
+        // ==========================================
+
+        function toggleConfig(category, key) {
+            config[category][key] = !config[category][key];
+            updateUIFromConfig();
+
+            // If we just toggled income visibility for current tab, re-render
+            if (category === 'showIncome' && key === currentTab) {
+                renderLeaderboard();
+            }
+
+            // If we toggled a tab visibility
+            if (category === 'visibleTabs') {
+                // If current tab became hidden, switch to the other one
+                if (!config.visibleTabs[currentTab]) {
+                    const other = currentTab === 'monthly' ? 'daily' : 'monthly';
+                    if (config.visibleTabs[other]) switchTab(other);
+                }
+            }
+        }
+
+        function updateConfigValue(key, value) {
+            config[key] = parseInt(value);
+            if (key === 'cycleDuration') {
+                timeLeft = config.cycleDuration;
+            }
+        }
+
+        function updateUIFromConfig() {
+            // Update Checkboxes in Modal
+            updateCheckbox('check-tab-daily', config.visibleTabs.daily);
+            updateCheckbox('check-tab-monthly', config.visibleTabs.monthly);
+            updateCheckbox('check-income-daily', config.showIncome.daily);
+            updateCheckbox('check-income-monthly', config.showIncome.monthly);
+
+            // Update Tab Buttons Visibility
+            document.getElementById('btn-daily').style.display = config.visibleTabs.daily ? 'block' : 'none';
+            document.getElementById('btn-monthly').style.display = config.visibleTabs.monthly ? 'block' : 'none';
+        }
+
+        function updateCheckbox(id, isChecked) {
+            const el = document.getElementById(id);
+            if (isChecked) el.classList.add('checked');
+            else el.classList.remove('checked');
+        }
+
+        async function fetchData() {
+            try {
+                document.getElementById('loading').classList.remove('hidden');
+                const response = await fetch(API_URL);
+                const json = await response.json();
+
+                if (json.status === "error") {
+                    alert("Error from Sheet: " + json.message);
+                    return;
+                }
+
+                rawData = json.data;
+                renderLeaderboard();
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('content').classList.remove('hidden');
+
+            } catch (error) {
+                console.error(error);
+                document.getElementById('loading').innerHTML = "<p style='color:red'>Failed to load data.<br>Check console and API URL.</p>";
+            }
+        }
+
+        function switchTab(tab) {
+            // Don't switch if target tab is disabled
+            if (!config.visibleTabs[tab]) return;
+
+            currentTab = tab;
+            timeLeft = config.cycleDuration; // Reset timer on manual switch
+
+            // Update UI Buttons
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            const btnId = tab === 'monthly' ? 'btn-monthly' : 'btn-daily';
+            const btn = document.getElementById(btnId);
+            if (btn) btn.classList.add('active');
+
+            renderLeaderboard();
+        }
+
+        function renderLeaderboard() {
+            const data = rawData[currentTab];
+            const podiumContainer = document.getElementById('podium');
+            const listContainer = document.getElementById('list');
+
+            podiumContainer.innerHTML = '';
+            listContainer.innerHTML = '';
+
+            if (!data || data.length === 0) {
+                listContainer.innerHTML = '<p style="text-align:center; color:#666">No data available for this period.</p>';
+                return;
+            }
+
+            // --- Render Top 5 (Podium) ---
+            // CSS ordering: rank-4, rank-2, rank-1, rank-3, rank-5
+            const top5 = data.slice(0, 5);
+
+            top5.forEach((idol, index) => {
+                const rank = index + 1;
+                const card = document.createElement('div');
+                card.className = `podium-card rank-${rank}`;
+
+                // Generate Avatar (Image or Initials)
+                let avatarHtml = `<div class="list-avatar" style="width:100%; height:100%; font-size: 24px; background: #333;">${idol.name.substring(0, 2).toUpperCase()}</div>`;
+
+                card.innerHTML = `
+                <div class="avatar-wrapper">
+                    ${avatarHtml}
+                    <div class="rank-badge">${rank}</div>
+                </div>
+                <div class="idol-name">${idol.name}</div>
+                ${config.showIncome[currentTab] ? `<div class="idol-value">${Math.ceil(idol.value).toLocaleString()}</div>` : ''}
+            `;
+                podiumContainer.appendChild(card);
+            });
+
+            // --- Render Rank 6 to 16 (List) ---
+            const rest = data.slice(5);
+
+            rest.forEach((idol, index) => {
+                const rank = index + 6;
+                const item = document.createElement('div');
+                item.className = 'list-item';
+
+                item.innerHTML = `
+                <div class="list-rank">${rank}</div>
+                <div class="list-info">
+                    <div class="list-avatar">${idol.name.substring(0, 2).toUpperCase()}</div>
+                    <div class="list-name">${idol.name}</div>
+                </div>
+                <div class="list-value">
+                    ${config.showIncome[currentTab] ? Math.ceil(idol.value).toLocaleString() : ''}
+                </div>
+            `;
+                listContainer.appendChild(item);
+            });
+        }
+
+        // Start
+        fetchData();
+
+    </script>
+
+</body>
+
+</html>
