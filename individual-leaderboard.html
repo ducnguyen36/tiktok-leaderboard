@@ -424,7 +424,7 @@
         }
 
         /* Desktop Row Layout */
-        @media (min-width: 768px) {
+        @media (min-width: 968px) {
             .list-item {
                 flex-direction: row;
                 text-align: left;
@@ -891,7 +891,7 @@
         // CONFIGURATION
         // ==========================================
         // PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL HERE
-        const API_URL = "https://script.google.com/macros/s/AKfycbxFgQE4JjOLw9QzQNjJeyNG6suXQRdFKHHdeWwL5BgNT5vnpp6aFyoJ4v1VaMLlKtb9/exec";
+        const API_URL = "https://script.google.com/macros/s/AKfycbzvgqowb8Daw4QhSdEArP_UETjX8ccKPZBst5BHwrZl4TGgxDKSn290Lc4q-xWYAK5R/exec";
         // ==========================================
 
         // ==========================================
@@ -1140,8 +1140,7 @@
                 card.className = `podium-card rank-${rank}`;
 
                 // Generate Avatar (Image or Initials)
-                let avatarHtml = `<div class="list-avatar" style="width:100%; height:100%; font-size: 24px; background: #333;">${idol.name.substring(0, 2).toUpperCase()}</div>`;
-
+                let avatarHtml = `<img src="${idol.avatar}" class="avatar" alt="${idol.name}">`;
                 card.innerHTML = `
                 <div class="avatar-wrapper">
                     ${avatarHtml}
@@ -1164,7 +1163,9 @@
                 item.innerHTML = `
                 <div class="list-rank">${rank}</div>
                 <div class="list-info">
-                    <div class="list-avatar">${idol.name.substring(0, 2).toUpperCase()}</div>
+                    <div class="list-avatar">
+                        <img src="${idol.avatar}" alt="${idol.name}">
+                    </div>
                     <div class="list-name">${idol.name}</div>
                 </div>
                 <div class="list-value">
