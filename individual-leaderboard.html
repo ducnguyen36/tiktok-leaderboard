@@ -89,6 +89,7 @@
             margin: 0;
             background: linear-gradient(to right, #25f4ee, #fe2c55);
             -webkit-background-clip: text;
+            background-clip: text;
             -webkit-text-fill-color: transparent;
             text-transform: uppercase;
             letter-spacing: 1px;
@@ -406,20 +407,20 @@
 
         .list-item {
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
             /* Stack vertically on mobile */
             align-items: center;
-            justify-content: center;
-            text-align: center;
+            justify-content: space-between;
+            text-align: left;
             background: var(--card-bg);
-            padding: 8px;
+            padding: 5px 10px;
             /* Reduced from 15px */
-            border-radius: 8px;
+            border-radius: 6px;
             /* Slightly tighter radius */
             transition: transform 0.2s;
-            gap: 4px;
+            gap: 8px;
             /* Reduced from 8px */
-            min-height: 100px;
+            min-height: 40px;
             /* Ensure consistent height */
         }
 
@@ -429,9 +430,9 @@
                 flex-direction: row;
                 text-align: left;
                 justify-content: flex-start;
-                padding: 15px;
-                border-radius: 12px;
-                gap: 0;
+                padding: 10px;
+                border-radius: 8px;
+                gap: 15px;
             }
         }
 
@@ -546,11 +547,17 @@
 
         .list-info {
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
             align-items: center;
-            gap: 4px;
+            gap: 8px;
             /* Tighter gap */
-            width: 100%;
+            flex: 1;
+            /* Take available space */
+            justify-content: flex-start;
+            /* Align left */
+            overflow: hidden;
+            /* For text overflow */
+            width: auto;
         }
 
         @media (min-width: 768px) {
@@ -1163,9 +1170,6 @@
                 item.innerHTML = `
                 <div class="list-rank">${rank}</div>
                 <div class="list-info">
-                    <div class="list-avatar">
-                        <img src="${idol.avatar}" alt="${idol.name}">
-                    </div>
                     <div class="list-name">${idol.name}</div>
                 </div>
                 <div class="list-value">
