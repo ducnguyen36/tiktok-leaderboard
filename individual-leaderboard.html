@@ -54,6 +54,8 @@
             transform-origin: center center;
             background-color: var(--bg-color);
             /* Ensure bg covers during rotation */
+            position: relative;
+            /* Allow absolute positioned children like settings modal */
         }
 
         /* Scrollbar styling */
@@ -627,21 +629,17 @@
             }
         }
 
-        /* Loading State */
-        #loading {
-            text-align: center;
-            padding: 50px;
-            color: var(--text-secondary);
-        }
-
-        .loader {
-            width: 40px;
-            height: 40px;
-            border: 4px solid var(--card-bg);
-            border-top: 4px solid var(--accent-color);
+        /* Loading State - Inline header spinner */
+        .header-loader {
+            width: 20px;
+            height: 20px;
+            border: 3px solid var(--card-bg);
+            border-top: 3px solid var(--accent-color);
             border-radius: 50%;
-            margin: 0 auto 15px;
             animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-left: 10px;
+            vertical-align: middle;
         }
 
         @keyframes spin {
@@ -659,9 +657,9 @@
             display: none !important;
         }
 
-        /* Settings Modal */
+        /* Settings Modal - positioned inside app-wrapper so it rotates with content */
         #settings-modal {
-            position: fixed;
+            position: absolute;
             top: 0;
             left: 0;
             width: 100%;
@@ -789,74 +787,94 @@
 
 <body>
 
-    <!-- Settings Modal -->
-    <div id="settings-modal" class="hidden">
-        <div class="settings-content">
-            <div class="settings-header">
-                <h2>Settings</h2>
-                <button class="close-btn" onclick="toggleSettings()"><i class="fas fa-times"></i></button>
-            </div>
+    <!-- Main Content Wrapper for Rotation -->
+    <div id="app-wrapper">
 
-            <div class="settings-section">
-                <div class="settings-title">Enabled Tabs</div>
-                <div class="checkbox-group">
-                    <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'daily')">
-                        <div class="custom-checkbox" id="check-tab-daily"><span class="checkbox-check">✓</span></div>
-                        Daily
-                    </label>
-                    <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'monthly')">
-                        <div class="custom-checkbox" id="check-tab-monthly"><span class="checkbox-check">✓</span></div>
-                        Monthly
-                    </label>
+        <!-- Settings Modal (inside wrapper so it rotates with content) -->
+        <div id="settings-modal" class="hidden">
+            <div class="settings-content">
+                <div class="settings-header">
+                    <h2>Settings</h2>
+                    <button class="close-btn" onclick="toggleSettings()"><i class="fas fa-times"></i></button>
                 </div>
-            </div>
 
-            <div class="settings-section">
-                <div class="settings-title">Show Income Numbers</div>
-                <div class="checkbox-group">
-                    <label class="checkbox-label" onclick="toggleConfig('showIncome', 'daily')">
-                        <div class="custom-checkbox" id="check-income-daily"><span class="checkbox-check">✓</span></div>
-                        Daily
-                    </label>
-                    <label class="checkbox-label" onclick="toggleConfig('showIncome', 'monthly')">
-                        <div class="custom-checkbox" id="check-income-monthly"><span class="checkbox-check">✓</span>
-                        </div>
-                        Monthly
-                    </label>
+                <div class="settings-section">
+                    <div class="settings-title">Enabled Tabs</div>
+                    <div class="checkbox-group">
+                        <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'daily')">
+                            <div class="custom-checkbox" id="check-tab-daily"><span class="checkbox-check">✓</span>
+                            </div>
+                            Daily
+                        </label>
+                        <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'monthly')">
+                            <div class="custom-checkbox" id="check-tab-monthly"><span class="checkbox-check">✓</span>
+                            </div>
+                            Monthly
+                        </label>
+                    </div>
                 </div>
-            </div>
 
-            <div class="settings-section">
-                <div class="settings-title">Cycle Time (Seconds)</div>
-                <div class="input-group">
-                    <i class="fas fa-sync-alt" style="color:#9ca3af"></i>
-                    <input type="number" class="settings-input" id="cycle-duration" min="1" value="10"
-                        onchange="updateConfigValue('cycleDuration', this.value)">
+                <div class="settings-section">
+                    <div class="settings-title">Show Income Numbers</div>
+                    <div class="checkbox-group">
+                        <label class="checkbox-label" onclick="toggleConfig('showIncome', 'daily')">
+                            <div class="custom-checkbox" id="check-income-daily"><span class="checkbox-check">✓</span>
+                            </div>
+                            Daily
+                        </label>
+                        <label class="checkbox-label" onclick="toggleConfig('showIncome', 'monthly')">
+                            <div class="custom-checkbox" id="check-income-monthly"><span class="checkbox-check">✓</span>
+                            </div>
+                            Monthly
+                        </label>
+                    </div>
                 </div>
-            </div>
 
-            <div class="settings-section">
-                <div class="settings-title">Shortcuts</div>
-                <div style="font-size: 0.8rem; color: #9ca3af; line-height: 1.6;">
-                    0: Rotate Screen<br>
-                    1: Monthly Tab<br>
-                    2: Daily Tab<br>
-                    3: Toggle Monthly Income<br>
-                    4: Toggle Daily Income<br>
-                    5: Toggle Monthly Tab<br>
-                    6: Toggle Daily Tab<br>
-                    7: Settings<br>
-                    8: Force Refresh
+                <div class="settings-section">
+                    <div class="settings-title">Show Avatars (Rank 6+)</div>
+                    <div class="checkbox-group">
+                        <label class="checkbox-label" onclick="toggleConfig('showAvatars', 'daily')">
+                            <div class="custom-checkbox" id="check-avatar-daily"><span class="checkbox-check">✓</span>
+                            </div>
+                            Daily
+                        </label>
+                        <label class="checkbox-label" onclick="toggleConfig('showAvatars', 'monthly')">
+                            <div class="custom-checkbox" id="check-avatar-monthly"><span class="checkbox-check">✓</span>
+                            </div>
+                            Monthly
+                        </label>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <div class="settings-title">Cycle Time (Seconds)</div>
+                    <div class="input-group">
+                        <i class="fas fa-sync-alt" style="color:#9ca3af"></i>
+                        <input type="number" class="settings-input" id="cycle-duration" min="1" value="10"
+                            onchange="updateConfigValue('cycleDuration', this.value)">
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <div class="settings-title">Shortcuts</div>
+                    <div style="font-size: 0.8rem; color: #9ca3af; line-height: 1.6;">
+                        0: Rotate Screen<br>
+                        1: Monthly Tab<br>
+                        2: Daily Tab<br>
+                        3: Toggle Monthly Income<br>
+                        4: Toggle Daily Income<br>
+                        5: Toggle Monthly Tab<br>
+                        6: Toggle Daily Tab<br>
+                        7: Settings<br>
+                        8: Force Refresh
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Main Content Wrapper for Rotation -->
-    <div id="app-wrapper">
         <div class="container">
             <header>
-                <h1>🏆 Leaderboard</h1>
+                <h1>🏆 Leaderboard <span id="header-loader" class="header-loader hidden"></span></h1>
                 <div class="controls">
                     <button class="icon-btn" onclick="rotateScreen()" title="Rotate Screen (0)">
                         <i class="fas fa-sync-alt"></i>
@@ -874,12 +892,7 @@
                 </div>
             </div>
 
-            <div id="loading">
-                <div class="loader"></div>
-                <p>Fetching Data...</p>
-            </div>
-
-            <div id="content" class="hidden">
+            <div id="content">
                 <!-- Top 5 Podium -->
                 <div id="podium" class="top-three">
                     <!-- Injected via JS -->
@@ -916,6 +929,7 @@
         let config = {
             visibleTabs: { daily: true, monthly: true },
             showIncome: { daily: true, monthly: true }, // Default: show both daily and monthly income
+            showAvatars: { daily: true, monthly: true }, // Default: show avatars for rank 6+
             cycleDuration: 10,
             resetHour: 6
         };
@@ -1046,8 +1060,8 @@
             config[category][key] = !config[category][key];
             updateUIFromConfig();
 
-            // If we just toggled income visibility for current tab, re-render
-            if (category === 'showIncome' && key === currentTab) {
+            // If we just toggled income or avatar visibility for current tab, re-render
+            if ((category === 'showIncome' || category === 'showAvatars') && key === currentTab) {
                 renderLeaderboard();
             }
 
@@ -1074,6 +1088,8 @@
             updateCheckbox('check-tab-monthly', config.visibleTabs.monthly);
             updateCheckbox('check-income-daily', config.showIncome.daily);
             updateCheckbox('check-income-monthly', config.showIncome.monthly);
+            updateCheckbox('check-avatar-daily', config.showAvatars.daily);
+            updateCheckbox('check-avatar-monthly', config.showAvatars.monthly);
 
             // Update Tab Buttons Visibility
             document.getElementById('btn-daily').style.display = config.visibleTabs.daily ? 'block' : 'none';
@@ -1087,24 +1103,25 @@
         }
 
         async function fetchData() {
+            const loader = document.getElementById('header-loader');
             try {
-                document.getElementById('loading').classList.remove('hidden');
+                loader.classList.remove('hidden');
                 const response = await fetch(API_URL);
                 const json = await response.json();
 
                 if (json.status === "error") {
                     alert("Error from Sheet: " + json.message);
+                    loader.classList.add('hidden');
                     return;
                 }
 
                 rawData = json.data;
                 renderLeaderboard();
-                document.getElementById('loading').classList.add('hidden');
-                document.getElementById('content').classList.remove('hidden');
+                loader.classList.add('hidden');
 
             } catch (error) {
                 console.error(error);
-                document.getElementById('loading').innerHTML = "<p style='color:red'>Failed to load data.<br>Check console and API URL.</p>";
+                loader.classList.add('hidden');
             }
         }
 
@@ -1161,15 +1178,21 @@
 
             // --- Render Rank 6 to 16 (List) ---
             const rest = data.slice(5);
+            const showAvatars = config.showAvatars[currentTab];
 
             rest.forEach((idol, index) => {
                 const rank = index + 6;
                 const item = document.createElement('div');
                 item.className = 'list-item';
 
+                const avatarHtml = showAvatars
+                    ? `<div class="list-avatar">${idol.avatar ? `<img src="${idol.avatar}" alt="${idol.name}">` : `<i class="fas fa-user"></i>`}</div>`
+                    : '';
+
                 item.innerHTML = `
                 <div class="list-rank">${rank}</div>
                 <div class="list-info">
+                    ${avatarHtml}
                     <div class="list-name">${idol.name}</div>
                 </div>
                 <div class="list-value">

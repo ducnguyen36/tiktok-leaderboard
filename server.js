@@ -72,7 +72,7 @@ const downloadAndSaveAvatar = async (displayId, avatarUrl) => {
 
 // --- CONFIGURATION ---
 const ALLOWED_CREATOR_IDS = {
-    'novix.ht2': '7592510945700806673',
+    'novix.ht': '7592510945700806673',
     'dopamine.ht': '7539826902857515009',
     'lunarknight.ht': '7514557708314542081',
     'huntera.ht': '7529074048186220545',
