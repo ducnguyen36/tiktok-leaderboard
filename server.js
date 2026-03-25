@@ -74,10 +74,12 @@ const downloadAndSaveAvatar = async (displayId, avatarUrl) => {
 const ALLOWED_CREATOR_IDS = {
     'novix.ht': '7592510945700806673',
     'dopamine.ht': '7539826902857515009',
-    'lunarknight.ht': '7514557708314542081',
-    'huntera.ht': '7529074048186220545',
-    'moonsiren.ht': '7514527995919646737',
+    'venyxis.ht': '7611202290426314753',
+    'velvetgrace.ht': '7611200108180504593',
     'kayzen.ht': '7484173710891679761'
+    // 'huntera.ht': '7529074048186220545',
+    // 'moonsiren.ht': '7514527995919646737',
+    // 'lunarknight.ht': '7514557708314542081',
 };
 
 // Default creator info with capitalized names
@@ -85,10 +87,12 @@ const ALLOWED_CREATOR_IDS = {
 const DEFAULT_CREATOR_INFO = {
     'novix.ht2': { name: 'NOVIX' },
     'dopamine.ht': { name: 'DOPAMINE' },
-    'lunarknight.ht': { name: 'LUNARKNIGHT' },
-    'huntera.ht': { name: 'HUNTERA' },
-    'moonsiren.ht': { name: 'MOONSIREN' },
+    'venyxis.ht': { name: 'VENYXIS' },
+    'velvetgrace.ht': { name: 'VELVETGRACE' },
     'kayzen.ht': { name: 'KAYZEN' }
+    // 'lunarknight.ht': { name: 'LUNARKNIGHT' },
+    // 'huntera.ht': { name: 'HUNTERA' },
+    // 'moonsiren.ht': { name: 'MOONSIREN' },
 };
 
 const CREATOR_URLS = {
@@ -100,38 +104,54 @@ const CREATOR_URLS = {
     //     // Page 3 (Offset 40)
     //     "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=novix.ht&Offset=40&Limit=20&HostID=7441833017436308501&msToken=8yVQwNriDYfdmmd_w4dcxi-AtaxBLQvRDjWpxbyhqBgg1FKruokd9TCssxiS9w2NtIwjHiai77bNA6xRji_wKUZeZM-39Oh9Q0RfSa3Utx_ksIb1cQihDXMWMG7Ik8o=&X-Bogus=DFSzswVLa00ANjMQCFdKuvpJlh8K&X-Gnarly=MxDZnFeCaP9kf6C7AmcdLePNU/ZwFCFdbKJKiEmqdBY/oF05mN0G4ZLPcu9az9QjwUG6QBwEBeathXiA02RB7saTvDGSQ98EHMLjs0JccduO6qjMBBOAWpwyniGokTnUMLO6Ptrf3ejtTIbUAesC2F--C4g94IHRB/kAtbU7Nat-mJb2EfMAIJGq19WMYl/0t8wgO/dZq6ZL-mF0oW7lpd5Dfx6IELbGVXx1ns00r6sIjEfUNLZB1UKFIeAT5EgkpZXz43mIQ099/vtj7DKsLDtoe8kHnWsJ78d3tzbOs3op"
     // ],
-    'novix.ht2': [
+    'novix.ht': [
         // Page 1 (Offset 0)
         "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=novix.ht2&Offset=0&Limit=20&HostID=7588012144228533249&msToken=SgDio30exhByQ8Zw-h7R4EwlFyfLOn_QhnYQnLk2U47j-58TDPTXsMVhhJtrDurmRUpkmZZkpNoQ5s4eMAuHaLIeMqoZGoXGrhO3OXF022hqCysbmNqwnw8k1zAO5gc=&X-Bogus=DFSzswVuIh6dUvHpCza3ZGVpMgh9&X-Gnarly=MHu2d-dichJkDLasscI/AlJhLocSWrLgWE657GVXe7Z4sD8fwXo47AHAtfUC6W5dWHkgqHOcEXLCSFmy8RWMiuDYHBXLu0ncuFPdhdobbl1q-wGuSHu3y2TSkeHrbeGAi0pz3uLRJ0MQEHG-F3tu4gRIucY8ndnnSMdhn4D0E4wxYmI2b2EVFAQoELB78N1IoNxbgw-/mKl8s38QAyoNNzQVPfctiTcWVsvKX3FFr/ZAnedI7HBR5zBU7qAPT0mL9Esk59bmxX9iPgCAp6Xiahm1vrXDJtRCPO9P/ApTIUdD",
         // Page 2 (Offset 20)
-        "",
+        "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=novix.ht&Offset=20&Limit=20&HostID=7588012144228533249&msToken=icSXgurfMIOn7chG0fKundhfmtRNkJ431VTvQ-D2gdabPRVYMPFqyg0gHQmdUaVD65Kq6I_7ijAgZDF6xfEYd9X8XDXME2mFu2TjvzmTimsNddqQ4eP0qnx5T7frWn8=&X-Bogus=DFSzswVuzETAN9NtCiOnHjTGOLSG&X-Gnarly=McVpIemnO4v/KH2Jc1jAMkw0ga417o4JW/DC2d02WZR4NngKkn4S62ElDQ3j6PUl0ZmfQa7V20oow4lvi/8duPjIQKXPAeVhRXthRPy6IEWnczY0UeWLcgaCx3mW6P2vfXdAEKcAUK/6chnwStLesEfadooD0EDCRciXiYVqnHrQNnL7XA78qa/0-Be6qrgVy2uNWcJBwpCE71puqZWcaUabr3XrsKNtPRqklTZgxr2yvSvHiS5jEiZhoffyaLJ9vGsAhxrh5sPqK2O4VefadTWqSc9yEI-5mEiq9VeU0wTj",
         // Page 3 (Offset 40)
+        "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=novix.ht&Offset=40&Limit=20&HostID=7588012144228533249&msToken=uzn86nyCHFK2DKGN6_WaOI0niYX7c8mGgroIRnGcHf0PPOVw3B2phBh_2BBubavuKMJX4sTxTbqULNreY0erxg539O8P-GXkIYj9f3h6S8GzQL8OkoHVXvxu1no06I4=&X-Bogus=DFSzswVunZXAN9NtCiOnFfTGOLt5&X-Gnarly=MkEL/LxSheXHXppU9L2xAgiusetrI0mh29idSG77tHXWtY4raOA7LncOarYc-1EdOwFTZ62IRsdwdO2TEfs1dprfHUWpy90zlbD2-OBjOzl7tE2h112VDGi8eIkeIwpcsrDO9pMuBtPBNPvDmFUWyV6EsGpmX9pkQCezN1Vsv-ZZuLZk7epZbhbFbN4/Shlb2bCqy/JJ-xQBQO68SJ20CtCct6UzCjneWguTFKx/i83-afJaZkZOzR0TsEAJXgeZpFls3K65BL7YMuqrAgO7kCf6f/xZ7H7uNnun8USCuE0i"
+    ],
+    // 'huntera.ht': [
+    //     // Page 1
+    //     "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=huntera.ht&Offset=0&Limit=20&HostID=7528287601460823048&msToken=4xXEY3UuhKRqxiCDvvxmP8BB4wVpFvhGVeHLPAv3wpmvO5LBT3xM27KUEuI_c73DHBFqnp_WfiE7aGlazqwg3k2X_PyoyIlnErA1IbM8M5jaq0asH9UWThUmcSptiuR8zoVP9-0Dyg==&X-Bogus=DFSzswVLY6TANjMQCFd3aJpJlh/2&X-Gnarly=MF5dJcoji5g89fIVkuhhmJgTOQJqLkjY6a8scywCy0dw3YiqWWhJNenQu30GGXKalKAs4gYu2WtTL/9FvBRe1BjsSWIvjP3l8wElAjJt2JPAyUBfolFkJrzrfVT6Eh75B53y3KP3CL1eHlnBp3Wssyov0ypg4oezmbWTfA/RCsVbIjNUjAThoXKwNmgQg85mBwxOyUF1KGs8r7HGT5a4sjMZU6nXi3V3qXfH0IRlZfJ9M9MR7qYOER8YAdqITFk/w/DCDpLKDrIKGHPhO8A7jTBob3gItduzPa8OfYc0Lgw5",
+    //     // Page 2
+    //     "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=huntera.ht&Offset=20&Limit=20&HostID=7528287601460823048&msToken=UjbitqljrRZrpYQNpNNbSflKu_o6mLnPcMts7tCqmRJ2GWqwXrVFOmvcRKE6VW3HcDWuAZOXT4FC5zzt693fzy6SZMzevTHbluCG-rPepjeXPVl1Uk9eMc3BdR7L5_qNvtnWepWaIA==&X-Bogus=DFSzswVLPpiANjMQCFd3tkpJlhMt&X-Gnarly=MxBL3PupWpWGygGrIQ42ND0L6Df7nSfWR0AkCRf2VIsGlG7WfqnQ8t7GxMCnId4gZjCLoiW0jEpw4lBinD0VGVOCd3YWw-/WJ56fnHEZE7lQDihFnYtOuyHm0LdVoMtCZFWqzB48kabKgQCGY2pD9rYb5RX0PmHirCusWiPgchjlRDjBGR7FuJpYgeBoLxBoVAETm83VgN9pqnVayVpxYXEJN9Z7tZMd5-r1q3cQIv4rx2K69d452bz1uw/NCMEQ9-DsomsKwClA/Tksl4zAi16JvzIe05ck3yb7SCQ0vyy9",
+    //     // Page 3
+    //     "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=huntera.ht&Offset=40&Limit=20&HostID=7528287601460823048&msToken=mJGgajzGJTnAPMrHtAwLs4dCa0Ww41YaS7p-JxZe1VGTnkbF5gMCDC4LgPvoKnMh61UOqGy40I_Axb1oTXvFuysdw1RiyyR2NRoQRULm_UeTGfr6mMUTTfmd4-FO-IDX2RL8wZotQw==&X-Bogus=DFSzswVLCazANjMQCFd3jJpJlh8A&X-Gnarly=MaAxYlRzsbfy4y8HGmxioLro64H-a0iYDn2DO0C5lMK/HxKfi5OmFJQ2Nw7fbx89JwfV5c-iOk6WIUBQIse43I8SV9iXCnnIQpZ5c9FKjS97JWGwsZHv0zgusu2MzbJ4FHrUAEtNcpgqo8B0ykO7cXQbpVWQ7j8z3ANTDieDWO5XhaGE0n5i32nz0Zt6f6onX9HkMVDUSM7hypd1XfztMqc6Rr2wJq6CjYFEWw/zRmNJOZvhNu0QVzbYpA7d2YYVt0PB81DaB8-ol77SBSElvQ4HG2PiGA8O96qEShA4IR01"
+    // ],
+    'velvetgrace.ht': [
+        // Page 1
+        "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=velvetgrace.ht&Offset=0&Limit=20&HostID=7611078269802267668&msToken=5KnMHUZBkxOXOYDCmS65cVMeGZtJpq5f6cbZSgfZOnStDrRHymNqepQNk-uAmj-yMYE0b4IpX9YvsVXf7sMnrhn6XRqp6BwbksaRNvRrNoBM3a3Lqfzuqu3TYs0S4wg=&X-Bogus=DFSzswVuwpkAN9NtCiOtXETGOLta&X-Gnarly=MK1SETBTP-MEjoJVtpJCpulipfIj7aTaFw866JJWAYaP4g-IH-s/cYRdLYYmB0GuNbGNfkLphWauW8XTFTWHayG3uDvvNL-rY/6mzGCK0I2eKpKrB48m8VnLDfD0vCTKSRVQr6RMw-Hhrj0Wh4fm3T0I/j4Jtwidz85vF7f8GIPStiFHDvIS9Enc42XnjNjoS-VENmQMdEdHmXWYCVEEXHPygwaZ0jpj6u2oNCxh6kjGezURQqdBwlKpIyyrZGIIrkROJpS0K-NZGdb1vzRYEngbulTsP7Qp22t/F-q1jVz2",
+        // Page 2
+        "",
+        // Page 3
         ""
     ],
-    'huntera.ht': [
+    // 'moonsiren.ht': [
+    //     // Page 1
+    //     "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=moonsiren.ht&Offset=0&Limit=20&HostID=7504516581285004309&msToken=oCEvfj-UfsknewozHA2gRTEqvTRvVB6RO2WexrfYBPEfasRocrvDQl6KzwfOckNoy70_XgV3rAYkKtmKxK5cvlwqRu-cVlUM8gtpHoZd66N1cpRNb4NRF2r0HUvX-tRQXICa6enSYQ==&X-Bogus=DFSzswVLWSJANjMQCFdW1kpJlh0J&X-Gnarly=MwyA5WHXedOUoba8-/irJEy86vKR8EopH2-99mM6n9x-auApSmQYjNlDk4TJg7mEPU1ch3rkBwh8hpC/OCyW5hGJzBvSMnBA8Ef9D22v-xuePS7kr6x67VowFT6plTG4YOXzY4gvYsrpwwUF7j/lTCBAC6QSFI99mTyWv744OivkgP5wtcaLmL4IRMjSlDvegviFuqXb0E93Ca/4yLsiDNIVuHwnKjIkPOV3QW-SaLIqYT0sdfP81bnugqkA2942N0Idg5CnllR/fhG9fKAFuo9nAzJS0UYVG/x6mi/DpKvy",
+    //     // Page 2
+    //     "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=moonsiren.ht&Offset=20&Limit=20&HostID=7504516581285004309&msToken=pCRvV0i5PMIHinwzYorn_BpBKYaR2E1_AdEpypOX0Pg1uPfYg9pgQINN6p3yZdihmMuotKtIL_jUrjyMrG5VdgWuypFnJlKL6XLkah6P7JhUeyH8q2emwzU8Jnej_fi2Faix9EPNhQ==&X-Bogus=DFSzswVLeBbANjMQCFdWXipJlh/k&X-Gnarly=MFdEC9gwHXxg0SOfKJPYQxtHtpmOVVsjcpknxYjV/HzhFdJZFSzw9PVfTMwU4xSLYl0P-lahg70tV2y6aqkf0HufTONziTxCH8atk8LQ2m8DAoof8Cn69ccVzKJnMITyRn6L15kHvqfOyceRPvhx3Ez0WMoH9kJ2svSPWmPFyeW4p9B18HbkuXtbVByfVvF2t1-P33TO/mYfNbyz9VR9efEFgGNppHSu3ncwud1hE/owqIUPF9W9jBJtoNjxQA5N40NXXkgL-WaIcyyX5piPGEooxqp54U5c3Rtsebde2-cW",
+    //     // Page 3
+    //     "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=moonsiren.ht&Offset=40&Limit=20&HostID=7504516581285004309&msToken=Ijcd2BdGBvtUOndAnECVJzSQF3kExk8iv47khjuHLFNCZ_1j_qg2M84739IlgPVaCqQyC7qL-SPLiNmOddV9iRJePjstqcOAaMkuhfzZ32l_DctZ_VMsr8xQLIzoOFecFgtdvdlDTw==&X-Bogus=DFSzswVLZJiANjMQCFdWMipJlh/P&X-Gnarly=M5fV8U98wlZNdAyEo3vzwo4dDkUSoelUAXJ9-XQuYeZsdrZr8RTWDRESbiO0mXQLSuYZ5RFq7T6gnL5wdqHFmm/yHV7s0GFUj4nKAyt-aGfSLFTKY7AKp6Uv2-rFST0jTquZ3xrq1XgFwrpYHJxyVlXxWyHUVxEVANLNvvTRV51AdZrHynNDsBeKq29VHsC3yyAw-2XK-Mw2ZMp1ZIO0EV2jOVfq4CI9dBbnkMdi3YUDGLqEzqIoTo1BvcU2tiTvjx-dd/Y3W2-CY4DQPB7to9DR5uJPhInAsuqF1twAKdM9"
+    // ],
+    'venyxis.ht': [
         // Page 1
-        "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=huntera.ht&Offset=0&Limit=20&HostID=7528287601460823048&msToken=4xXEY3UuhKRqxiCDvvxmP8BB4wVpFvhGVeHLPAv3wpmvO5LBT3xM27KUEuI_c73DHBFqnp_WfiE7aGlazqwg3k2X_PyoyIlnErA1IbM8M5jaq0asH9UWThUmcSptiuR8zoVP9-0Dyg==&X-Bogus=DFSzswVLY6TANjMQCFd3aJpJlh/2&X-Gnarly=MF5dJcoji5g89fIVkuhhmJgTOQJqLkjY6a8scywCy0dw3YiqWWhJNenQu30GGXKalKAs4gYu2WtTL/9FvBRe1BjsSWIvjP3l8wElAjJt2JPAyUBfolFkJrzrfVT6Eh75B53y3KP3CL1eHlnBp3Wssyov0ypg4oezmbWTfA/RCsVbIjNUjAThoXKwNmgQg85mBwxOyUF1KGs8r7HGT5a4sjMZU6nXi3V3qXfH0IRlZfJ9M9MR7qYOER8YAdqITFk/w/DCDpLKDrIKGHPhO8A7jTBob3gItduzPa8OfYc0Lgw5",
+        "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=venyxis.ht&Offset=0&Limit=20&HostID=7610698114203403284&msToken=L6jj6gRbk4tniVwqdmQiGzy7tOIXs8VzN2M1g4J6aBn_2a19u7B0RWgjOGF2vkIGDnpEJnYuOGpkdebDDjg4n3WptUxwz5GurihyWe6iL3N7DYRY6qraDl6w5URBTEE=&X-Bogus=DFSzswVuuJSdUINtCiOe4ETGOLtZ&X-Gnarly=MKsV90LLkIoS0xCPcvQ6lZ8Dsv6Ghv7Z8nqN/TMclEvFfVb8BB1wJRAao31Z4RRuTsqcsrgboIOC-tcveINgQVDSgieD2sY2SjEAVET2scJXkSpZNXOt3ASVOpiycLBoAUjwoEF-mk-e0dG-oT6uKM8A288uzLXD5Bf-S0fs9y40SM09Uaq3ME4Yw5z8sqpSYRAZuhCE9Ty8gPvqlxDMKjMPD0B9ANHwcr1WXKBr2TckQedQA6UIaY2vPD1Y-uX0IjSYT9y3qslMIVbFc7IhTiKsuuTSH/Te/bSMDd3M53cT",
         // Page 2
-        "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=huntera.ht&Offset=20&Limit=20&HostID=7528287601460823048&msToken=UjbitqljrRZrpYQNpNNbSflKu_o6mLnPcMts7tCqmRJ2GWqwXrVFOmvcRKE6VW3HcDWuAZOXT4FC5zzt693fzy6SZMzevTHbluCG-rPepjeXPVl1Uk9eMc3BdR7L5_qNvtnWepWaIA==&X-Bogus=DFSzswVLPpiANjMQCFd3tkpJlhMt&X-Gnarly=MxBL3PupWpWGygGrIQ42ND0L6Df7nSfWR0AkCRf2VIsGlG7WfqnQ8t7GxMCnId4gZjCLoiW0jEpw4lBinD0VGVOCd3YWw-/WJ56fnHEZE7lQDihFnYtOuyHm0LdVoMtCZFWqzB48kabKgQCGY2pD9rYb5RX0PmHirCusWiPgchjlRDjBGR7FuJpYgeBoLxBoVAETm83VgN9pqnVayVpxYXEJN9Z7tZMd5-r1q3cQIv4rx2K69d452bz1uw/NCMEQ9-DsomsKwClA/Tksl4zAi16JvzIe05ck3yb7SCQ0vyy9",
+        "",
         // Page 3
-        "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=huntera.ht&Offset=40&Limit=20&HostID=7528287601460823048&msToken=mJGgajzGJTnAPMrHtAwLs4dCa0Ww41YaS7p-JxZe1VGTnkbF5gMCDC4LgPvoKnMh61UOqGy40I_Axb1oTXvFuysdw1RiyyR2NRoQRULm_UeTGfr6mMUTTfmd4-FO-IDX2RL8wZotQw==&X-Bogus=DFSzswVLCazANjMQCFd3jJpJlh8A&X-Gnarly=MaAxYlRzsbfy4y8HGmxioLro64H-a0iYDn2DO0C5lMK/HxKfi5OmFJQ2Nw7fbx89JwfV5c-iOk6WIUBQIse43I8SV9iXCnnIQpZ5c9FKjS97JWGwsZHv0zgusu2MzbJ4FHrUAEtNcpgqo8B0ykO7cXQbpVWQ7j8z3ANTDieDWO5XhaGE0n5i32nz0Zt6f6onX9HkMVDUSM7hypd1XfztMqc6Rr2wJq6CjYFEWw/zRmNJOZvhNu0QVzbYpA7d2YYVt0PB81DaB8-ol77SBSElvQ4HG2PiGA8O96qEShA4IR01"
+        ""
     ],
-    'moonsiren.ht': [
-        // Page 1
-        "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=moonsiren.ht&Offset=0&Limit=20&HostID=7504516581285004309&msToken=oCEvfj-UfsknewozHA2gRTEqvTRvVB6RO2WexrfYBPEfasRocrvDQl6KzwfOckNoy70_XgV3rAYkKtmKxK5cvlwqRu-cVlUM8gtpHoZd66N1cpRNb4NRF2r0HUvX-tRQXICa6enSYQ==&X-Bogus=DFSzswVLWSJANjMQCFdW1kpJlh0J&X-Gnarly=MwyA5WHXedOUoba8-/irJEy86vKR8EopH2-99mM6n9x-auApSmQYjNlDk4TJg7mEPU1ch3rkBwh8hpC/OCyW5hGJzBvSMnBA8Ef9D22v-xuePS7kr6x67VowFT6plTG4YOXzY4gvYsrpwwUF7j/lTCBAC6QSFI99mTyWv744OivkgP5wtcaLmL4IRMjSlDvegviFuqXb0E93Ca/4yLsiDNIVuHwnKjIkPOV3QW-SaLIqYT0sdfP81bnugqkA2942N0Idg5CnllR/fhG9fKAFuo9nAzJS0UYVG/x6mi/DpKvy",
-        // Page 2
-        "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=moonsiren.ht&Offset=20&Limit=20&HostID=7504516581285004309&msToken=pCRvV0i5PMIHinwzYorn_BpBKYaR2E1_AdEpypOX0Pg1uPfYg9pgQINN6p3yZdihmMuotKtIL_jUrjyMrG5VdgWuypFnJlKL6XLkah6P7JhUeyH8q2emwzU8Jnej_fi2Faix9EPNhQ==&X-Bogus=DFSzswVLeBbANjMQCFdWXipJlh/k&X-Gnarly=MFdEC9gwHXxg0SOfKJPYQxtHtpmOVVsjcpknxYjV/HzhFdJZFSzw9PVfTMwU4xSLYl0P-lahg70tV2y6aqkf0HufTONziTxCH8atk8LQ2m8DAoof8Cn69ccVzKJnMITyRn6L15kHvqfOyceRPvhx3Ez0WMoH9kJ2svSPWmPFyeW4p9B18HbkuXtbVByfVvF2t1-P33TO/mYfNbyz9VR9efEFgGNppHSu3ncwud1hE/owqIUPF9W9jBJtoNjxQA5N40NXXkgL-WaIcyyX5piPGEooxqp54U5c3Rtsebde2-cW",
-        // Page 3
-        "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=moonsiren.ht&Offset=40&Limit=20&HostID=7504516581285004309&msToken=Ijcd2BdGBvtUOndAnECVJzSQF3kExk8iv47khjuHLFNCZ_1j_qg2M84739IlgPVaCqQyC7qL-SPLiNmOddV9iRJePjstqcOAaMkuhfzZ32l_DctZ_VMsr8xQLIzoOFecFgtdvdlDTw==&X-Bogus=DFSzswVLZJiANjMQCFdWMipJlh/P&X-Gnarly=M5fV8U98wlZNdAyEo3vzwo4dDkUSoelUAXJ9-XQuYeZsdrZr8RTWDRESbiO0mXQLSuYZ5RFq7T6gnL5wdqHFmm/yHV7s0GFUj4nKAyt-aGfSLFTKY7AKp6Uv2-rFST0jTquZ3xrq1XgFwrpYHJxyVlXxWyHUVxEVANLNvvTRV51AdZrHynNDsBeKq29VHsC3yyAw-2XK-Mw2ZMp1ZIO0EV2jOVfq4CI9dBbnkMdi3YUDGLqEzqIoTo1BvcU2tiTvjx-dd/Y3W2-CY4DQPB7to9DR5uJPhInAsuqF1twAKdM9"
-    ],
-    'lunarknight.ht': [
-        // Page 1
-        "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=lunarknight.ht&Offset=0&Limit=20&HostID=7514528621319783441&msToken=5WWH0Uu6Kuvf1yVB7eiyCG2iCP5IhnEDwAk3nP7zSPBSZWJ1maXL4idLQll4znkPdaL0p8H6p9QJQNLpis3YGDyU32tMbEjv0a7z_YiyC4dR8NllkWq7i7I83yXKxpelLX_Mm7tsEQ==&X-Bogus=DFSzswVL32UANjMQCFd32kpJlh8N&X-Gnarly=MxSdZ5heLL2VEwDPnPoCI820eJyrAdGtorKrgZJ/7yUWK9hNU7dQ0jA7JljNNraYbtz01-48HxD7LtCLpJlzVkMnF/1iw/v2OtN39IJkWMvovmysO9mDQCrSVTVotHcjHMGakIOkYBvyATf65PPZ-BYYoWCTsl3Puvnb-pws90u7dv32KJyacMhn46r8Wmfdo9rqvu33LVXm5SbwxkeqNgsUKoZlaqDeZNiZfGM7C1EerfBIpxvg8Wx9ir4uITKqDMR/jWgijq4pP2zn3S5NrfxzHE6O5OPR0JNoEXXRE051",
-        // Page 2
-        "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=lunarknight.ht&Offset=20&Limit=20&HostID=7514528621319783441&msToken=g7YTRYiIE4Abqcxk5AJZUx9-xuADKK-CPHuvHofd9VzUI8QbbKUUE355BdWD7vvGh3FJdWRshtbjznO2r4m1zgpw-f39kEt-RKrja6RsVO7GvFTc7vEGzvXMDks_iJU228wb46klug==&X-Bogus=DFSzswVL3ybANjMQCFd3fipJlhM2&X-Gnarly=Mxg15RjCuOFnTJGM0J3z--14HU0PMti3WVa0iphJ-gebi-Tr1RAReFHX95neA6ERiqDOnpzolBqtTp1s7kcbZO9X7ojm5qXDEl2/7NTbiAZImTJq1HKkf8k8nn3NO4d-kIjsEMq8BIJ4BJsW/sbZgY8UYZFjGX-GuZtM/Pg0uD5IGyUY8l2ff1IWj463zwhOCMZfULS/m3XSNn7ZZyAioT2tpRTVtUtGFgi9mHQnz3RtdmYm1mXqBOo70CVnL3l5HXxDhNa1uO0OySsyC4aMZvV7AGnGkYDK787OtnUHOrXb",
-        // Page 3
-        "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=lunarknight.ht&Offset=40&Limit=20&HostID=7514528621319783441&msToken=diUX3Y4sR6CdFciL0Iyh9kpVV2XjVNyToKeeu2bXMue07rHzvpuAJi9gx7ushZvWEw0mez0V_sBPJlGil4qcto_Dc_s5U2GrlImh6_cqJrbeP7gS7BlBWE_Kn0u4jbEo7ALyx7WD5w==&X-Bogus=DFSzswVL0GXANjMQCFd3KipJlh8U&X-Gnarly=MaEJDvhOcOqYM484R4RJJ-96wwaBtN7b6/l0e2Cn/GtwQtQmTVdygo99cr/Aty0ghOm083Ca/knRJ-Z88-JtZ8w5PJ3XmTCvgHc8/fL0SvjRRI/yDfQIX8YB49qq2g2plNlHB4GRJGT5-DT3hY/9bAhnpWjUfeVak-k01FY0a1wXANKmDpzZhB-kzp7uilvIPb859u7SLMzqsA9vD3riF6em/fGIzcThCwFzDGHPSKEhbao6KntZye5kbEgGtEZ-CRggGJ1C66DmDATSzOeIE8Uj060qF7iBu7qayWTqU/Rb"
-    ],
+    // 'lunarknight.ht': [
+    //     // Page 1
+    //     "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=lunarknight.ht&Offset=0&Limit=20&HostID=7514528621319783441&msToken=5WWH0Uu6Kuvf1yVB7eiyCG2iCP5IhnEDwAk3nP7zSPBSZWJ1maXL4idLQll4znkPdaL0p8H6p9QJQNLpis3YGDyU32tMbEjv0a7z_YiyC4dR8NllkWq7i7I83yXKxpelLX_Mm7tsEQ==&X-Bogus=DFSzswVL32UANjMQCFd32kpJlh8N&X-Gnarly=MxSdZ5heLL2VEwDPnPoCI820eJyrAdGtorKrgZJ/7yUWK9hNU7dQ0jA7JljNNraYbtz01-48HxD7LtCLpJlzVkMnF/1iw/v2OtN39IJkWMvovmysO9mDQCrSVTVotHcjHMGakIOkYBvyATf65PPZ-BYYoWCTsl3Puvnb-pws90u7dv32KJyacMhn46r8Wmfdo9rqvu33LVXm5SbwxkeqNgsUKoZlaqDeZNiZfGM7C1EerfBIpxvg8Wx9ir4uITKqDMR/jWgijq4pP2zn3S5NrfxzHE6O5OPR0JNoEXXRE051",
+    //     // Page 2
+    //     "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=lunarknight.ht&Offset=20&Limit=20&HostID=7514528621319783441&msToken=g7YTRYiIE4Abqcxk5AJZUx9-xuADKK-CPHuvHofd9VzUI8QbbKUUE355BdWD7vvGh3FJdWRshtbjznO2r4m1zgpw-f39kEt-RKrja6RsVO7GvFTc7vEGzvXMDks_iJU228wb46klug==&X-Bogus=DFSzswVL3ybANjMQCFd3fipJlhM2&X-Gnarly=Mxg15RjCuOFnTJGM0J3z--14HU0PMti3WVa0iphJ-gebi-Tr1RAReFHX95neA6ERiqDOnpzolBqtTp1s7kcbZO9X7ojm5qXDEl2/7NTbiAZImTJq1HKkf8k8nn3NO4d-kIjsEMq8BIJ4BJsW/sbZgY8UYZFjGX-GuZtM/Pg0uD5IGyUY8l2ff1IWj463zwhOCMZfULS/m3XSNn7ZZyAioT2tpRTVtUtGFgi9mHQnz3RtdmYm1mXqBOo70CVnL3l5HXxDhNa1uO0OySsyC4aMZvV7AGnGkYDK787OtnUHOrXb",
+    //     // Page 3
+    //     "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=lunarknight.ht&Offset=40&Limit=20&HostID=7514528621319783441&msToken=diUX3Y4sR6CdFciL0Iyh9kpVV2XjVNyToKeeu2bXMue07rHzvpuAJi9gx7ushZvWEw0mez0V_sBPJlGil4qcto_Dc_s5U2GrlImh6_cqJrbeP7gS7BlBWE_Kn0u4jbEo7ALyx7WD5w==&X-Bogus=DFSzswVL0GXANjMQCFd3KipJlh8U&X-Gnarly=MaEJDvhOcOqYM484R4RJJ-96wwaBtN7b6/l0e2Cn/GtwQtQmTVdygo99cr/Aty0ghOm083Ca/knRJ-Z88-JtZ8w5PJ3XmTCvgHc8/fL0SvjRRI/yDfQIX8YB49qq2g2plNlHB4GRJGT5-DT3hY/9bAhnpWjUfeVak-k01FY0a1wXANKmDpzZhB-kzp7uilvIPb859u7SLMzqsA9vD3riF6em/fGIzcThCwFzDGHPSKEhbao6KntZye5kbEgGtEZ-CRggGJ1C66DmDATSzOeIE8Uj060qF7iBu7qayWTqU/Rb"
+    // ],
     'kayzen.ht': [
         // Page 1
         "https://live-backstage.tiktok.com/creators/live/union_platform_api/union/anchor/v2/get_room_list/?DisplayID=kayzen.ht&Offset=0&Limit=20&HostID=7483391252383581205&msToken=IchJODzjpQq-JOao1i_DfGdqDqX2wTRqFqEvYsiXoV6rAC1S7Mfzfr_QqtLqGJEJnf9l0-SncmTdq0ck4Zi66msGrpPVzpHG7xxI454_Lov9ETwS2ogC3UClh1gW9vu4k2H3P1OL4w==&X-Bogus=DFSzswVLOlzANjMQCFd3zkpJlh0a&X-Gnarly=MP3g-9P/sb6puXixmtyM24V1hom70JkJJuON0CDrRl8krQyzd9BVb7IeiUeSZqjZJI2-hWoRU401wPiHknAzPSg3TN0-wXhe8UwcRELz3Ea3cNxcIUx8XLEKUH9LaFaA48v4jIpzEV2aHHpkKtlVNpxMlqh-O/3a-42NT5ImItNfYvm0EokuH2tL2DS/em29UJcJc0n4MRgzs5u8v-idqQpnV4/yms/H6qRtonZjOvj-oBbmhQPkzaxBB0EdPTfvLP7kho1ILnHaXKpTC/cZ5oalc8XIIRwvzojkaSPz6S0o",
