@@ -13,7 +13,8 @@ const usernames = [
     "silvercrystal888", "linhnhi2903", "channe0306","kz_krys", "kz_pudy.fwfw",
     "kzblue_52", "kz_mikeyyy", "bunboholic247", "hissin25", "dlee10109999",
     "minluong89", "__bintran99", "shin.nosukee", "hoithanh83", "soyaaaa.ah",
-    "wina.here", "laylaizme", "la.isyne", "ni3tui", "jyan.52hz", "eddie.ht"
+    "wina.here", "laylaizme", "la.isyne", "ni3tui","katie.0712", "jyan.52hz",
+    "nellrrel", "phwnthuy", "nyn2f", "tqi.04", "zii.zuu20.03"
 ];
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
