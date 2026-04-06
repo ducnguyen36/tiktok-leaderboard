@@ -178,29 +178,62 @@ function avatarFileExists(avatarUrl) {
 // In-flight fetch tracker to avoid duplicate TikTok fetches
 const pendingFetches = new Map();
 
+// Avatar cache: { url, fetchedAt, failed } — avoids re-fetching constantly
+const avatarCache = new Map();
+const AVATAR_CACHE_TTL = 8 * 60 * 60 * 1000;   // 8 hours for successful fetches
+const AVATAR_FAIL_TTL  = 30 * 60 * 1000;        // 30 minutes before retrying failed fetches
+
 async function resolveAvatar(avatarUrl, tiktokUsername) {
-    // If avatar URL exists and the file is present, use it
+    // If avatar URL exists and the file is present, use it directly
     if (avatarUrl && avatarFileExists(avatarUrl)) {
         return avatarUrl;
     }
 
-    // Fallback: fetch from TikTok using username
+    // No username to fall back to
     if (!tiktokUsername) return avatarUrl || '';
+
+    // Check cache — avoid re-fetching if we already tried recently
+    const cached = avatarCache.get(tiktokUsername);
+    if (cached) {
+        const age = Date.now() - cached.fetchedAt;
+        const ttl = cached.failed ? AVATAR_FAIL_TTL : AVATAR_CACHE_TTL;
+        if (age < ttl) {
+            // Cache still valid — return cached result (or empty for failures)
+            return cached.url || avatarUrl || '';
+        }
+        // Cache expired, will re-fetch below
+    }
 
     // Deduplicate concurrent fetches for the same username
     if (pendingFetches.has(tiktokUsername)) {
         return pendingFetches.get(tiktokUsername);
     }
 
-    const fetchPromise = fetchTikTokAvatar(tiktokUsername);
-    pendingFetches.set(tiktokUsername, fetchPromise);
+    const fetchPromise = (async () => {
+        try {
+            const result = await fetchTikTokAvatar(tiktokUsername);
+            // Cache the result
+            avatarCache.set(tiktokUsername, {
+                url: result || '',
+                fetchedAt: Date.now(),
+                failed: !result
+            });
+            return result || avatarUrl || '';
+        } catch (err) {
+            // Cache the failure so we don't retry immediately
+            avatarCache.set(tiktokUsername, {
+                url: '',
+                fetchedAt: Date.now(),
+                failed: true
+            });
+            return avatarUrl || '';
+        } finally {
+            pendingFetches.delete(tiktokUsername);
+        }
+    })();
 
-    try {
-        const result = await fetchPromise;
-        return result || avatarUrl || '';
-    } finally {
-        pendingFetches.delete(tiktokUsername);
-    }
+    pendingFetches.set(tiktokUsername, fetchPromise);
+    return fetchPromise;
 }
 
 // ==========================================
