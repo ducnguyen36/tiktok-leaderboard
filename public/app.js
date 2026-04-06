@@ -58,7 +58,10 @@ document.addEventListener('DOMContentLoaded', () => {
     updateUIFromConfig();
     requestWakeLock();
 
-    // Connect SSE for real-time updates (falls back to polling)
+    // Fetch data immediately on load (don't wait for SSE handshake)
+    fetchData();
+
+    // Then connect SSE for real-time updates (falls back to polling)
     connectSSE();
 });
 
