@@ -47,15 +47,19 @@ app.get('/userdata/avatars/:filename', (req, res) => {
 // --- MongoDB Connection ---
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 let db = null;
+let mongoClient = null;
+
+// --- SSE (Server-Sent Events) for real-time push ---
+const sseClients = new Set();
 
 async function connectDB() {
     try {
         console.log('[Database] Connecting to MongoDB...');
-        const client = new MongoClient(MONGODB_URI);
-        await client.connect();
+        mongoClient = new MongoClient(MONGODB_URI);
+        await mongoClient.connect();
 
         const uriDb = new URL(MONGODB_URI.replace('mongodb+srv://', 'https://')).pathname.slice(1);
-        db = client.db(uriDb || 'helioscontrol');
+        db = mongoClient.db(uriDb || 'helioscontrol');
 
         console.log(`[Database] Connected to: ${db.databaseName}`);
 
@@ -407,7 +411,177 @@ async function aggregateGroup(startMs, talentToProfile, profileMap, profileNameT
 }
 
 // ==========================================
-// API: LEADERBOARD
+// SHARED AGGREGATION (used by API + SSE push)
+// ==========================================
+let lastResetHour = 6; // default, updated from client requests
+
+async function buildLeaderboardData(resetHour) {
+    const now = new Date();
+
+    // Daily boundary
+    const dailyStart = new Date(now);
+    dailyStart.setHours(resetHour, 0, 0, 0);
+    if (now < dailyStart) dailyStart.setDate(dailyStart.getDate() - 1);
+    const dailyStartMs = dailyStart.getTime();
+
+    // Monthly boundary
+    const monthlyStart = new Date(now.getFullYear(), now.getMonth(), 1, resetHour, 0, 0, 0);
+    const monthlyStartMs = monthlyStart.getTime();
+
+    // Load profiles
+    const profiles = await loadProfiles();
+    const talentAvatarMap = buildTalentAvatars(profiles);
+    const profileMap = buildProfileMap(profiles);
+    const talentToProfile = buildTalentToProfileMap(profiles);
+    const profileNameToId = buildProfileNameToIdMap(profiles);
+
+    // Run all 4 aggregations
+    const [individualDaily, individualMonthly, groupDaily, groupMonthly] = await Promise.all([
+        aggregateIndividual(dailyStartMs, talentAvatarMap, profileNameToId),
+        aggregateIndividual(monthlyStartMs, talentAvatarMap, profileNameToId),
+        aggregateGroup(dailyStartMs, talentToProfile, profileMap, profileNameToId),
+        aggregateGroup(monthlyStartMs, talentToProfile, profileMap, profileNameToId)
+    ]);
+
+    // Format individual: resolve avatar with TikTok fallback
+    async function formatIndividual(raw) {
+        return Promise.all(raw.map(async entry => {
+            const talentInfo = talentAvatarMap[entry._id] || {};
+            const avatar = await resolveAvatar(talentInfo.avatarUrl, talentInfo.uniqueId);
+            return {
+                name: entry._id,
+                value: entry.totalDiamonds,
+                avatar
+            };
+        }));
+    }
+
+    // Format group: use profile avatar with TikTok fallback
+    async function formatGroup(raw) {
+        return Promise.all(raw.map(async entry => {
+            const pInfo = profileMap[entry._id] || {};
+            const avatar = await resolveAvatar(pInfo.avatar, pInfo.username);
+            return {
+                name: entry.name,
+                value: entry.totalDiamonds,
+                avatar
+            };
+        }));
+    }
+
+    const [indDaily, indMonthly, grpDaily, grpMonthly] = await Promise.all([
+        formatIndividual(individualDaily),
+        formatIndividual(individualMonthly),
+        formatGroup(groupDaily),
+        formatGroup(groupMonthly)
+    ]);
+
+    return {
+        individual: { daily: indDaily, monthly: indMonthly },
+        group: { daily: grpDaily, monthly: grpMonthly }
+    };
+}
+
+// ==========================================
+// SSE: REAL-TIME PUSH TO BROWSERS
+// ==========================================
+function broadcastLeaderboard(data) {
+    const message = `data: ${JSON.stringify({ status: 'ok', data })}\n\n`;
+    for (const client of sseClients) {
+        try {
+            client.write(message);
+        } catch (e) {
+            sseClients.delete(client);
+        }
+    }
+    if (sseClients.size > 0) {
+        console.log(`[SSE] Pushed update to ${sseClients.size} client(s)`);
+    }
+}
+
+app.get('/api/leaderboard/stream', (req, res) => {
+    // SSE headers
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*'
+    });
+
+    // Keep-alive
+    res.write(':ok\n\n');
+
+    // Track client
+    sseClients.add(res);
+    console.log(`[SSE] Client connected (${sseClients.size} total)`);
+
+    // Send initial data immediately
+    if (db) {
+        buildLeaderboardData(lastResetHour)
+            .then(data => {
+                res.write(`data: ${JSON.stringify({ status: 'ok', data })}\n\n`);
+            })
+            .catch(err => {
+                console.error('[SSE] Initial data error:', err.message);
+            });
+    }
+
+    // Cleanup on disconnect
+    req.on('close', () => {
+        sseClients.delete(res);
+        console.log(`[SSE] Client disconnected (${sseClients.size} remaining)`);
+    });
+});
+
+// ==========================================
+// CHANGE STREAMS: WATCH MongoDB FOR CHANGES
+// ==========================================
+let debounceTimer = null;
+
+function startChangeStreams() {
+    if (!db) return;
+
+    // Watch gifts collection
+    const giftsStream = db.collection('gifts').watch([], { fullDocument: 'updateLookup' });
+    giftsStream.on('change', (change) => {
+        console.log(`[ChangeStream] Gift ${change.operationType}`);
+        debouncedBroadcast();
+    });
+    giftsStream.on('error', (err) => {
+        console.error('[ChangeStream] Gifts stream error:', err.message);
+        // Restart after delay
+        setTimeout(() => startChangeStreams(), 5000);
+    });
+
+    // Watch profiles collection
+    const profilesStream = db.collection('profiles').watch([], { fullDocument: 'updateLookup' });
+    profilesStream.on('change', (change) => {
+        console.log(`[ChangeStream] Profile ${change.operationType}`);
+        debouncedBroadcast();
+    });
+    profilesStream.on('error', (err) => {
+        console.error('[ChangeStream] Profiles stream error:', err.message);
+    });
+
+    console.log('[ChangeStream] Watching gifts + profiles collections for real-time updates');
+}
+
+function debouncedBroadcast() {
+    // Debounce: wait 500ms after last change before re-aggregating
+    // This prevents 100 rapid gifts from triggering 100 re-aggregations
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(async () => {
+        try {
+            const data = await buildLeaderboardData(lastResetHour);
+            broadcastLeaderboard(data);
+        } catch (err) {
+            console.error('[ChangeStream] Broadcast error:', err.message);
+        }
+    }, 500);
+}
+
+// ==========================================
+// API: LEADERBOARD (polling fallback)
 // ==========================================
 app.get('/api/leaderboard', async (req, res) => {
     if (!db) {
@@ -416,73 +590,11 @@ app.get('/api/leaderboard', async (req, res) => {
 
     try {
         const resetHour = parseInt(req.query.resetHour) || 6;
-        const now = new Date();
+        lastResetHour = resetHour; // Save for SSE broadcasts
 
-        // Daily boundary
-        const dailyStart = new Date(now);
-        dailyStart.setHours(resetHour, 0, 0, 0);
-        if (now < dailyStart) dailyStart.setDate(dailyStart.getDate() - 1);
-        const dailyStartMs = dailyStart.getTime();
+        const data = await buildLeaderboardData(resetHour);
 
-        // Monthly boundary
-        const monthlyStart = new Date(now.getFullYear(), now.getMonth(), 1, resetHour, 0, 0, 0);
-        const monthlyStartMs = monthlyStart.getTime();
-
-        // Load profiles
-        const profiles = await loadProfiles();
-        const talentAvatarMap = buildTalentAvatars(profiles);
-        const profileMap = buildProfileMap(profiles);
-        const talentToProfile = buildTalentToProfileMap(profiles);
-        const profileNameToId = buildProfileNameToIdMap(profiles);
-
-        // Run all 4 aggregations (pass full profile/talent data so 0-diamond entries are included)
-        const [individualDaily, individualMonthly, groupDaily, groupMonthly] = await Promise.all([
-            aggregateIndividual(dailyStartMs, talentAvatarMap, profileNameToId),
-            aggregateIndividual(monthlyStartMs, talentAvatarMap, profileNameToId),
-            aggregateGroup(dailyStartMs, talentToProfile, profileMap, profileNameToId),
-            aggregateGroup(monthlyStartMs, talentToProfile, profileMap, profileNameToId)
-        ]);
-
-        // Format individual: resolve avatar with TikTok fallback
-        async function formatIndividual(raw) {
-            return Promise.all(raw.map(async entry => {
-                const talentInfo = talentAvatarMap[entry._id] || {};
-                const avatar = await resolveAvatar(talentInfo.avatarUrl, talentInfo.uniqueId);
-                return {
-                    name: entry._id,
-                    value: entry.totalDiamonds,
-                    avatar
-                };
-            }));
-        }
-
-        // Format group: use profile avatar with TikTok fallback (profile username)
-        async function formatGroup(raw) {
-            return Promise.all(raw.map(async entry => {
-                const pInfo = profileMap[entry._id] || {};
-                const avatar = await resolveAvatar(pInfo.avatar, pInfo.username);
-                return {
-                    name: entry.name,
-                    value: entry.totalDiamonds,
-                    avatar
-                };
-            }));
-        }
-
-        const [indDaily, indMonthly, grpDaily, grpMonthly] = await Promise.all([
-            formatIndividual(individualDaily),
-            formatIndividual(individualMonthly),
-            formatGroup(groupDaily),
-            formatGroup(groupMonthly)
-        ]);
-
-        res.json({
-            status: 'ok',
-            data: {
-                individual: { daily: indDaily, monthly: indMonthly },
-                group: { daily: grpDaily, monthly: grpMonthly }
-            }
-        });
+        res.json({ status: 'ok', data });
     } catch (err) {
         console.error('[Leaderboard] Error:', err);
         res.json({ status: 'error', message: err.message });
@@ -500,7 +612,11 @@ connectDB()
         app.listen(PORT, '0.0.0.0', () => {
             console.log(`✅ Leaderboard server running at http://0.0.0.0:${PORT}`);
             console.log(`📁 Avatars: Electron=${ELECTRON_AVATARS} | Dev=${DEV_AVATARS} | Local=${LOCAL_AVATARS}`);
+            console.log(`🔴 SSE endpoint: /api/leaderboard/stream`);
         });
+
+        // Start watching MongoDB for changes
+        startChangeStreams();
     })
     .catch(err => {
         console.error('Failed to start server:', err.message);

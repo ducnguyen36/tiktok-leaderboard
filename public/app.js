@@ -52,39 +52,113 @@ let config = {
 document.addEventListener('DOMContentLoaded', () => {
     loadSavedSettings();
     detectTV();
-    fetchData();
     startClock();
     startCycleTimer();
     setupInteractionListeners();
     updateUIFromConfig();
     requestWakeLock();
 
-    // Poll for updates (near real-time)
-    setInterval(fetchData, (config.refreshInterval || 10) * 1000);
+    // Connect SSE for real-time updates (falls back to polling)
+    connectSSE();
 });
 
 // ==========================================
-// DATA FETCHING
+// REAL-TIME: SSE (primary) + POLLING (fallback)
 // ==========================================
+let eventSource = null;
+let pollingInterval = null;
+let isSSEConnected = false;
+
+function connectSSE() {
+    if (!window.EventSource) {
+        console.log('[SSE] Not supported, using polling');
+        startPolling();
+        return;
+    }
+
+    console.log('[SSE] Connecting to /api/leaderboard/stream...');
+    eventSource = new EventSource('/api/leaderboard/stream');
+
+    eventSource.onmessage = (event) => {
+        try {
+            const json = JSON.parse(event.data);
+            if (json.status === 'ok') {
+                rawData = json.data;
+                renderLeaderboard();
+                updateConnectionStatus('live');
+
+                // Hide loader
+                const loader = document.getElementById('header-loader');
+                if (loader) loader.classList.add('hidden');
+            }
+        } catch (err) {
+            console.error('[SSE] Parse error:', err);
+        }
+    };
+
+    eventSource.onopen = () => {
+        console.log('[SSE] Connected — receiving real-time updates');
+        isSSEConnected = true;
+        updateConnectionStatus('live');
+
+        // Stop polling if it was running as fallback
+        if (pollingInterval) {
+            clearInterval(pollingInterval);
+            pollingInterval = null;
+        }
+    };
+
+    eventSource.onerror = () => {
+        console.warn('[SSE] Connection lost, falling back to polling');
+        isSSEConnected = false;
+        updateConnectionStatus('polling');
+
+        // SSE will auto-reconnect, but start polling as backup
+        if (!pollingInterval) {
+            startPolling();
+        }
+    };
+}
+
+function startPolling() {
+    // Initial fetch
+    fetchData();
+    // Poll at configured interval
+    pollingInterval = setInterval(fetchData, (config.refreshInterval || 10) * 1000);
+    updateConnectionStatus('polling');
+}
+
+function updateConnectionStatus(mode) {
+    const el = document.getElementById('footer-connection');
+    if (!el) return;
+    if (mode === 'live') {
+        el.textContent = '🟢 LIVE';
+        el.style.color = '#4ade80';
+    } else {
+        el.textContent = '🟡 POLL';
+        el.style.color = '#facc15';
+    }
+}
+
 async function fetchData() {
     const loader = document.getElementById('header-loader');
     try {
-        loader.classList.remove('hidden');
+        if (loader) loader.classList.remove('hidden');
         const response = await fetch(`/api/leaderboard?resetHour=${config.resetHour}`);
         const json = await response.json();
 
         if (json.status === 'error') {
             console.error('API Error:', json.message);
-            loader.classList.add('hidden');
+            if (loader) loader.classList.add('hidden');
             return;
         }
 
         rawData = json.data;
         renderLeaderboard();
-        loader.classList.add('hidden');
+        if (loader) loader.classList.add('hidden');
     } catch (error) {
         console.error('Fetch error:', error);
-        loader.classList.add('hidden');
+        if (loader) loader.classList.add('hidden');
     }
 }
 

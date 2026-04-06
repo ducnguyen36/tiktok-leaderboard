@@ -50,12 +50,10 @@ services:
     depends_on:
       leaderboard:
         condition: service_healthy
-    # --- Option A: Quick Tunnel (temporary random URL) ---
-    # Uncomment this if you DON'T have a Cloudflare token:
+    # --- Option A: Quick Tunnel (free, no domain needed) ---
     command: tunnel --no-autoupdate --url http://leaderboard:5000
 
-    # --- Option B: Named Tunnel (permanent custom domain) ---
-    # Comment out Option A above and uncomment this:
+    # --- Option B: Named Tunnel (requires domain + token in .env) ---
     # command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
 
 volumes:
