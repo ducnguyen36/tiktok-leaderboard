@@ -1,47 +1,17 @@
 {
-  "name": "tiktok-tv-leaderboard",
-  "version": "0.1.0",
+  "name": "helios-leaderboard",
+  "version": "2.0.0",
   "private": true,
+  "description": "Unified TikTok talent leaderboard — MongoDB-backed, dual-theme, 4 tabs",
+  "main": "server.js",
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
-    "http-proxy-middleware": "^2.0.9",
-    "lucide-react": "^0.263.1",
-    "node-fetch": "^3.3.2",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-scripts": "5.0.1",
-    "request": "^2.88.2",
-    "web-vitals": "^2.1.4"
+    "mongodb": "^6.12.0"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test",
-    "eject": "react-scripts eject"
-  },
-  "eslintConfig": {
-    "extends": [
-      "react-app",
-      "react-app/jest"
-    ]
-  },
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
-  },
-  "devDependencies": {
-    "autoprefixer": "^10.4.14",
-    "postcss": "^8.4.27",
-    "tailwindcss": "^3.3.3"
+    "start": "node server.js",
+    "dev": "node server.js"
   }
 }

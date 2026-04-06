@@ -1,4 +1,20 @@
-version: '3.8'
+# ============================================
+# Helios Leaderboard — Docker Compose
+# App + Cloudflare Tunnel (free, no port forwarding)
+# ============================================
+#
+# SETUP:
+# 1. Copy .env.example to .env and fill in your values
+# 2. For Cloudflare Quick Tunnel (temporary URL):
+#      docker compose up -d
+#      docker logs cloudflare-tunnel   # <-- grab the *.trycloudflare.com URL
+#
+# 3. For Cloudflare Named Tunnel (permanent domain):
+#      - Go to https://one.dash.cloudflare.com → Networks → Tunnels
+#      - Create a tunnel and copy the token
+#      - Set CLOUDFLARE_TUNNEL_TOKEN in your .env
+#      - docker compose up -d
+# ============================================
 
 services:
   leaderboard:
@@ -6,25 +22,42 @@ services:
     container_name: helios-leaderboard
     restart: unless-stopped
     ports:
-      # Map container port 5000 to host port 5050 (Avoids Synology DSM port 5000 conflict)
-      - "5050:5000"
+      # Map to 5050 on NAS to avoid Synology DSM port 5000 conflict
+      - "${HOST_PORT:-5050}:5000"
     environment:
       - NODE_ENV=production
-      - TIKTOK_SESSION_ID=${TIKTOK_SESSION_ID}
+      - MONGODB_URI=${MONGODB_URI}
+      - PORT=5000
+      - NODE_TLS_REJECT_UNAUTHORIZED=0
+    volumes:
+      # Persist avatar cache across restarts
+      - avatar-cache:/app/avatars
     healthcheck:
-      test: [ "CMD", "wget", "-q", "--spider", "http://localhost:5000/api/leaderboard?type=monthly" ]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:5000/api/leaderboard?resetHour=6').then(r=>{if(!r.ok)throw 1;process.exit(0)}).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 15s
+
   # ============================================
-  # CLOUDFLARE TUNNEL - Access from anywhere!
-  # Free, secure, no port forwarding needed
+  # CLOUDFLARE TUNNEL — Free HTTPS access
+  # No port forwarding, works behind CGNAT/NAS
   # ============================================
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: cloudflare-tunnel
     restart: unless-stopped
-    # Run Quick Tunnel (No token needed, works through CGNAT)
-    command: tunnel --url http://leaderboard:5000
     depends_on:
-      - leaderboard
+      leaderboard:
+        condition: service_healthy
+    # --- Option A: Quick Tunnel (temporary random URL) ---
+    # Uncomment this if you DON'T have a Cloudflare token:
+    command: tunnel --no-autoupdate --url http://leaderboard:5000
+
+    # --- Option B: Named Tunnel (permanent custom domain) ---
+    # Comment out Option A above and uncomment this:
+    # command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+
+volumes:
+  avatar-cache:
+    driver: local

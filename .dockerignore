@@ -2,9 +2,6 @@
 node_modules
 npm-debug.log
 
-# Build output (will be created during Docker build)
-build
-
 # Git
 .git
 .gitignore
@@ -12,22 +9,46 @@ build
 # IDE
 .vscode
 .idea
+.gemini
 
-# Test files
+# Test / debug files
 *.test.js
 test-api.js
 test-api2.js
 testserver.js
+debug_avatar.js
+check_gifts.js
+server copy.js
 
-# Environment files with secrets (if any)
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# Old HTML files (not needed in container)
+individual-leaderboard.html
+tiktok-leaderboard.html
+tiktok-leaderboard (1).html
+tiktok_response.html
+avatar_urls.csv
+avatar_urls.bak.csv
+
+# Local avatar cache (volume-mounted in production)
+avatars
+
+# Legacy React/Tailwind files
+src
+build
+postcss.config.js
+tailwind.config.js
+
+# Environment files (passed via docker-compose)
+.env
+.env.*
 
 # OS files
 .DS_Store
 Thumbs.db
+
+# Docker files
+Dockerfile
+docker-compose.yml
+.dockerignore
 
 # Documentation
 README.md
