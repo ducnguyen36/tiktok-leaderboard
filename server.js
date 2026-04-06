@@ -274,12 +274,16 @@ function buildProfileNameToIdMap(profiles) {
 // ==========================================
 
 // Individual: returns all talents from profiles, merging gift totals (0 if no gifts)
-async function aggregateIndividual(startMs, talentAvatarMap) {
-    // Get gift totals from DB
+// Excludes profile-name gifts (those belong to group only)
+async function aggregateIndividual(startMs, talentAvatarMap, profileNameToId) {
+    // Get gift totals from DB — exclude 'Group', 'Unassigned', and profile names
+    const allProfileNames = Object.keys(profileNameToId);
+    const excludeList = ['Group', 'Unassigned', null, ...allProfileNames];
+
     const giftTotals = await db.collection('gifts').aggregate([
         { $match: { timeStamp: { $gte: startMs }, 'user.userId': { $ne: 'Manual' } } },
         { $group: { _id: '$receivedTalent', totalDiamonds: { $sum: '$cost' } } },
-        { $match: { _id: { $ne: null, $nin: ['Group', 'Unassigned', null] } } }
+        { $match: { _id: { $ne: null, $nin: excludeList } } }
     ]).toArray();
 
     // Build a map of gift totals by talent name
@@ -433,8 +437,8 @@ app.get('/api/leaderboard', async (req, res) => {
 
         // Run all 4 aggregations (pass full profile/talent data so 0-diamond entries are included)
         const [individualDaily, individualMonthly, groupDaily, groupMonthly] = await Promise.all([
-            aggregateIndividual(dailyStartMs, talentAvatarMap),
-            aggregateIndividual(monthlyStartMs, talentAvatarMap),
+            aggregateIndividual(dailyStartMs, talentAvatarMap, profileNameToId),
+            aggregateIndividual(monthlyStartMs, talentAvatarMap, profileNameToId),
             aggregateGroup(dailyStartMs, talentToProfile, profileMap, profileNameToId),
             aggregateGroup(monthlyStartMs, talentToProfile, profileMap, profileNameToId)
         ]);

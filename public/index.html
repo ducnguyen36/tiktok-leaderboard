@@ -132,6 +132,34 @@
                     </div>
                 </div>
 
+                <div class="settings-section">
+                    <div class="settings-title">Podium Slots (Top N)</div>
+                    <div class="input-group">
+                        <i class="fas fa-trophy" style="color:var(--text-secondary)"></i>
+                        <input type="number" class="settings-input" id="podium-slots" min="1" max="5" value="5"
+                            onchange="updateConfigValue('podiumSlots', this.value); renderLeaderboard()">
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <div class="settings-title">List Columns</div>
+                    <div class="input-group">
+                        <i class="fas fa-columns" style="color:var(--text-secondary)"></i>
+                        <input type="number" class="settings-input" id="list-columns" min="1" max="5" value="3"
+                            onchange="updateConfigValue('listColumns', this.value); renderLeaderboard()">
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <div class="settings-title">Refresh Interval</div>
+                    <div class="input-group">
+                        <i class="fas fa-wifi" style="color:var(--text-secondary)"></i>
+                        <input type="number" class="settings-input" id="refresh-interval" min="5" max="60" value="10"
+                            onchange="updateConfigValue('refreshInterval', this.value)">
+                        <span style="color:var(--text-secondary); font-size: 0.85rem;">sec</span>
+                    </div>
+                </div>
+
                 <div class="settings-section" style="border-top: 1px solid var(--border-color); padding-top: 16px;">
                     <button class="save-default-btn" onclick="saveAsDefault()">
                         <i class="fas fa-save"></i> Save as Default

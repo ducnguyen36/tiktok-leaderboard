@@ -40,7 +40,10 @@ let config = {
     },
     cycleDuration: 10,
     resetHour: 6,
-    rotation: 0
+    rotation: 0,
+    podiumSlots: 5,
+    listColumns: 3,
+    refreshInterval: 10
 };
 
 // ==========================================
@@ -56,8 +59,8 @@ document.addEventListener('DOMContentLoaded', () => {
     updateUIFromConfig();
     requestWakeLock();
 
-    // Poll for updates every 60 seconds
-    setInterval(fetchData, 60000);
+    // Poll for updates (near real-time)
+    setInterval(fetchData, (config.refreshInterval || 10) * 1000);
 });
 
 // ==========================================
@@ -152,11 +155,16 @@ function renderLeaderboard() {
 
     const showIncome = config.showIncome[tabKey];
     const showAvatars = config.showAvatars[tabKey];
+    const podiumCount = Math.min(config.podiumSlots || 5, data.length);
+    const cols = config.listColumns || 3;
 
-    // --- Render Top 5 (Podium) ---
-    const top5 = data.slice(0, 5);
+    // Apply list column count via CSS custom property
+    listContainer.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
 
-    top5.forEach((idol, index) => {
+    // --- Render Podium (Top N) ---
+    const topN = data.slice(0, podiumCount);
+
+    topN.forEach((idol, index) => {
         const rank = index + 1;
         const card = document.createElement('div');
         card.className = `podium-card rank-${rank}`;
@@ -180,11 +188,11 @@ function renderLeaderboard() {
         podiumContainer.appendChild(card);
     });
 
-    // --- Render Rank 6+ (List) ---
-    const rest = data.slice(5);
+    // --- Render Rank N+1 and below (List) ---
+    const rest = data.slice(podiumCount);
 
     rest.forEach((idol, index) => {
-        const rank = index + 6;
+        const rank = index + podiumCount + 1;
         const item = document.createElement('div');
         item.className = 'list-item';
 
@@ -328,6 +336,14 @@ function updateUIFromConfig() {
     document.getElementById('reset-hour').value = config.resetHour;
     const rotInput = document.getElementById('rotation-deg');
     if (rotInput) rotInput.value = rotation;
+
+    // Layout settings
+    const podiumInput = document.getElementById('podium-slots');
+    if (podiumInput) podiumInput.value = config.podiumSlots || 5;
+    const colInput = document.getElementById('list-columns');
+    if (colInput) colInput.value = config.listColumns || 3;
+    const refreshInput = document.getElementById('refresh-interval');
+    if (refreshInput) refreshInput.value = config.refreshInterval || 10;
 
     // Footer
     document.getElementById('footer-cycle').textContent = config.cycleDuration + 's';
