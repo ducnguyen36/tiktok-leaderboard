@@ -39,7 +39,7 @@ let config = {
         'individual-daily': true
     },
     cycleDuration: 10,
-    resetHour: 6,
+    resetHour: 0,
     rotation: 0,
     podiumSlots: 5,
     listColumns: 3,
@@ -357,6 +357,17 @@ function toggleSettings() {
     modal.classList.toggle('hidden');
 }
 
+// Close settings when clicking outside the panel
+document.addEventListener('DOMContentLoaded', () => {
+    const modal = document.getElementById('settings-modal');
+    modal.addEventListener('click', (e) => {
+        // Only close if clicking the backdrop itself, not the content
+        if (e.target === modal) {
+            modal.classList.add('hidden');
+        }
+    });
+});
+
 function toggleConfig(category, key) {
     config[category][key] = !config[category][key];
     updateUIFromConfig();
@@ -375,7 +386,8 @@ function toggleConfig(category, key) {
 }
 
 function updateConfigValue(key, value) {
-    config[key] = parseInt(value) || config[key];
+    const parsed = parseInt(value);
+    config[key] = isNaN(parsed) ? config[key] : parsed;
     if (key === 'cycleDuration') {
         timeLeft = config.cycleDuration;
         document.getElementById('footer-cycle').textContent = config.cycleDuration + 's';

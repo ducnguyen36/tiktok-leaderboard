@@ -4,6 +4,9 @@
 # ============================================
 FROM node:22-slim
 
+# Install timezone data (slim image doesn't include it)
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Copy package files and install production deps only
@@ -23,9 +26,8 @@ VOLUME /app/avatars
 # Expose port (default 5000)
 EXPOSE 5000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD node -e "fetch('http://localhost:5000/api/leaderboard?resetHour=6').then(r=>{if(!r.ok)throw new Error();process.exit(0)}).catch(()=>process.exit(1))"
+# Health check is defined in docker-compose.yml (uses /api/health)
+# Do NOT define HEALTHCHECK here — it would override compose
 
 # Start server
 CMD ["node", "server.js"]

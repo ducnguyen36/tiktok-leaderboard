@@ -44,6 +44,42 @@ app.get('/userdata/avatars/:filename', (req, res) => {
     res.status(404).send('Avatar not found');
 });
 
+// --- Health Check (lightweight, no aggregation) ---
+app.get('/api/health', (req, res) => {
+    res.json({ status: db ? 'ok' : 'no_db', uptime: process.uptime() });
+});
+
+// --- Debug: compare time boundaries and gift counts ---
+app.get('/api/debug', async (req, res) => {
+    if (!db) return res.json({ error: 'no db' });
+    // if (!db) return res.status(503).json({ status: 'error', error: 'Database not connected' });
+
+   
+        const parsed = parseInt(req.query.resetHour);
+        const resetHour = isNaN(parsed) ? 0 : parsed;
+        const now = new Date();
+
+        const dailyStart = new Date(now);
+        dailyStart.setHours(resetHour, 0, 0, 0);
+        if (now < dailyStart) dailyStart.setDate(dailyStart.getDate() - 1);
+
+        const monthlyStart = new Date(now.getFullYear(), now.getMonth(), 1, resetHour, 0, 0, 0);
+
+        const totalGifts = await db.collection('gifts').countDocuments();
+        const dailyGifts = await db.collection('gifts').countDocuments({ timeStamp: { $gte: dailyStart.getTime() } });
+        const monthlyGifts = await db.collection('gifts').countDocuments({ timeStamp: { $gte: monthlyStart.getTime() } });
+
+        res.json({
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            now: now.toISOString(),
+            nowLocal: now.toString(),
+            dailyStart: { iso: dailyStart.toISOString(), local: dailyStart.toString(), ms: dailyStart.getTime() },
+            monthlyStart: { iso: monthlyStart.toISOString(), local: monthlyStart.toString(), ms: monthlyStart.getTime() },
+            giftCounts: { total: totalGifts, daily: dailyGifts, monthly: monthlyGifts }
+        });
+   
+});
+
 // --- MongoDB Connection ---
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 let db = null;
@@ -181,7 +217,7 @@ const pendingFetches = new Map();
 // Avatar cache: { url, fetchedAt, failed } — avoids re-fetching constantly
 const avatarCache = new Map();
 const AVATAR_CACHE_TTL = 8 * 60 * 60 * 1000;   // 8 hours for successful fetches
-const AVATAR_FAIL_TTL  = 30 * 60 * 1000;        // 30 minutes before retrying failed fetches
+const AVATAR_FAIL_TTL = 30 * 60 * 1000;        // 30 minutes before retrying failed fetches
 
 async function resolveAvatar(avatarUrl, tiktokUsername) {
     // If avatar URL exists and the file is present, use it directly
@@ -367,15 +403,9 @@ function resolveGiftTalents(gift, uidToTalent) {
 // AGGREGATION — INDIVIDUAL
 // Fetches raw gifts and processes in JS to handle multi-talent splitting + UID resolution
 // ==========================================
-async function aggregateIndividual(startMs, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile) {
+function aggregateIndividual(gifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile) {
     const allProfileNames = Object.keys(profileNameToId);
     const allTalentNames = Object.keys(talentAvatarMap);
-
-    // Fetch raw gifts (not grouped — we need to split multi-talent)
-    const gifts = await db.collection('gifts').find({
-        timeStamp: { $gte: startMs },
-        'user.userId': { $ne: 'Manual' }
-    }).toArray();
 
     // Accumulate diamonds per talent (individual gifts)
     const talentTotals = {};
@@ -449,17 +479,11 @@ async function aggregateIndividual(startMs, talentAvatarMap, profileNameToId, ui
     }
 
     // Merge with all known talents (ensure 0-diamond entries appear)
+    // Only include talents registered in profiles — old/renamed nicknames are excluded
     const results = allTalentNames.map(name => ({
         _id: name,
         totalDiamonds: talentTotals[name] || 0
     }));
-
-    // Also include talents from gifts that aren't in profiles (edge case)
-    for (const [name, total] of Object.entries(talentTotals)) {
-        if (!talentAvatarMap[name] && !allProfileNames.includes(name) && name !== 'Group' && name !== 'Unassigned') {
-            results.push({ _id: name, totalDiamonds: total });
-        }
-    }
 
     results.sort((a, b) => b.totalDiamonds - a.totalDiamonds || a._id.localeCompare(b._id));
     return results.slice(0, 50);
@@ -470,18 +494,12 @@ async function aggregateIndividual(startMs, talentAvatarMap, profileNameToId, ui
 // Accumulates total income per profile (talent gifts + group gifts + profile-name gifts)
 // Supports multi-talent splitting and UID-based resolution
 // ==========================================
-async function aggregateGroup(startMs, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile) {
+async function aggregateGroup(gifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile) {
     // Start with ALL profiles at 0
     const profileTotals = {};
     for (const [pid, pInfo] of Object.entries(profileMap)) {
         profileTotals[pid] = { name: pInfo.name, totalDiamonds: 0 };
     }
-
-    // Fetch raw gifts
-    const gifts = await db.collection('gifts').find({
-        timeStamp: { $gte: startMs },
-        'user.userId': { $ne: 'Manual' }
-    }).toArray();
 
     // Track unresolved group gifts by session for legacy fallback
     const unresolvedBySession = {}; // sessionId -> total
@@ -586,7 +604,7 @@ async function aggregateGroup(startMs, talentToProfile, profileMap, profileNameT
 // ==========================================
 // SHARED AGGREGATION (used by API + SSE push)
 // ==========================================
-let lastResetHour = 6; // default, updated from client requests
+let lastResetHour = 0; // default, updated from client requests
 
 async function buildLeaderboardData(resetHour) {
     const now = new Date();
@@ -609,12 +627,24 @@ async function buildLeaderboardData(resetHour) {
     const profileNameToId = buildProfileNameToIdMap(profiles);
     const { uidToTalent, uidToProfile } = buildUidMaps(profiles);
 
-    // Run all 4 aggregations
+    // Fetch gifts ONCE per time window (major perf optimization)
+    const [dailyGifts, monthlyGifts] = await Promise.all([
+        db.collection('gifts').find(
+            { timeStamp: { $gte: dailyStartMs }, 'user.userId': { $ne: 'Manual' } },
+            { projection: { receivedTalent: 1, receivedTalents: 1, receivedTalentUid: 1, toMemberUid: 1, cost: 1, sessionId: 1, timeStamp: 1 } }
+        ).toArray(),
+        db.collection('gifts').find(
+            { timeStamp: { $gte: monthlyStartMs }, 'user.userId': { $ne: 'Manual' } },
+            { projection: { receivedTalent: 1, receivedTalents: 1, receivedTalentUid: 1, toMemberUid: 1, cost: 1, sessionId: 1, timeStamp: 1 } }
+        ).toArray()
+    ]);
+
+    // Run all 4 aggregations (reuse fetched gift arrays)
     const [individualDaily, individualMonthly, groupDaily, groupMonthly] = await Promise.all([
-        aggregateIndividual(dailyStartMs, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
-        aggregateIndividual(monthlyStartMs, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
-        aggregateGroup(dailyStartMs, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile),
-        aggregateGroup(monthlyStartMs, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile)
+        aggregateIndividual(dailyGifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
+        aggregateIndividual(monthlyGifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
+        aggregateGroup(dailyGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile),
+        aggregateGroup(monthlyGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile)
     ]);
 
     // Format individual: resolve avatar with TikTok fallback
@@ -763,7 +793,8 @@ app.get('/api/leaderboard', async (req, res) => {
     }
 
     try {
-        const resetHour = parseInt(req.query.resetHour) || 6;
+        const parsed = parseInt(req.query.resetHour);
+        const resetHour = isNaN(parsed) ? 0 : parsed;
         lastResetHour = resetHour; // Save for SSE broadcasts
 
         const data = await buildLeaderboardData(resetHour);
@@ -775,8 +806,9 @@ app.get('/api/leaderboard', async (req, res) => {
     }
 });
 
-// Catch-all: serve index.html
-app.get('*path', (req, res) => {
+// Catch-all: serve index.html (but NOT for /api/ routes)
+app.use((req, res, next) => {
+    if (req.path.startsWith('/api/')) return next();
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 

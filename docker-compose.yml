@@ -30,15 +30,16 @@ services:
       - NODE_ENV=production
       - PORT=5000
       - NODE_TLS_REJECT_UNAUTHORIZED=0
+      - TZ=Asia/Ho_Chi_Minh
     volumes:
       # Persist avatar cache across restarts
       - avatar-cache:/app/avatars
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:5000/api/leaderboard?resetHour=6').then(r=>{if(!r.ok)throw 1;process.exit(0)}).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:5000/api/health').then(r=>{if(!r.ok)throw 1;return r.json()}).then(d=>{if(d.status!=='ok')throw 1;process.exit(0)}).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 60s
 
   # ============================================
   # CLOUDFLARE TUNNEL — Free HTTPS access
@@ -53,7 +54,6 @@ services:
         condition: service_healthy
     # --- Option A: Quick Tunnel (free, no domain needed) ---
     command: tunnel --no-autoupdate --url http://leaderboard:5000
-
     # --- Option B: Named Tunnel (requires domain + token in .env) ---
     # command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
 

@@ -7,16 +7,31 @@ async function main() {
     await c.connect();
     const db = c.db('helioscontrol');
 
-    const profiles = await db.collection('profiles').find().toArray();
-    profiles.forEach(p => {
-        console.log(`\n=== Profile: ${p.name} ===`);
-        console.log('talents type:', typeof p.talents, Array.isArray(p.talents) ? 'array' : '');
-        // Show raw structure
-        if (p.talents) {
-            const entries = Array.isArray(p.talents) ? p.talents : Object.entries(p.talents);
-            console.log('talents sample:', JSON.stringify(entries.slice ? entries.slice(0, 2) : entries, null, 2));
-        }
-    });
+    const resetHour = 6;
+    const now = new Date();
+
+    const dailyStart = new Date(now);
+    dailyStart.setHours(resetHour, 0, 0, 0);
+    if (now < dailyStart) dailyStart.setDate(dailyStart.getDate() - 1);
+
+    const monthlyStart = new Date(now.getFullYear(), now.getMonth(), 1, resetHour, 0, 0, 0);
+
+    const totalGifts = await db.collection('gifts').countDocuments();
+    const dailyGifts = await db.collection('gifts').countDocuments({ timeStamp: { $gte: dailyStart.getTime() } });
+    const monthlyGifts = await db.collection('gifts').countDocuments({ timeStamp: { $gte: monthlyStart.getTime() } });
+
+    console.log('=== DEBUG INFO ===');
+    console.log('Timezone:', Intl.DateTimeFormat().resolvedOptions().timeZone);
+    console.log('Now:', now.toString());
+    console.log('Daily start:', dailyStart.toString(), '| ms:', dailyStart.getTime());
+    console.log('Monthly start:', monthlyStart.toString(), '| ms:', monthlyStart.getTime());
+    console.log('Gift counts:', { total: totalGifts, daily: dailyGifts, monthly: monthlyGifts });
+
+    // Check earliest gift timestamp
+    const earliest = await db.collection('gifts').find().sort({ timeStamp: 1 }).limit(1).toArray();
+    if (earliest.length) {
+        console.log('Earliest gift:', new Date(earliest[0].timeStamp).toString(), '| ms:', earliest[0].timeStamp);
+    }
 
     await c.close();
 }
