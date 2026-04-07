@@ -306,133 +306,273 @@ function buildProfileNameToIdMap(profiles) {
     return map;
 }
 
+// Maps talent UID -> { talentName, profileId, profileName }
+// Used to resolve gifts by UID instead of nickname
+function buildUidMaps(profiles) {
+    const uidToTalent = {};   // uid -> talentName
+    const uidToProfile = {};  // uid -> profileId
+    for (const profile of profiles) {
+        const pid = profile._id;
+        const pName = profile.name || pid.toString();
+        if (profile.talents) {
+            for (const [talentName, info] of Object.entries(profile.talents)) {
+                if (info.id) {
+                    uidToTalent[info.id] = talentName;
+                    uidToProfile[info.id] = { profileId: pid, profileName: pName };
+                }
+            }
+        }
+    }
+    return { uidToTalent, uidToProfile };
+}
+
 // ==========================================
-// AGGREGATION PIPELINES
+// GIFT ENTRY RESOLVER
+// Extracts talent names from a gift, handling all formats:
+// - New: receivedTalents: [{name, uid}, ...] (objects with UIDs)
+// - Old: receivedTalents: ["name", ...] (plain strings)
+// - Legacy: receivedTalent: "name" (single string, no array)
+// Returns: [{ name, uid }]
 // ==========================================
+function resolveGiftTalents(gift, uidToTalent) {
+    const results = [];
 
-// Individual: returns all talents from profiles, merging gift totals (0 if no gifts)
-// Excludes profile-name gifts (those belong to group only)
-async function aggregateIndividual(startMs, talentAvatarMap, profileNameToId) {
-    // Get gift totals from DB — exclude 'Group', 'Unassigned', and profile names
-    const allProfileNames = Object.keys(profileNameToId);
-    const excludeList = ['Group', 'Unassigned', null, ...allProfileNames];
-
-    const giftTotals = await db.collection('gifts').aggregate([
-        { $match: { timeStamp: { $gte: startMs }, 'user.userId': { $ne: 'Manual' } } },
-        { $group: { _id: '$receivedTalent', totalDiamonds: { $sum: '$cost' } } },
-        { $match: { _id: { $ne: null, $nin: excludeList } } }
-    ]).toArray();
-
-    // Build a map of gift totals by talent name
-    const giftMap = {};
-    for (const entry of giftTotals) {
-        giftMap[entry._id] = entry.totalDiamonds;
+    // Prefer receivedTalents array (new format)
+    if (gift.receivedTalents && Array.isArray(gift.receivedTalents) && gift.receivedTalents.length > 0) {
+        for (const entry of gift.receivedTalents) {
+            if (typeof entry === 'object' && entry.name) {
+                // {name, uid} format — resolve name by UID if possible
+                const resolvedName = (entry.uid && uidToTalent[entry.uid]) || entry.name;
+                results.push({ name: resolvedName, uid: entry.uid || '' });
+            } else {
+                // Plain string
+                results.push({ name: String(entry), uid: '' });
+            }
+        }
+        return results;
     }
 
-    // Merge: start with all known talents (from profiles), then overlay gift data
-    const allTalents = Object.keys(talentAvatarMap);
-    const results = allTalents.map(name => ({
-        _id: name,
-        totalDiamonds: giftMap[name] || 0
-    }));
+    // Fallback: single receivedTalent string
+    if (gift.receivedTalent) {
+        // Try to resolve by UID if available
+        const uid = gift.receivedTalentUid || gift.toMemberUid || '';
+        const resolvedName = (uid && uidToTalent[uid]) || gift.receivedTalent;
+        results.push({ name: resolvedName, uid });
+    }
 
-    // Also include any talents from gifts that aren't in profiles (edge case)
-    for (const entry of giftTotals) {
-        if (!talentAvatarMap[entry._id]) {
-            results.push({ _id: entry._id, totalDiamonds: entry.totalDiamonds });
+    return results;
+}
+
+// ==========================================
+// AGGREGATION — INDIVIDUAL
+// Fetches raw gifts and processes in JS to handle multi-talent splitting + UID resolution
+// ==========================================
+async function aggregateIndividual(startMs, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile) {
+    const allProfileNames = Object.keys(profileNameToId);
+    const allTalentNames = Object.keys(talentAvatarMap);
+
+    // Fetch raw gifts (not grouped — we need to split multi-talent)
+    const gifts = await db.collection('gifts').find({
+        timeStamp: { $gte: startMs },
+        'user.userId': { $ne: 'Manual' }
+    }).toArray();
+
+    // Accumulate diamonds per talent (individual gifts)
+    const talentTotals = {};
+    // Accumulate group/profile gifts per profileId for later splitting
+    const profileGroupTotals = {};
+
+    for (const gift of gifts) {
+        const talents = resolveGiftTalents(gift, uidToTalent);
+        if (talents.length === 0) continue;
+
+        // Separate individual talents vs group-level entries
+        const individualTalents = [];
+        const groupEntries = [];
+
+        for (const t of talents) {
+            if (t.name === 'Group' || t.name === 'Unassigned' || allProfileNames.includes(t.name)) {
+                groupEntries.push(t);
+            } else {
+                individualTalents.push(t);
+            }
+        }
+
+        // Process individual talents — each gets cost / total_talents_in_gift
+        if (individualTalents.length > 0) {
+            const perTalentCost = Math.floor(gift.cost / talents.length);
+            for (const t of individualTalents) {
+                talentTotals[t.name] = (talentTotals[t.name] || 0) + perTalentCost;
+            }
+        }
+
+        // Process group-level entries — accumulate for later splitting among members
+        if (groupEntries.length > 0) {
+            const perEntryCost = Math.floor(gift.cost / talents.length);
+
+            for (const t of groupEntries) {
+                // Resolve which profile this group gift belongs to
+                let pid = null;
+
+                // Try UID first
+                const uid = t.uid || gift.toMemberUid || '';
+                if (uid && uidToProfile[uid]) {
+                    pid = uidToProfile[uid].profileId;
+                }
+
+                // Try profile name match
+                if (!pid && allProfileNames.includes(t.name)) {
+                    pid = profileNameToId[t.name];
+                }
+
+                // Try talent → profile mapping (shouldn't normally hit here, but safety)
+                if (!pid && talentToProfile[t.name]) {
+                    pid = talentToProfile[t.name].profileId;
+                }
+
+                if (pid) {
+                    profileGroupTotals[pid] = (profileGroupTotals[pid] || 0) + perEntryCost;
+                }
+            }
         }
     }
 
-    // Sort by diamonds descending, then alphabetically for ties
+    // Split accumulated group gifts evenly among each profile's talent members
+    for (const [pid, groupTotal] of Object.entries(profileGroupTotals)) {
+        const pInfo = profileMap[pid];
+        if (!pInfo || !pInfo.talentNames || pInfo.talentNames.length === 0) continue;
+
+        const perMember = Math.floor(groupTotal / pInfo.talentNames.length);
+        for (const talentName of pInfo.talentNames) {
+            talentTotals[talentName] = (talentTotals[talentName] || 0) + perMember;
+        }
+    }
+
+    // Merge with all known talents (ensure 0-diamond entries appear)
+    const results = allTalentNames.map(name => ({
+        _id: name,
+        totalDiamonds: talentTotals[name] || 0
+    }));
+
+    // Also include talents from gifts that aren't in profiles (edge case)
+    for (const [name, total] of Object.entries(talentTotals)) {
+        if (!talentAvatarMap[name] && !allProfileNames.includes(name) && name !== 'Group' && name !== 'Unassigned') {
+            results.push({ _id: name, totalDiamonds: total });
+        }
+    }
+
     results.sort((a, b) => b.totalDiamonds - a.totalDiamonds || a._id.localeCompare(b._id));
     return results.slice(0, 50);
 }
 
-// Group: returns ALL profiles with TOTAL income (talent gifts + Group/profile-name gifts)
-async function aggregateGroup(startMs, talentToProfile, profileMap, profileNameToId) {
-    // Step 1: Get ALL gift totals per receivedTalent (including 'Group' and profile names)
-    const allGiftTotals = await db.collection('gifts').aggregate([
-        { $match: { timeStamp: { $gte: startMs }, 'user.userId': { $ne: 'Manual' } } },
-        { $group: { _id: '$receivedTalent', totalDiamonds: { $sum: '$cost' } } },
-        { $match: { _id: { $ne: null } } }
-    ]).toArray();
-
+// ==========================================
+// AGGREGATION — GROUP
+// Accumulates total income per profile (talent gifts + group gifts + profile-name gifts)
+// Supports multi-talent splitting and UID-based resolution
+// ==========================================
+async function aggregateGroup(startMs, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile) {
     // Start with ALL profiles at 0
     const profileTotals = {};
     for (const [pid, pInfo] of Object.entries(profileMap)) {
         profileTotals[pid] = { name: pInfo.name, totalDiamonds: 0 };
     }
 
-    // Step 2: Add talent-specific gifts AND profile-name gifts to their profile
-    for (const entry of allGiftTotals) {
-        if (entry._id === 'Group' || entry._id === 'Unassigned') continue;
+    // Fetch raw gifts
+    const gifts = await db.collection('gifts').find({
+        timeStamp: { $gte: startMs },
+        'user.userId': { $ne: 'Manual' }
+    }).toArray();
 
-        // Check if receivedTalent is a talent name
-        const talentMapping = talentToProfile[entry._id];
-        if (talentMapping) {
-            const pid = talentMapping.profileId;
-            if (!profileTotals[pid]) {
-                profileTotals[pid] = { name: talentMapping.profileName, totalDiamonds: 0 };
+    // Track unresolved group gifts by session for legacy fallback
+    const unresolvedBySession = {}; // sessionId -> total
+
+    for (const gift of gifts) {
+        const talents = resolveGiftTalents(gift, uidToTalent);
+
+        if (talents.length === 0) continue;
+
+        // Check if this is a legacy "Group" or "Unassigned" gift
+        if (talents.length === 1 && (talents[0].name === 'Group' || talents[0].name === 'Unassigned')) {
+            // Try UID-based resolution for group gifts
+            const uid = talents[0].uid || gift.toMemberUid || '';
+            if (uid && uidToProfile[uid]) {
+                const pid = uidToProfile[uid].profileId;
+                if (profileTotals[pid]) {
+                    profileTotals[pid].totalDiamonds += gift.cost;
+                }
+            } else if (talents[0].name === 'Group') {
+                // Legacy: no UID, need session-based inference
+                const sid = gift.sessionId;
+                if (sid) {
+                    unresolvedBySession[sid] = (unresolvedBySession[sid] || 0) + gift.cost;
+                }
             }
-            profileTotals[pid].totalDiamonds += entry.totalDiamonds;
             continue;
         }
 
-        // Check if receivedTalent is a profile name (new helioscontrol format)
-        const profileId = profileNameToId[entry._id];
-        if (profileId) {
-            if (!profileTotals[profileId]) {
-                profileTotals[profileId] = { name: entry._id, totalDiamonds: 0 };
+        // For each talent/entry in the gift
+        const splitCost = Math.floor(gift.cost / talents.length);
+
+        for (const t of talents) {
+            // Check by UID first
+            if (t.uid && uidToProfile[t.uid]) {
+                const pid = uidToProfile[t.uid].profileId;
+                if (profileTotals[pid]) {
+                    profileTotals[pid].totalDiamonds += splitCost;
+                }
+                continue;
             }
-            profileTotals[profileId].totalDiamonds += entry.totalDiamonds;
+
+            // Check if it's a talent name -> profile
+            const talentMapping = talentToProfile[t.name];
+            if (talentMapping) {
+                const pid = talentMapping.profileId;
+                if (!profileTotals[pid]) {
+                    profileTotals[pid] = { name: talentMapping.profileName, totalDiamonds: 0 };
+                }
+                profileTotals[pid].totalDiamonds += splitCost;
+                continue;
+            }
+
+            // Check if it's a profile name directly
+            const profileId = profileNameToId[t.name];
+            if (profileId) {
+                if (!profileTotals[profileId]) {
+                    profileTotals[profileId] = { name: t.name, totalDiamonds: 0 };
+                }
+                profileTotals[profileId].totalDiamonds += splitCost;
+            }
         }
     }
 
-    // Step 3: Handle legacy 'Group' gifts by checking session co-occurrence
-    // (New format uses profile names directly — handled in Step 2)
+    // Legacy fallback: resolve unresolved "Group" gifts by session co-occurrence
     const allProfileNames = Object.values(profileMap).map(p => p.name);
-    const groupGifts = await db.collection('gifts').aggregate([
-        { $match: { timeStamp: { $gte: startMs }, receivedTalent: 'Group', 'user.userId': { $ne: 'Manual' } } },
-        { $group: { _id: '$sessionId', groupTotal: { $sum: '$cost' } } }
-    ]).toArray();
 
-    for (const sessionGroup of groupGifts) {
-        // Find which talents are in this session (exclude Group, Unassigned, and profile names)
+    for (const [sessionId, groupTotal] of Object.entries(unresolvedBySession)) {
         const sessionTalents = await db.collection('gifts').distinct('receivedTalent', {
-            sessionId: sessionGroup._id,
+            sessionId,
             receivedTalent: { $nin: ['Group', 'Unassigned', null, ...allProfileNames] }
         });
 
-        // Determine which profile these talents belong to
         const sessionProfiles = new Set();
         for (const t of sessionTalents) {
             if (talentToProfile[t]) sessionProfiles.add(talentToProfile[t].profileId);
         }
 
         if (sessionProfiles.size === 1) {
-            // Single profile identified — assign all Group gifts to it
             const pid = [...sessionProfiles][0];
-            if (profileTotals[pid]) {
-                profileTotals[pid].totalDiamonds += sessionGroup.groupTotal;
-            }
+            if (profileTotals[pid]) profileTotals[pid].totalDiamonds += groupTotal;
         } else if (sessionProfiles.size === 0) {
-            // No talent-specific gifts in this session — try to infer from which
-            // profile was most recently updated (likely the active one)
             const sortedProfiles = Object.entries(profileMap)
                 .sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
             if (sortedProfiles.length > 0) {
                 const pid = sortedProfiles[0][0];
-                if (profileTotals[pid]) {
-                    profileTotals[pid].totalDiamonds += sessionGroup.groupTotal;
-                }
+                if (profileTotals[pid]) profileTotals[pid].totalDiamonds += groupTotal;
             }
         } else {
-            // Multiple profiles in same session (rare) — split equally
-            const share = Math.floor(sessionGroup.groupTotal / sessionProfiles.size);
+            const share = Math.floor(groupTotal / sessionProfiles.size);
             for (const pid of sessionProfiles) {
-                if (profileTotals[pid]) {
-                    profileTotals[pid].totalDiamonds += share;
-                }
+                if (profileTotals[pid]) profileTotals[pid].totalDiamonds += share;
             }
         }
     }
@@ -467,13 +607,14 @@ async function buildLeaderboardData(resetHour) {
     const profileMap = buildProfileMap(profiles);
     const talentToProfile = buildTalentToProfileMap(profiles);
     const profileNameToId = buildProfileNameToIdMap(profiles);
+    const { uidToTalent, uidToProfile } = buildUidMaps(profiles);
 
     // Run all 4 aggregations
     const [individualDaily, individualMonthly, groupDaily, groupMonthly] = await Promise.all([
-        aggregateIndividual(dailyStartMs, talentAvatarMap, profileNameToId),
-        aggregateIndividual(monthlyStartMs, talentAvatarMap, profileNameToId),
-        aggregateGroup(dailyStartMs, talentToProfile, profileMap, profileNameToId),
-        aggregateGroup(monthlyStartMs, talentToProfile, profileMap, profileNameToId)
+        aggregateIndividual(dailyStartMs, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
+        aggregateIndividual(monthlyStartMs, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
+        aggregateGroup(dailyStartMs, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile),
+        aggregateGroup(monthlyStartMs, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile)
     ]);
 
     // Format individual: resolve avatar with TikTok fallback
