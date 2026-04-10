@@ -1,0 +1,74 @@
+# ============================================
+# Helios Leaderboard — NAS Docker Compose
+# Uses pre-built image from GHCR (auto-updated by Watchtower)
+# ============================================
+#
+# FIRST-TIME SETUP:
+# 1. Copy your .env file to the same folder as this file
+# 2. Log in to GHCR (one time):
+#      docker login ghcr.io -u YOUR_GITHUB_USERNAME -p YOUR_GITHUB_PAT
+# 3. Start everything:
+#      docker compose -f docker-compose.nas.yml up -d
+# 4. Grab tunnel URL:
+#      docker logs cloudflare-tunnel
+#
+# AFTER THIS — all updates are AUTOMATIC via Watchtower!
+# ============================================
+
+services:
+  leaderboard:
+    image: ghcr.io/ducnguyen36/tiktok-leaderboard:latest
+    container_name: helios-leaderboard
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-5050}:5000"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - NODE_TLS_REJECT_UNAUTHORIZED=0
+      - TZ=Asia/Ho_Chi_Minh
+    volumes:
+      - avatar-cache:/app/avatars
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:5000/api/health').then(r=>{if(!r.ok)throw 1;return r.json()}).then(d=>{if(d.status!=='ok')throw 1;process.exit(0)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ============================================
+  # CLOUDFLARE TUNNEL — Free HTTPS access
+  # ============================================
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflare-tunnel
+    restart: unless-stopped
+    depends_on:
+      leaderboard:
+        condition: service_healthy
+    command: tunnel --no-autoupdate --url http://leaderboard:5000
+
+  # ============================================
+  # WATCHTOWER — Auto-pull & restart on new images
+  # Checks every 5 minutes for updates from GHCR
+  # ============================================
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /root/.docker/config.json:/config.json:ro
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=300
+      - WATCHTOWER_INCLUDE_STOPPED=true
+      - WATCHTOWER_REVIVE_STOPPED=true
+      - WATCHTOWER_LABEL_ENABLE=false
+    command: helios-leaderboard
+
+volumes:
+  avatar-cache:
+    driver: local
