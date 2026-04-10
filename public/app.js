@@ -6,9 +6,11 @@
 // STATE & CONFIG
 // ==========================================
 let rawData = {
-    individual: { monthly: [], daily: [] },
-    group: { monthly: [], daily: [] }
+    individual: { monthly: [], daily: [], yesterday: [] },
+    group: { monthly: [], daily: [], yesterday: [] },
+    frozen: false
 };
+let viewingYesterday = false; // toggle for showing yesterday as full ranking
 let currentTab = 'group-monthly';
 let currentTheme = 'classic'; // 'classic' or 'modern'
 let rotation = 0;
@@ -16,6 +18,8 @@ let isInteracting = false;
 let interactionTimer = null;
 let cycleTimer = null;
 let timeLeft = 10;
+let footerHideTimer = null;
+let tempUnfreezeUntil = 0; // timestamp when temp unfreeze expires
 
 const TAB_ORDER = ['group-monthly', 'group-daily', 'individual-monthly', 'individual-daily'];
 
@@ -38,8 +42,13 @@ let config = {
         'individual-monthly': true,
         'individual-daily': true
     },
+    showYesterday: {
+        'group-daily': true,
+        'individual-daily': true
+    },
     cycleDuration: 10,
     resetHour: 0,
+    freezeUntil: '',
     rotation: 0,
     podiumSlots: 5,
     listColumns: 3,
@@ -49,17 +58,18 @@ let config = {
 // ==========================================
 // INITIALIZATION
 // ==========================================
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     loadSavedSettings();
     detectTV();
     startClock();
     startCycleTimer();
     setupInteractionListeners();
+    setupFooterAutoHide();
     updateUIFromConfig();
     requestWakeLock();
 
-    // Fetch data immediately on load (don't wait for SSE handshake)
-    fetchData();
+    // Fetch data first (sets lastFreezeUntil on server before SSE connects)
+    await fetchData();
 
     // Then connect SSE for real-time updates (falls back to polling)
     connectSSE();
@@ -87,7 +97,11 @@ function connectSSE() {
             const json = JSON.parse(event.data);
             if (json.status === 'ok') {
                 rawData = json.data;
+                if (json.data.frozen !== undefined) {
+                    rawData.frozen = json.data.frozen;
+                }
                 renderLeaderboard();
+                updateUIFromConfig(); // refresh frozen badge
                 updateConnectionStatus('live');
 
                 // Hide loader
@@ -147,7 +161,10 @@ async function fetchData() {
     const loader = document.getElementById('header-loader');
     try {
         if (loader) loader.classList.remove('hidden');
-        const response = await fetch(`/api/leaderboard?resetHour=${config.resetHour}`);
+        // If temp unfreeze is active, don't send freezeUntil
+        const isTempUnfrozen = tempUnfreezeUntil > Date.now();
+        const freezeParam = (config.freezeUntil && !isTempUnfrozen) ? `&freezeUntil=${config.freezeUntil}` : '';
+        const response = await fetch(`/api/leaderboard?resetHour=${config.resetHour}${freezeParam}`);
         const json = await response.json();
 
         if (json.status === 'error') {
@@ -157,7 +174,12 @@ async function fetchData() {
         }
 
         rawData = json.data;
+        // Track frozen state
+        if (json.data.frozen !== undefined) {
+            rawData.frozen = json.data.frozen;
+        }
         renderLeaderboard();
+        updateUIFromConfig(); // refresh frozen badge
         if (loader) loader.classList.add('hidden');
     } catch (error) {
         console.error('Fetch error:', error);
@@ -171,8 +193,14 @@ async function fetchData() {
 function getDataForTab(tab) {
     // Map tab name to the correct data path
     const category = getTabCategory(tab); // 'group' or 'individual'
-    const period = tab.includes('monthly') ? 'monthly' : 'daily';
-
+    const isDaily = tab.includes('daily');
+    
+    // If viewing yesterday on a daily tab, return yesterday data
+    if (isDaily && viewingYesterday && rawData[category] && rawData[category].yesterday) {
+        return rawData[category].yesterday;
+    }
+    
+    const period = isDaily ? 'daily' : 'monthly';
     if (rawData[category] && rawData[category][period]) {
         return rawData[category][period];
     }
@@ -204,7 +232,79 @@ function switchTab(tab) {
     if (btn) btn.classList.add('active');
 
     renderLeaderboard();
+    updateUIFromConfig(); // update yesterday button visibility
     handleInteraction();
+}
+
+function toggleYesterdayView() {
+    const isFrozen = rawData.frozen && tempUnfreezeUntil <= Date.now();
+    
+    if (isFrozen) {
+        // Frozen mode: click = temp unfreeze for 2 minutes
+        tempUnfreezeUntil = Date.now() + 2 * 60 * 1000;
+        fetchData(); // re-fetch without freeze
+        updateHistoryIcon();
+        
+        // Countdown to re-freeze
+        let remaining = 120;
+        if (window._unfreezeInterval) clearInterval(window._unfreezeInterval);
+        window._unfreezeInterval = setInterval(() => {
+            remaining--;
+            if (remaining <= 0 || tempUnfreezeUntil <= Date.now()) {
+                clearInterval(window._unfreezeInterval);
+                window._unfreezeInterval = null;
+                tempUnfreezeUntil = 0;
+                fetchData(); // re-fetch with freeze restored
+                updateHistoryIcon();
+                return;
+            }
+            updateHistoryIcon(remaining);
+        }, 1000);
+    } else {
+        // Normal mode: toggle yesterday view
+        viewingYesterday = !viewingYesterday;
+        renderLeaderboard();
+        updateHistoryIcon();
+    }
+}
+
+function updateHistoryIcon(unfreezeRemaining) {
+    const btn = document.getElementById('btn-yesterday-view');
+    if (!btn) return;
+    
+    const icon = btn.querySelector('i');
+    const isTempUnfrozen = tempUnfreezeUntil > Date.now();
+    const isFrozen = rawData.frozen && !isTempUnfrozen;
+    
+    // Remove all state classes
+    btn.classList.remove('yesterday-active', 'frozen-active', 'unfreeze-active');
+    
+    if (isTempUnfrozen) {
+        // Temporarily unfrozen — show unlock icon with countdown
+        icon.className = 'fas fa-lock-open';
+        btn.classList.add('unfreeze-active');
+        if (unfreezeRemaining != null) {
+            const mins = Math.floor(unfreezeRemaining / 60);
+            const secs = unfreezeRemaining % 60;
+            btn.title = `Live for ${mins}:${secs.toString().padStart(2, '0')} — click to view yesterday`;
+        } else {
+            btn.title = 'Temporarily showing live data';
+        }
+    } else if (isFrozen) {
+        // Frozen — show snowflake
+        icon.className = 'fas fa-snowflake';
+        btn.classList.add('frozen-active');
+        btn.title = 'Frozen (showing yesterday) — click to briefly show live data';
+    } else if (viewingYesterday) {
+        // Viewing yesterday (not frozen)
+        icon.className = 'fas fa-clock';
+        btn.classList.add('yesterday-active');
+        btn.title = 'Viewing yesterday — click to go back to today';
+    } else {
+        // Normal
+        icon.className = 'fas fa-clock';
+        btn.title = 'View yesterday\'s daily ranking';
+    }
 }
 
 // ==========================================
@@ -232,6 +332,8 @@ function renderLeaderboard() {
 
     const showIncome = config.showIncome[tabKey];
     const showAvatars = config.showAvatars[tabKey];
+    const isDaily = currentTab.includes('daily');
+    const showYD = isDaily && !viewingYesterday && config.showYesterday && config.showYesterday[tabKey];
     const podiumCount = Math.min(config.podiumSlots || 5, data.length);
     const cols = config.listColumns || 3;
 
@@ -261,6 +363,7 @@ function renderLeaderboard() {
             </div>
             <div class="idol-name">${idol.name}</div>
             ${showIncome ? `<div class="idol-value">${formatNumber(idol.value)}</div>` : ''}
+            ${showYD && idol.yesterday ? `<div class="yesterday-score">YD: ${formatNumber(idol.yesterday.value)}</div>` : ''}
         `;
         podiumContainer.appendChild(card);
     });
@@ -288,6 +391,7 @@ function renderLeaderboard() {
             </div>
             <div class="list-value">
                 ${showIncome ? formatNumber(idol.value) : ''}
+                ${showYD && idol.yesterday && showIncome ? `<span class="yesterday-badge">YD: ${formatNumber(idol.yesterday.value)}</span>` : ''}
             </div>
         `;
         listContainer.appendChild(item);
@@ -379,8 +483,8 @@ function toggleConfig(category, key) {
         if (nextTab) switchTab(nextTab);
     }
 
-    // Re-render if we toggled income or avatars for current tab's category
-    if (category === 'showIncome' || category === 'showAvatars') {
+    // Re-render if we toggled income, avatars, or yesterday for current tab
+    if (category === 'showIncome' || category === 'showAvatars' || category === 'showYesterday') {
         renderLeaderboard();
     }
 }
@@ -394,6 +498,17 @@ function updateConfigValue(key, value) {
     }
     if (key === 'resetHour') {
         fetchData(); // Re-fetch with new reset hour
+    }
+    if (key === 'freezeUntil') {
+        fetchData(); // Re-fetch with new freeze setting
+    }
+    saveSettings();
+}
+
+function updateConfigString(key, value) {
+    config[key] = value || '';
+    if (key === 'freezeUntil') {
+        fetchData(); // Re-fetch with new freeze setting
     }
     saveSettings();
 }
@@ -416,6 +531,14 @@ function updateUIFromConfig() {
         updateCheckbox('check-avatar-' + tab, config.showAvatars[tab]);
     });
 
+    // Yesterday score checkboxes (only daily tabs)
+    ['group-daily', 'individual-daily'].forEach(tab => {
+        updateCheckbox('check-yd-' + tab, config.showYesterday && config.showYesterday[tab]);
+    });
+
+    // Update the unified history/freeze icon button
+    updateHistoryIcon();
+
     // Theme checkboxes
     updateCheckbox('check-theme-classic', currentTheme === 'classic');
     updateCheckbox('check-theme-modern', currentTheme === 'modern');
@@ -433,6 +556,10 @@ function updateUIFromConfig() {
     if (colInput) colInput.value = config.listColumns || 3;
     const refreshInput = document.getElementById('refresh-interval');
     if (refreshInput) refreshInput.value = config.refreshInterval || 10;
+    const freezeInput = document.getElementById('freeze-until');
+    if (freezeInput) freezeInput.value = config.freezeUntil || '';
+
+
 
     // Footer
     document.getElementById('footer-cycle').textContent = config.cycleDuration + 's';
@@ -484,6 +611,7 @@ function loadSavedSettings() {
             if (parsed.visibleTabs) config.visibleTabs = { ...config.visibleTabs, ...parsed.visibleTabs };
             if (parsed.showIncome) config.showIncome = { ...config.showIncome, ...parsed.showIncome };
             if (parsed.showAvatars) config.showAvatars = { ...config.showAvatars, ...parsed.showAvatars };
+            if (parsed.showYesterday) config.showYesterday = { ...config.showYesterday, ...parsed.showYesterday };
 
             // Restore rotation
             if (parsed.rotation != null) {
@@ -555,10 +683,45 @@ function handleInteraction() {
 }
 
 // ==========================================
+// FOOTER AUTO-HIDE ON IDLE
+// ==========================================
+function setupFooterAutoHide() {
+    const footer = document.getElementById('footer-bar');
+    if (!footer) return;
+
+    function showFooter() {
+        footer.classList.remove('footer-hidden');
+        footer.classList.add('footer-visible');
+        if (footerHideTimer) clearTimeout(footerHideTimer);
+        footerHideTimer = setTimeout(() => {
+            footer.classList.remove('footer-visible');
+            footer.classList.add('footer-hidden');
+        }, 3000);
+    }
+
+    // Show on any mouse/touch/key activity
+    ['mousemove', 'mousedown', 'touchstart', 'keydown', 'scroll'].forEach(evt => {
+        window.addEventListener(evt, showFooter);
+    });
+
+    // Start hidden after initial delay
+    footerHideTimer = setTimeout(() => {
+        footer.classList.add('footer-hidden');
+    }, 3000);
+}
+
+
+
+// ==========================================
 // KEYBOARD SHORTCUTS
 // ==========================================
 window.addEventListener('keydown', (e) => {
     handleInteraction();
+
+    // Don't trigger shortcuts when settings modal is open (allow typing in inputs)
+    const settingsModal = document.getElementById('settings-modal');
+    if (settingsModal && !settingsModal.classList.contains('hidden')) return;
+
     const key = e.key;
 
     switch (key) {

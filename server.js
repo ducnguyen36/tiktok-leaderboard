@@ -277,7 +277,12 @@ async function resolveAvatar(avatarUrl, tiktokUsername) {
 // ==========================================
 async function loadProfiles() {
     try {
-        return await db.collection('profiles').find().toArray();
+        const all = await db.collection('profiles').find().toArray();
+        // Filter out accidental "new profile" entries
+        return all.filter(p => {
+            const name = (p.name || '').toLowerCase().trim();
+            return name !== 'new profile';
+        });
     } catch (err) {
         console.error('[Profiles] Error loading:', err.message);
         return [];
@@ -605,8 +610,9 @@ async function aggregateGroup(gifts, talentToProfile, profileMap, profileNameToI
 // SHARED AGGREGATION (used by API + SSE push)
 // ==========================================
 let lastResetHour = 0; // default, updated from client requests
+let lastFreezeUntil = ''; // e.g. '09:15' — freeze yesterday's daily scores until this time
 
-async function buildLeaderboardData(resetHour) {
+async function buildLeaderboardData(resetHour, freezeUntil) {
     const now = new Date();
 
     // Daily boundary
@@ -614,6 +620,27 @@ async function buildLeaderboardData(resetHour) {
     dailyStart.setHours(resetHour, 0, 0, 0);
     if (now < dailyStart) dailyStart.setDate(dailyStart.getDate() - 1);
     const dailyStartMs = dailyStart.getTime();
+
+    // Yesterday boundary (the 24h window before dailyStart)
+    const yesterdayStart = new Date(dailyStart);
+    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+    const yesterdayStartMs = yesterdayStart.getTime();
+    const yesterdayEndMs = dailyStartMs; // yesterday ends where today starts
+
+    // Check if we should freeze (show yesterday's daily data as today's)
+    let isFrozen = false;
+    if (freezeUntil) {
+        const [fh, fm] = freezeUntil.split(':').map(Number);
+        if (!isNaN(fh) && !isNaN(fm)) {
+            const freezeTime = new Date(now);
+            freezeTime.setHours(fh, fm, 0, 0);
+            // Frozen = current time is before the freeze-until time AND after daily reset
+            if (now < freezeTime && now >= dailyStart) {
+                isFrozen = true;
+            }
+            console.log(`[Freeze] freezeUntil=${freezeUntil}, now=${now.toLocaleTimeString()}, freezeTime=${freezeTime.toLocaleTimeString()}, dailyStart=${dailyStart.toLocaleTimeString()}, isFrozen=${isFrozen}`);
+        }
+    }
 
     // Monthly boundary
     const monthlyStart = new Date(now.getFullYear(), now.getMonth(), 1, resetHour, 0, 0, 0);
@@ -627,23 +654,31 @@ async function buildLeaderboardData(resetHour) {
     const profileNameToId = buildProfileNameToIdMap(profiles);
     const { uidToTalent, uidToProfile } = buildUidMaps(profiles);
 
+    const giftProjection = { projection: { receivedTalent: 1, receivedTalents: 1, receivedTalentUid: 1, toMemberUid: 1, cost: 1, sessionId: 1, timeStamp: 1 } };
+
     // Fetch gifts ONCE per time window (major perf optimization)
-    const [dailyGifts, monthlyGifts] = await Promise.all([
+    const [dailyGifts, yesterdayGifts, monthlyGifts] = await Promise.all([
         db.collection('gifts').find(
             { timeStamp: { $gte: dailyStartMs }, 'user.userId': { $ne: 'Manual' } },
-            { projection: { receivedTalent: 1, receivedTalents: 1, receivedTalentUid: 1, toMemberUid: 1, cost: 1, sessionId: 1, timeStamp: 1 } }
+            giftProjection
+        ).toArray(),
+        db.collection('gifts').find(
+            { timeStamp: { $gte: yesterdayStartMs, $lt: yesterdayEndMs }, 'user.userId': { $ne: 'Manual' } },
+            giftProjection
         ).toArray(),
         db.collection('gifts').find(
             { timeStamp: { $gte: monthlyStartMs }, 'user.userId': { $ne: 'Manual' } },
-            { projection: { receivedTalent: 1, receivedTalents: 1, receivedTalentUid: 1, toMemberUid: 1, cost: 1, sessionId: 1, timeStamp: 1 } }
+            giftProjection
         ).toArray()
     ]);
 
-    // Run all 4 aggregations (reuse fetched gift arrays)
-    const [individualDaily, individualMonthly, groupDaily, groupMonthly] = await Promise.all([
+    // Run all 6 aggregations (today + yesterday for daily)
+    const [individualDaily, individualYesterday, individualMonthly, groupDaily, groupYesterday, groupMonthly] = await Promise.all([
         aggregateIndividual(dailyGifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
+        aggregateIndividual(yesterdayGifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
         aggregateIndividual(monthlyGifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
         aggregateGroup(dailyGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile),
+        aggregateGroup(yesterdayGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile),
         aggregateGroup(monthlyGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile)
     ]);
 
@@ -673,16 +708,45 @@ async function buildLeaderboardData(resetHour) {
         }));
     }
 
-    const [indDaily, indMonthly, grpDaily, grpMonthly] = await Promise.all([
+    const [indDaily, indYesterday, indMonthly, grpDaily, grpYesterday, grpMonthly] = await Promise.all([
         formatIndividual(individualDaily),
+        formatIndividual(individualYesterday),
         formatIndividual(individualMonthly),
         formatGroup(groupDaily),
+        formatGroup(groupYesterday),
         formatGroup(groupMonthly)
     ]);
 
+    // Build yesterday lookup maps for rank/value comparison
+    function buildYesterdayMap(yesterdayArr) {
+        const map = {};
+        yesterdayArr.forEach((entry, idx) => {
+            map[entry.name] = { rank: idx + 1, value: entry.value };
+        });
+        return map;
+    }
+
+    // Attach yesterday's data to each daily entry
+    function attachYesterday(dailyArr, yesterdayArr) {
+        const ydMap = buildYesterdayMap(yesterdayArr);
+        return dailyArr.map((entry, idx) => ({
+            ...entry,
+            yesterday: ydMap[entry.name] || null
+        }));
+    }
+
+    const indDailyWithHistory = attachYesterday(indDaily, indYesterday);
+    const grpDailyWithHistory = attachYesterday(grpDaily, grpYesterday);
+
+    // If frozen, use yesterday's daily data as today's daily
+    // but still attach yesterday info for display
+    const finalIndDaily = isFrozen ? attachYesterday(indYesterday, indYesterday) : indDailyWithHistory;
+    const finalGrpDaily = isFrozen ? attachYesterday(grpYesterday, grpYesterday) : grpDailyWithHistory;
+
     return {
-        individual: { daily: indDaily, monthly: indMonthly },
-        group: { daily: grpDaily, monthly: grpMonthly }
+        individual: { daily: finalIndDaily, monthly: indMonthly, yesterday: indYesterday },
+        group: { daily: finalGrpDaily, monthly: grpMonthly, yesterday: grpYesterday },
+        frozen: isFrozen
     };
 }
 
@@ -721,7 +785,7 @@ app.get('/api/leaderboard/stream', (req, res) => {
 
     // Send initial data immediately
     if (db) {
-        buildLeaderboardData(lastResetHour)
+        buildLeaderboardData(lastResetHour, lastFreezeUntil)
             .then(data => {
                 res.write(`data: ${JSON.stringify({ status: 'ok', data })}\n\n`);
             })
@@ -776,7 +840,7 @@ function debouncedBroadcast() {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(async () => {
         try {
-            const data = await buildLeaderboardData(lastResetHour);
+            const data = await buildLeaderboardData(lastResetHour, lastFreezeUntil);
             broadcastLeaderboard(data);
         } catch (err) {
             console.error('[ChangeStream] Broadcast error:', err.message);
@@ -797,7 +861,11 @@ app.get('/api/leaderboard', async (req, res) => {
         const resetHour = isNaN(parsed) ? 0 : parsed;
         lastResetHour = resetHour; // Save for SSE broadcasts
 
-        const data = await buildLeaderboardData(resetHour);
+        // Freeze-until setting (e.g. '09:15')
+        const freezeUntil = req.query.freezeUntil || '';
+        if (freezeUntil) lastFreezeUntil = freezeUntil;
+
+        const data = await buildLeaderboardData(resetHour, lastFreezeUntil);
 
         res.json({ status: 'ok', data });
     } catch (err) {
