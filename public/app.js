@@ -43,8 +43,8 @@ let config = {
         'individual-daily': false
     },
     showYesterday: {
-        'group-daily': true,
-        'individual-daily': true
+        'group-daily': false,
+        'individual-daily': false
     },
     cycleDuration: 10,
     resetHour: 0,
