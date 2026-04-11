@@ -214,10 +214,10 @@ function avatarFileExists(avatarUrl) {
 // In-flight fetch tracker to avoid duplicate TikTok fetches
 const pendingFetches = new Map();
 
-// Avatar cache: { url, fetchedAt, failed } — avoids re-fetching constantly
+// Avatar cache: { url, fetchedAt, failed, lastGoodUrl } — avoids re-fetching constantly
 const avatarCache = new Map();
 const AVATAR_CACHE_TTL = 8 * 60 * 60 * 1000;   // 8 hours for successful fetches
-const AVATAR_FAIL_TTL = 30 * 60 * 1000;        // 30 minutes before retrying failed fetches
+const AVATAR_FAIL_TTL = 30 * 1000;              // 30 seconds before retrying failed fetches
 
 async function resolveAvatar(avatarUrl, tiktokUsername) {
     // If avatar URL exists and the file is present, use it directly
@@ -248,21 +248,26 @@ async function resolveAvatar(avatarUrl, tiktokUsername) {
     const fetchPromise = (async () => {
         try {
             const result = await fetchTikTokAvatar(tiktokUsername);
+            // Find last good URL from a previous successful file
+            const previousGood = cached ? cached.lastGoodUrl : '';
             // Cache the result
             avatarCache.set(tiktokUsername, {
                 url: result || '',
                 fetchedAt: Date.now(),
-                failed: !result
+                failed: !result,
+                lastGoodUrl: result || previousGood || ''
             });
-            return result || avatarUrl || '';
+            return result || previousGood || avatarUrl || '';
         } catch (err) {
-            // Cache the failure so we don't retry immediately
+            const previousGood = cached ? cached.lastGoodUrl : '';
+            // Cache the failure so we retry after AVATAR_FAIL_TTL
             avatarCache.set(tiktokUsername, {
                 url: '',
                 fetchedAt: Date.now(),
-                failed: true
+                failed: true,
+                lastGoodUrl: previousGood || ''
             });
-            return avatarUrl || '';
+            return previousGood || avatarUrl || '';
         } finally {
             pendingFetches.delete(tiktokUsername);
         }
@@ -610,7 +615,14 @@ async function aggregateGroup(gifts, talentToProfile, profileMap, profileNameToI
 // SHARED AGGREGATION (used by API + SSE push)
 // ==========================================
 let lastResetHour = 0; // default, updated from client requests
-let lastFreezeUntil = ''; // e.g. '09:15' — freeze yesterday's daily scores until this time
+let lastFreezeUntil = '09:00'; // e.g. '09:15' — freeze yesterday's daily scores until this time
+
+// ==========================================
+// DATA CACHE — serve instantly, refresh in background
+// ==========================================
+let cachedData = null;
+let cacheTimestamp = 0;
+const CACHE_BG_INTERVAL = 60 * 60 * 1000; // 1 hour background refresh when no clients
 
 async function buildLeaderboardData(resetHour, freezeUntil) {
     const now = new Date();
@@ -783,10 +795,23 @@ app.get('/api/leaderboard/stream', (req, res) => {
     sseClients.add(res);
     console.log(`[SSE] Client connected (${sseClients.size} total)`);
 
-    // Send initial data immediately
-    if (db) {
+    // Send initial data immediately (from cache or fresh)
+    if (cachedData) {
+        res.write(`data: ${JSON.stringify({ status: 'ok', data: cachedData })}\n\n`);
+        // Refresh in background if stale (>30s old)
+        if (Date.now() - cacheTimestamp > 30000 && db) {
+            buildLeaderboardData(lastResetHour, lastFreezeUntil)
+                .then(data => {
+                    cachedData = data;
+                    cacheTimestamp = Date.now();
+                })
+                .catch(() => {});
+        }
+    } else if (db) {
         buildLeaderboardData(lastResetHour, lastFreezeUntil)
             .then(data => {
+                cachedData = data;
+                cacheTimestamp = Date.now();
                 res.write(`data: ${JSON.stringify({ status: 'ok', data })}\n\n`);
             })
             .catch(err => {
@@ -841,6 +866,9 @@ function debouncedBroadcast() {
     debounceTimer = setTimeout(async () => {
         try {
             const data = await buildLeaderboardData(lastResetHour, lastFreezeUntil);
+            // Update cache
+            cachedData = data;
+            cacheTimestamp = Date.now();
             broadcastLeaderboard(data);
         } catch (err) {
             console.error('[ChangeStream] Broadcast error:', err.message);
@@ -852,21 +880,35 @@ function debouncedBroadcast() {
 // API: LEADERBOARD (polling fallback)
 // ==========================================
 app.get('/api/leaderboard', async (req, res) => {
+    const parsed = parseInt(req.query.resetHour);
+    const resetHour = isNaN(parsed) ? 0 : parsed;
+    lastResetHour = resetHour; // Save for SSE broadcasts
+
+    // Freeze-until setting (e.g. '09:15')
+    const freezeUntil = req.query.freezeUntil || '';
+    if (freezeUntil) lastFreezeUntil = freezeUntil;
+
+    // Return cached data instantly if available
+    if (cachedData) {
+        res.json({ status: 'ok', data: cachedData });
+        // Refresh in background if stale (>10s)
+        if (Date.now() - cacheTimestamp > 10000 && db) {
+            buildLeaderboardData(resetHour, lastFreezeUntil)
+                .then(data => { cachedData = data; cacheTimestamp = Date.now(); })
+                .catch(() => {});
+        }
+        return;
+    }
+
+    // No cache — must build fresh
     if (!db) {
         return res.status(503).json({ status: 'error', message: 'Database not connected' });
     }
 
     try {
-        const parsed = parseInt(req.query.resetHour);
-        const resetHour = isNaN(parsed) ? 0 : parsed;
-        lastResetHour = resetHour; // Save for SSE broadcasts
-
-        // Freeze-until setting (e.g. '09:15')
-        const freezeUntil = req.query.freezeUntil || '';
-        if (freezeUntil) lastFreezeUntil = freezeUntil;
-
         const data = await buildLeaderboardData(resetHour, lastFreezeUntil);
-
+        cachedData = data;
+        cacheTimestamp = Date.now();
         res.json({ status: 'ok', data });
     } catch (err) {
         console.error('[Leaderboard] Error:', err);
@@ -891,6 +933,28 @@ connectDB()
 
         // Start watching MongoDB for changes
         startChangeStreams();
+
+        // Pre-warm cache on startup
+        buildLeaderboardData(lastResetHour, lastFreezeUntil)
+            .then(data => {
+                cachedData = data;
+                cacheTimestamp = Date.now();
+                console.log('[Cache] Pre-warmed leaderboard cache on startup');
+            })
+            .catch(err => console.error('[Cache] Pre-warm error:', err.message));
+
+        // Background refresh every hour when no clients connected
+        setInterval(async () => {
+            if (sseClients.size > 0) return; // clients connected = cache stays fresh via change streams
+            try {
+                const data = await buildLeaderboardData(lastResetHour, lastFreezeUntil);
+                cachedData = data;
+                cacheTimestamp = Date.now();
+                console.log('[Cache] Background refresh (no clients connected)');
+            } catch (err) {
+                console.error('[Cache] Background refresh error:', err.message);
+            }
+        }, CACHE_BG_INTERVAL);
     })
     .catch(err => {
         console.error('Failed to start server:', err.message);

@@ -4,8 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Helios Leaderboard</title>
-    <meta name="description" content="Live TikTok talent leaderboard — daily & monthly rankings">
+    <title>Helios Talent</title>
+    <meta name="description" content="Helios Talent — live TikTok talent leaderboard rankings">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="/style.css">
 </head>
@@ -20,193 +20,185 @@
             <div class="settings-content">
                 <div class="settings-header">
                     <h2>⚙️ Settings</h2>
-                    <button class="close-btn" onclick="toggleSettings()"><i class="fas fa-times"></i></button>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <button class="close-btn" id="btn-shortcuts-help" onclick="toggleShortcutsHelp()" title="Keyboard Shortcuts"><i class="fas fa-question-circle"></i></button>
+                        <button class="close-btn" onclick="toggleSettings()"><i class="fas fa-times"></i></button>
+                    </div>
                 </div>
 
-                <div class="settings-section">
-                    <div class="settings-title">Theme</div>
-                    <div class="checkbox-group">
-                        <label class="checkbox-label" onclick="setTheme('classic')">
-                            <div class="custom-checkbox" id="check-theme-classic"><span class="checkbox-check">✓</span></div>
-                            Classic
-                        </label>
-                        <label class="checkbox-label" onclick="setTheme('modern')">
-                            <div class="custom-checkbox" id="check-theme-modern"><span class="checkbox-check">✓</span></div>
-                            Modern
+                <!-- Shortcuts tooltip (hidden by default) -->
+                <div id="shortcuts-help" class="shortcuts-tooltip hidden">
+                    <div class="shortcuts-list">
+                        <kbd>0</kbd> Rotate &nbsp; <kbd>1</kbd> Grp Mon &nbsp; <kbd>2</kbd> Grp Day &nbsp; <kbd>3</kbd> Ind Mon &nbsp; <kbd>4</kbd> Ind Day<br>
+                        <kbd>5</kbd> Toggle Income &nbsp; <kbd>6</kbd> Theme &nbsp; <kbd>7</kbd> Settings &nbsp; <kbd>8</kbd> Refresh
+                    </div>
+                </div>
+
+                <!-- Row 1: Theme + Tabs -->
+                <div class="settings-row">
+                    <div class="settings-section settings-half">
+                        <div class="settings-title">Theme</div>
+                        <div class="checkbox-group">
+                            <label class="checkbox-label" onclick="setTheme('classic')">
+                                <div class="custom-checkbox" id="check-theme-classic"><span class="checkbox-check">✓</span></div>
+                                Classic
+                            </label>
+                            <label class="checkbox-label" onclick="setTheme('modern')">
+                                <div class="custom-checkbox" id="check-theme-modern"><span class="checkbox-check">✓</span></div>
+                                Modern
+                            </label>
+                        </div>
+                    </div>
+                    <div class="settings-section settings-half">
+                        <div class="settings-title">Enabled Tabs</div>
+                        <div class="checkbox-group">
+                            <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'group-monthly')">
+                                <div class="custom-checkbox" id="check-tab-group-monthly"><span class="checkbox-check">✓</span></div>
+                                GM
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'group-daily')">
+                                <div class="custom-checkbox" id="check-tab-group-daily"><span class="checkbox-check">✓</span></div>
+                                GD
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'individual-monthly')">
+                                <div class="custom-checkbox" id="check-tab-individual-monthly"><span class="checkbox-check">✓</span></div>
+                                IM
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'individual-daily')">
+                                <div class="custom-checkbox" id="check-tab-individual-daily"><span class="checkbox-check">✓</span></div>
+                                ID
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Row 2: Income + Avatars -->
+                <div class="settings-row">
+                    <div class="settings-section settings-half">
+                        <div class="settings-title">Show Income</div>
+                        <div class="checkbox-group">
+                            <label class="checkbox-label" onclick="toggleConfig('showIncome', 'group-monthly')">
+                                <div class="custom-checkbox" id="check-income-group-monthly"><span class="checkbox-check">✓</span></div>
+                                GM
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('showIncome', 'group-daily')">
+                                <div class="custom-checkbox" id="check-income-group-daily"><span class="checkbox-check">✓</span></div>
+                                GD
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('showIncome', 'individual-monthly')">
+                                <div class="custom-checkbox" id="check-income-individual-monthly"><span class="checkbox-check">✓</span></div>
+                                IM
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('showIncome', 'individual-daily')">
+                                <div class="custom-checkbox" id="check-income-individual-daily"><span class="checkbox-check">✓</span></div>
+                                ID
+                            </label>
+                        </div>
+                    </div>
+                    <div class="settings-section settings-half">
+                        <div class="settings-title">List Avatars</div>
+                        <div class="checkbox-group">
+                            <label class="checkbox-label" onclick="toggleConfig('showAvatars', 'group-monthly')">
+                                <div class="custom-checkbox" id="check-avatar-group-monthly"><span class="checkbox-check">✓</span></div>
+                                GM
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('showAvatars', 'group-daily')">
+                                <div class="custom-checkbox" id="check-avatar-group-daily"><span class="checkbox-check">✓</span></div>
+                                GD
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('showAvatars', 'individual-monthly')">
+                                <div class="custom-checkbox" id="check-avatar-individual-monthly"><span class="checkbox-check">✓</span></div>
+                                IM
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('showAvatars', 'individual-daily')">
+                                <div class="custom-checkbox" id="check-avatar-individual-daily"><span class="checkbox-check">✓</span></div>
+                                ID
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Row 3: Yesterday Points + Layout -->
+                <div class="settings-row">
+                    <div class="settings-section settings-half">
+                        <div class="settings-title">Yesterday Points</div>
+                        <div class="checkbox-group">
+                            <label class="checkbox-label" onclick="toggleConfig('showYesterday', 'group-daily')">
+                                <div class="custom-checkbox" id="check-yd-group-daily"><span class="checkbox-check">✓</span></div>
+                                Grp
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('showYesterday', 'individual-daily')">
+                                <div class="custom-checkbox" id="check-yd-individual-daily"><span class="checkbox-check">✓</span></div>
+                                Ind
+                            </label>
+                        </div>
+                    </div>
+                    <div class="settings-section settings-half">
+                        <div class="settings-title">Podium / Columns</div>
+                        <div class="input-group compact">
+                            <i class="fas fa-trophy" style="color:var(--text-secondary); font-size:11px"></i>
+                            <input type="number" class="settings-input mini" id="podium-slots" min="1" max="5" value="5"
+                                onchange="updateConfigValue('podiumSlots', this.value); renderLeaderboard()">
+                            <i class="fas fa-columns" style="color:var(--text-secondary); font-size:11px; margin-left:8px"></i>
+                            <input type="number" class="settings-input mini" id="list-columns" min="1" max="5" value="3"
+                                onchange="updateConfigValue('listColumns', this.value); renderLeaderboard()">
+                        </div>
+                        <label class="checkbox-label" style="margin-top:6px; font-size:0.75rem;" onclick="toggleConfig('forceHorizontal', 'enabled')">
+                            <div class="custom-checkbox" id="check-force-horizontal"><span class="checkbox-check">✓</span></div>
+                            Force Horizontal
                         </label>
                     </div>
                 </div>
 
-                <div class="settings-section">
-                    <div class="settings-title">Enabled Tabs</div>
-                    <div class="checkbox-group">
-                        <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'group-monthly')">
-                            <div class="custom-checkbox" id="check-tab-group-monthly"><span class="checkbox-check">✓</span></div>
-                            Group Monthly
-                        </label>
-                        <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'group-daily')">
-                            <div class="custom-checkbox" id="check-tab-group-daily"><span class="checkbox-check">✓</span></div>
-                            Group Daily
-                        </label>
-                        <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'individual-monthly')">
-                            <div class="custom-checkbox" id="check-tab-individual-monthly"><span class="checkbox-check">✓</span></div>
-                            Individual Monthly
-                        </label>
-                        <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'individual-daily')">
-                            <div class="custom-checkbox" id="check-tab-individual-daily"><span class="checkbox-check">✓</span></div>
-                            Individual Daily
-                        </label>
+                <!-- Row 4: Rotation + Cycle + Reset + Freeze -->
+                <div class="settings-row">
+                    <div class="settings-section settings-quarter">
+                        <div class="settings-title">Rotate</div>
+                        <div class="input-group compact">
+                            <input type="number" class="settings-input mini" id="rotation-deg" min="0" max="270" step="90" value="0"
+                                onchange="setRotation(parseInt(this.value))">
+                            <span style="color:var(--text-secondary); font-size:0.75rem">°</span>
+                        </div>
+                    </div>
+                    <div class="settings-section settings-quarter">
+                        <div class="settings-title">Cycle</div>
+                        <div class="input-group compact">
+                            <input type="number" class="settings-input mini" id="cycle-duration" min="1" value="10"
+                                onchange="updateConfigValue('cycleDuration', this.value)">
+                            <span style="color:var(--text-secondary); font-size:0.75rem">s</span>
+                        </div>
+                    </div>
+                    <div class="settings-section settings-quarter">
+                        <div class="settings-title">Reset</div>
+                        <div class="input-group compact">
+                            <input type="number" class="settings-input mini" id="reset-hour" min="0" max="23" value="0"
+                                onchange="updateConfigValue('resetHour', this.value)">
+                            <span style="color:var(--text-secondary); font-size:0.75rem">h</span>
+                        </div>
+                    </div>
+                    <div class="settings-section settings-quarter">
+                        <div class="settings-title">Freeze</div>
+                        <div class="input-group compact">
+                            <div class="freeze-box">
+                                <input type="number" class="freeze-hh" id="freeze-hh" min="0" max="23" placeholder="HH"
+                                    oninput="updateFreezeTime()">
+                                <span class="freeze-colon">:</span>
+                                <input type="number" class="freeze-mm" id="freeze-mm" min="0" max="59" placeholder="MM"
+                                    oninput="updateFreezeTime()">
+                            </div>
+                            <button class="clear-btn mini" onclick="clearFreezeTime()" title="Clear">
+                                <i class="fas fa-times" style="font-size:9px"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
-                <div class="settings-section">
-                    <div class="settings-title">Show Income Numbers</div>
-                    <div class="checkbox-group">
-                        <label class="checkbox-label" onclick="toggleConfig('showIncome', 'group-monthly')">
-                            <div class="custom-checkbox" id="check-income-group-monthly"><span class="checkbox-check">✓</span></div>
-                            Grp Mon
-                        </label>
-                        <label class="checkbox-label" onclick="toggleConfig('showIncome', 'group-daily')">
-                            <div class="custom-checkbox" id="check-income-group-daily"><span class="checkbox-check">✓</span></div>
-                            Grp Daily
-                        </label>
-                        <label class="checkbox-label" onclick="toggleConfig('showIncome', 'individual-monthly')">
-                            <div class="custom-checkbox" id="check-income-individual-monthly"><span class="checkbox-check">✓</span></div>
-                            Ind Mon
-                        </label>
-                        <label class="checkbox-label" onclick="toggleConfig('showIncome', 'individual-daily')">
-                            <div class="custom-checkbox" id="check-income-individual-daily"><span class="checkbox-check">✓</span></div>
-                            Ind Daily
-                        </label>
-                    </div>
-                </div>
-
-                <div class="settings-section">
-                    <div class="settings-title">Show Avatars (Rank 6+)</div>
-                    <div class="checkbox-group">
-                        <label class="checkbox-label" onclick="toggleConfig('showAvatars', 'group-monthly')">
-                            <div class="custom-checkbox" id="check-avatar-group-monthly"><span class="checkbox-check">✓</span></div>
-                            Grp Mon
-                        </label>
-                        <label class="checkbox-label" onclick="toggleConfig('showAvatars', 'group-daily')">
-                            <div class="custom-checkbox" id="check-avatar-group-daily"><span class="checkbox-check">✓</span></div>
-                            Grp Daily
-                        </label>
-                        <label class="checkbox-label" onclick="toggleConfig('showAvatars', 'individual-monthly')">
-                            <div class="custom-checkbox" id="check-avatar-individual-monthly"><span class="checkbox-check">✓</span></div>
-                            Ind Mon
-                        </label>
-                        <label class="checkbox-label" onclick="toggleConfig('showAvatars', 'individual-daily')">
-                            <div class="custom-checkbox" id="check-avatar-individual-daily"><span class="checkbox-check">✓</span></div>
-                            Ind Daily
-                        </label>
-                    </div>
-                </div>
-
-                <div class="settings-section">
-                    <div class="settings-title">Show Yesterday Points</div>
-                    <div class="checkbox-group">
-                        <label class="checkbox-label" onclick="toggleConfig('showYesterday', 'group-daily')">
-                            <div class="custom-checkbox" id="check-yd-group-daily"><span class="checkbox-check">✓</span></div>
-                            Grp Daily
-                        </label>
-                        <label class="checkbox-label" onclick="toggleConfig('showYesterday', 'individual-daily')">
-                            <div class="custom-checkbox" id="check-yd-individual-daily"><span class="checkbox-check">✓</span></div>
-                            Ind Daily
-                        </label>
-                    </div>
-                </div>
-
-                <div class="settings-section">
-                    <div class="settings-title">Screen Rotation</div>
-                    <div class="input-group">
-                        <i class="fas fa-redo" style="color:var(--text-secondary)"></i>
-                        <input type="number" class="settings-input" id="rotation-deg" min="0" max="270" step="90" value="0"
-                            onchange="setRotation(parseInt(this.value))">
-                        <span style="color:var(--text-secondary); font-size: 0.85rem;">°</span>
-                    </div>
-                </div>
-
-                <div class="settings-section">
-                    <div class="settings-title">Cycle Time (Seconds)</div>
-                    <div class="input-group">
-                        <i class="fas fa-sync-alt" style="color:var(--text-secondary)"></i>
-                        <input type="number" class="settings-input" id="cycle-duration" min="1" value="10"
-                            onchange="updateConfigValue('cycleDuration', this.value)">
-                    </div>
-                </div>
-
-                <div class="settings-section">
-                    <div class="settings-title">Daily Reset Hour</div>
-                    <div class="input-group">
-                        <i class="fas fa-clock" style="color:var(--text-secondary)"></i>
-                        <input type="number" class="settings-input" id="reset-hour" min="0" max="23" value="0"
-                            onchange="updateConfigValue('resetHour', this.value)">
-                        <span style="color:var(--text-secondary); font-size: 0.85rem;">h</span>
-                    </div>
-                </div>
-
-                <div class="settings-section">
-                    <div class="settings-title">Freeze Yesterday Until</div>
-                    <div class="settings-hint">Keep showing yesterday's daily scores until this time (leave empty to disable)</div>
-                    <div class="input-group">
-                        <i class="fas fa-snowflake" style="color:var(--text-secondary)"></i>
-                        <input type="time" class="settings-input" id="freeze-until" value=""
-                            onchange="updateConfigString('freezeUntil', this.value)">
-                        <button class="clear-btn" onclick="document.getElementById('freeze-until').value=''; updateConfigString('freezeUntil', '')" title="Clear">
-                            <i class="fas fa-times"></i>
-                        </button>
-                    </div>
-                </div>
-
-                <div class="settings-section">
-                    <div class="settings-title">Podium Slots (Top N)</div>
-                    <div class="input-group">
-                        <i class="fas fa-trophy" style="color:var(--text-secondary)"></i>
-                        <input type="number" class="settings-input" id="podium-slots" min="1" max="5" value="5"
-                            onchange="updateConfigValue('podiumSlots', this.value); renderLeaderboard()">
-                    </div>
-                </div>
-
-                <div class="settings-section">
-                    <div class="settings-title">List Columns</div>
-                    <div class="input-group">
-                        <i class="fas fa-columns" style="color:var(--text-secondary)"></i>
-                        <input type="number" class="settings-input" id="list-columns" min="1" max="5" value="3"
-                            onchange="updateConfigValue('listColumns', this.value); renderLeaderboard()">
-                    </div>
-                </div>
-
-                <div class="settings-section">
-                    <div class="settings-title">Refresh Interval</div>
-                    <div class="input-group">
-                        <i class="fas fa-wifi" style="color:var(--text-secondary)"></i>
-                        <input type="number" class="settings-input" id="refresh-interval" min="5" max="60" value="10"
-                            onchange="updateConfigValue('refreshInterval', this.value)">
-                        <span style="color:var(--text-secondary); font-size: 0.85rem;">sec</span>
-                    </div>
-                </div>
-
-                <div class="settings-section" style="border-top: 1px solid var(--border-color); padding-top: 16px;">
+                <!-- Save Button -->
+                <div class="settings-section" style="border-top: 1px solid var(--border-color); padding-top: 12px; margin-bottom: 0;">
                     <button class="save-default-btn" onclick="saveAsDefault()">
                         <i class="fas fa-save"></i> Save as Default
                     </button>
-                    <div id="save-feedback" style="font-size: 0.75rem; color: #4ade80; margin-top: 6px; display:none;">✓ Saved!</div>
-                </div>
-
-                <div class="settings-section">
-                    <div class="settings-title">Shortcuts</div>
-                    <div class="shortcuts-list">
-                        <kbd>0</kbd> Rotate Screen<br>
-                        <kbd>1</kbd> Group Monthly<br>
-                        <kbd>2</kbd> Group Daily<br>
-                        <kbd>3</kbd> Individual Monthly<br>
-                        <kbd>4</kbd> Individual Daily<br>
-                        <kbd>5</kbd> Toggle Income<br>
-                        <kbd>6</kbd> Toggle Theme<br>
-                        <kbd>7</kbd> Settings<br>
-                        <kbd>8</kbd> Force Refresh
-                    </div>
+                    <div id="save-feedback" style="font-size: 0.75rem; color: #4ade80; margin-top: 4px; display:none;">✓ Saved!</div>
                 </div>
             </div>
         </div>
@@ -215,7 +207,8 @@
         <div class="container">
             <header>
                 <div class="header-left">
-                    <h1>🏆 Leaderboard <span id="header-loader" class="header-loader hidden"></span>
+                    <img src="/default.jpg" alt="Helios" class="header-logo">
+                    <h1>Helios Talent <span id="header-loader" class="header-loader hidden"></span>
                 </h1>
                 </div>
                 <div class="controls">
@@ -245,13 +238,13 @@
             </div>
 
             <!-- Content -->
-            <div id="content" style="flex:1; display:flex; flex-direction:column;">
-                <!-- Podium (Top 5) -->
+            <div id="content" style="flex:1; display:flex; flex-direction:column; min-height:0;">
+                <!-- Podium (Top N) -->
                 <div id="podium" class="top-section">
                     <!-- Injected via JS -->
                 </div>
 
-                <!-- List (Rank 6+) -->
+                <!-- List (Rank N+1) -->
                 <div id="list" class="list-container">
                     <!-- Injected via JS -->
                 </div>

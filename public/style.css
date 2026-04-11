@@ -93,8 +93,9 @@ body {
     color: var(--text-primary);
     overflow: hidden;
     font-size: 14px;
-    width: 100vw;
+    width: 95vw;
     height: 100vh;
+    margin: 0 auto;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -124,7 +125,7 @@ body {
     height: 100%;
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
+    overflow: hidden;
     transition: transform 0.5s ease-in-out, width 0.5s ease-in-out, height 0.5s ease-in-out;
     transform-origin: center center;
     background-color: var(--bg-color);
@@ -138,10 +139,13 @@ body {
     width: 100%;
     max-width: 1200px;
     margin: 0 auto;
-    padding: 15px;
+    padding: 10px 15px;
     flex: 1;
     display: flex;
     flex-direction: column;
+    height: 100%;
+    max-height: 100vh;
+    overflow: hidden;
 }
 
 /* ==========================================
@@ -159,7 +163,15 @@ header {
 .header-left {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
+}
+
+.header-logo {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+    filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.4));
 }
 
 h1 {
@@ -305,6 +317,69 @@ h1 {
 .podium-card.rank-4 { order: 1; transform: scale(0.8); opacity: 0.9; }
 .podium-card.rank-5 { order: 5; transform: scale(0.8); opacity: 0.9; }
 
+/* Podium scaling — bigger when fewer items (uses ID for specificity) */
+#podium[data-podium-count="3"] { gap: 28px; padding: 16px 12px 24px; }
+#podium[data-podium-count="3"] .avatar-wrapper { width: 90px !important; height: 90px !important; }
+#podium[data-podium-count="3"] .rank-1 .avatar-wrapper { width: 150px !important; height: 150px !important; }
+#podium[data-podium-count="3"] .idol-name { font-size: 16px; max-width: 160px; }
+#podium[data-podium-count="3"] .idol-value { font-size: 15px; }
+#podium[data-podium-count="3"] .podium-card.rank-1 { transform: scale(1.1); }
+#podium[data-podium-count="3"] .podium-card.rank-2,
+#podium[data-podium-count="3"] .podium-card.rank-3 { transform: scale(0.95); }
+#podium[data-podium-count="3"] .rank-1 .rank-badge { width: 28px; height: 28px; font-size: 14px; }
+
+#podium[data-podium-count="2"] { gap: 56px; padding: 20px 16px 28px; }
+#podium[data-podium-count="2"] .avatar-wrapper { width: 110px !important; height: 110px !important; }
+#podium[data-podium-count="2"] .rank-1 .avatar-wrapper { width: 160px !important; height: 160px !important; }
+#podium[data-podium-count="2"] .idol-name { font-size: 18px; max-width: 180px; }
+#podium[data-podium-count="2"] .idol-value { font-size: 17px; }
+#podium[data-podium-count="2"] .podium-card { transform: scale(1.1); }
+#podium[data-podium-count="2"] .rank-badge { width: 28px; height: 28px; font-size: 14px; }
+
+#podium[data-podium-count="1"] { gap: 0; padding: 32px 16px 40px; }
+#podium[data-podium-count="1"] .avatar-wrapper { width: 200px !important; height: 200px !important; }
+#podium[data-podium-count="1"] .idol-name { font-size: 22px; max-width: 280px; }
+#podium[data-podium-count="1"] .idol-value { font-size: 20px; }
+#podium[data-podium-count="1"] .podium-card { transform: scale(1.15); }
+#podium[data-podium-count="1"] .rank-badge { width: 34px; height: 34px; font-size: 17px; }
+
+/* Portrait mode (rotated 90°/270°) — much bigger podium */
+.portrait-mode #podium[data-podium-count="5"] { gap: 12px; }
+.portrait-mode #podium[data-podium-count="5"] .avatar-wrapper { width: 70px !important; height: 70px !important; }
+.portrait-mode #podium[data-podium-count="5"] .rank-1 .avatar-wrapper { width: 120px !important; height: 120px !important; }
+.portrait-mode #podium[data-podium-count="5"] .rank-4 .avatar-wrapper,
+.portrait-mode #podium[data-podium-count="5"] .rank-5 .avatar-wrapper { width: 56px !important; height: 56px !important; }
+.portrait-mode #podium[data-podium-count="5"] .idol-name { font-size: 14px; }
+.portrait-mode #podium[data-podium-count="5"] .idol-value { font-size: 13px; }
+.portrait-mode #podium[data-podium-count="5"] .rank-1 .rank-badge { width: 26px; height: 26px; font-size: 13px; }
+
+.portrait-mode #podium[data-podium-count="4"] { gap: 16px; }
+.portrait-mode #podium[data-podium-count="4"] .avatar-wrapper { width: 80px !important; height: 80px !important; }
+.portrait-mode #podium[data-podium-count="4"] .rank-1 .avatar-wrapper { width: 140px !important; height: 140px !important; }
+.portrait-mode #podium[data-podium-count="4"] .idol-name { font-size: 15px; }
+.portrait-mode #podium[data-podium-count="4"] .idol-value { font-size: 14px; }
+.portrait-mode #podium[data-podium-count="4"] .rank-1 .rank-badge { width: 28px; height: 28px; font-size: 14px; }
+
+.portrait-mode #podium[data-podium-count="3"] { gap: 36px; padding: 20px 16px 28px; }
+.portrait-mode #podium[data-podium-count="3"] .avatar-wrapper { width: 140px !important; height: 140px !important; }
+.portrait-mode #podium[data-podium-count="3"] .rank-1 .avatar-wrapper { width: 250px !important; height: 250px !important; }
+.portrait-mode #podium[data-podium-count="3"] .idol-name { font-size: 18px; max-width: 200px; }
+.portrait-mode #podium[data-podium-count="3"] .idol-value { font-size: 17px; }
+.portrait-mode #podium[data-podium-count="3"] .rank-1 .rank-badge { width: 36px; height: 36px; font-size: 16px; }
+
+.portrait-mode #podium[data-podium-count="2"] { gap: 64px; padding: 24px 16px 32px; }
+.portrait-mode #podium[data-podium-count="2"] .avatar-wrapper { width: 180px !important; height: 180px !important; }
+.portrait-mode #podium[data-podium-count="2"] .rank-1 .avatar-wrapper { width: 280px !important; height: 280px !important; }
+.portrait-mode #podium[data-podium-count="2"] .idol-name { font-size: 22px; max-width: 240px; }
+.portrait-mode #podium[data-podium-count="2"] .idol-value { font-size: 20px; }
+.portrait-mode #podium[data-podium-count="2"] .rank-badge { width: 34px; height: 34px; font-size: 16px; }
+
+.portrait-mode #podium[data-podium-count="1"] { gap: 0; padding: 36px 16px 44px; }
+.portrait-mode #podium[data-podium-count="1"] .avatar-wrapper { width: 400px !important; height: 400px !important; }
+.portrait-mode #podium[data-podium-count="1"] .idol-name { font-size: 28px; max-width: 360px; }
+.portrait-mode #podium[data-podium-count="1"] .idol-value { font-size: 24px; }
+.portrait-mode #podium[data-podium-count="1"] .rank-badge { width: 44px; height: 44px; font-size: 20px; }
+
 .podium-card:hover { transform: scale(1.08); }
 .podium-card.rank-2:hover, .podium-card.rank-3:hover { transform: scale(0.98); }
 
@@ -415,9 +490,23 @@ body.theme-modern .trophy-icon {
    ========================================== */
 .list-container {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
     flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    align-content: start;
+    width: 100%;
+}
+
+/* Portrait-mode: content fills remaining space */
+.portrait-mode .container {
+    max-height: none;
+}
+.portrait-mode #content {
+    flex: 1;
+    min-height: 0;
 }
 
 .list-item {
@@ -430,12 +519,58 @@ body.theme-modern .trophy-icon {
     transition: all 0.2s;
     gap: 6px;
     min-height: 38px;
+    max-height: 108px;
+    min-width: 0;
+    overflow: hidden;
     border: 1px solid transparent;
+}
+
+/* Portrait-mode: compact list items */
+.portrait-mode .list-item {
+    max-height: 60px;
+    padding: 4px 8px;
+}
+
+/* Vertical item layout for 4+ columns */
+.vertical-items .list-item {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 6px 4px;
+    max-height: 108px;
+    gap: 2px;
+}
+
+.vertical-items .list-info {
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+
+.vertical-items .list-name {
+    white-space: normal;
+    text-align: center;
+    line-height: 1.2;
+    font-size: 11px;
+}
+
+.vertical-items .list-rank {
+    font-size: 10px;
+    min-width: auto;
+}
+
+.vertical-items .list-value {
+    font-size: 10px;
+}
+
+.vertical-items .list-avatar {
+    width: 26px;
+    height: 26px;
 }
 
 .list-item:hover {
     background: var(--card-bg-hover);
-    transform: translateX(3px);
     border-color: rgba(255,255,255,0.05);
 }
 
@@ -581,14 +716,15 @@ body.theme-modern .idol-value {
 
 .settings-content {
     background: var(--settings-bg);
-    padding: 24px;
+    padding: 16px 20px;
     border-radius: 20px;
-    width: 90%;
-    max-width: 420px;
+    width: 95%;
+    max-width: 560px;
     border: 1px solid var(--border-color);
     box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
-    max-height: 85vh;
+    max-height: 95vh;
     overflow-y: auto;
+    overflow-x: hidden;
     color: white;
 }
 
@@ -624,7 +760,36 @@ body.theme-modern .idol-value {
 }
 
 .settings-section {
-    margin-bottom: 18px;
+    margin-bottom: 12px;
+}
+
+.settings-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 4px;
+}
+
+.settings-half {
+    flex: 1;
+    min-width: 0;
+}
+
+.settings-quarter {
+    flex: 1;
+    min-width: 0;
+}
+
+.settings-third {
+    flex: 1.5;
+    min-width: 0;
+}
+
+.freeze-input {
+    padding: 6px 8px;
+    font-size: 13px;
+    width: 80px;
+    flex-shrink: 0;
+    letter-spacing: 1px;
 }
 
 .settings-title {
@@ -701,6 +866,74 @@ body.theme-modern .idol-value {
 
 .settings-input:focus {
     border-color: var(--accent-primary);
+}
+
+.settings-input.mini {
+    padding: 6px 8px;
+    font-size: 12px;
+    width: 56px;
+    flex-shrink: 0;
+}
+
+.clear-btn.mini {
+    width: 22px;
+    height: 22px;
+    font-size: 9px;
+    padding: 0;
+    flex-shrink: 0;
+}
+
+.freeze-box {
+    display: flex;
+    align-items: center;
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 2px 4px;
+    gap: 0;
+    flex: 1;
+    max-width: 75px;
+}
+
+.freeze-hh, .freeze-mm {
+    background: transparent;
+    border: none;
+    color: white;
+    font-family: 'Inter', monospace;
+    font-size: 12px;
+    width: 26px;
+    text-align: center;
+    outline: none;
+    padding: 4px 0;
+    -moz-appearance: textfield;
+}
+
+.freeze-hh::-webkit-inner-spin-button,
+.freeze-hh::-webkit-outer-spin-button,
+.freeze-mm::-webkit-inner-spin-button,
+.freeze-mm::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.freeze-colon {
+    color: var(--text-secondary);
+    font-weight: 700;
+    font-size: 12px;
+    user-select: none;
+}
+
+/* Shortcuts tooltip */
+.shortcuts-tooltip {
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+}
+
+.input-group.compact {
+    gap: 6px;
 }
 
 .shortcuts-list {

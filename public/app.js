@@ -37,10 +37,10 @@ let config = {
         'individual-daily': true
     },
     showAvatars: {
-        'group-monthly': true,
-        'group-daily': true,
-        'individual-monthly': true,
-        'individual-daily': true
+        'group-monthly': false,
+        'group-daily': false,
+        'individual-monthly': false,
+        'individual-daily': false
     },
     showYesterday: {
         'group-daily': true,
@@ -48,11 +48,13 @@ let config = {
     },
     cycleDuration: 10,
     resetHour: 0,
-    freezeUntil: '',
+    freezeUntil: '09:00',
     rotation: 0,
     podiumSlots: 5,
     listColumns: 3,
-    refreshInterval: 10
+    forceHorizontal: {
+        'enabled': false
+    }
 };
 
 // ==========================================
@@ -337,8 +339,27 @@ function renderLeaderboard() {
     const podiumCount = Math.min(config.podiumSlots || 5, data.length);
     const cols = config.listColumns || 3;
 
-    // Apply list column count via CSS custom property
-    listContainer.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    // Set podium count for CSS scaling
+    podiumContainer.setAttribute('data-podium-count', podiumCount);
+
+    // Apply list column layout — minmax(0,1fr) prevents overflow
+    listContainer.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+    // For 4+ columns, use vertical flow + vertical item layout (unless force horizontal)
+    if (cols >= 4) {
+        const rest = data.slice(podiumCount);
+        const rows = Math.ceil(rest.length / cols);
+        listContainer.style.gridTemplateRows = `repeat(${rows}, auto)`;
+        listContainer.style.gridAutoFlow = 'column';
+        if (config.forceHorizontal && config.forceHorizontal['enabled']) {
+            listContainer.classList.remove('vertical-items');
+        } else {
+            listContainer.classList.add('vertical-items');
+        }
+    } else {
+        listContainer.style.gridTemplateRows = '';
+        listContainer.style.gridAutoFlow = '';
+        listContainer.classList.remove('vertical-items');
+    }
 
     // --- Render Podium (Top N) ---
     const topN = data.slice(0, podiumCount);
@@ -447,9 +468,11 @@ function applyRotation() {
     if (isPortrait) {
         wrapper.style.width = '100vh';
         wrapper.style.height = '100vw';
+        wrapper.classList.add('portrait-mode');
     } else {
         wrapper.style.width = '100vw';
         wrapper.style.height = '100vh';
+        wrapper.classList.remove('portrait-mode');
     }
 }
 
@@ -484,7 +507,7 @@ function toggleConfig(category, key) {
     }
 
     // Re-render if we toggled income, avatars, or yesterday for current tab
-    if (category === 'showIncome' || category === 'showAvatars' || category === 'showYesterday') {
+    if (category === 'showIncome' || category === 'showAvatars' || category === 'showYesterday' || category === 'forceHorizontal') {
         renderLeaderboard();
     }
 }
@@ -511,6 +534,24 @@ function updateConfigString(key, value) {
         fetchData(); // Re-fetch with new freeze setting
     }
     saveSettings();
+}
+
+function updateFreezeTime() {
+    const hh = document.getElementById('freeze-hh').value;
+    const mm = document.getElementById('freeze-mm').value;
+    if (hh === '' && mm === '') {
+        updateConfigString('freezeUntil', '');
+    } else {
+        const h = String(hh || 0).padStart(2, '0');
+        const m = String(mm || 0).padStart(2, '0');
+        updateConfigString('freezeUntil', `${h}:${m}`);
+    }
+}
+
+function clearFreezeTime() {
+    document.getElementById('freeze-hh').value = '';
+    document.getElementById('freeze-mm').value = '';
+    updateConfigString('freezeUntil', '');
 }
 
 function updateUIFromConfig() {
@@ -554,13 +595,23 @@ function updateUIFromConfig() {
     if (podiumInput) podiumInput.value = config.podiumSlots || 5;
     const colInput = document.getElementById('list-columns');
     if (colInput) colInput.value = config.listColumns || 3;
-    const refreshInput = document.getElementById('refresh-interval');
-    if (refreshInput) refreshInput.value = config.refreshInterval || 10;
-    const freezeInput = document.getElementById('freeze-until');
-    if (freezeInput) freezeInput.value = config.freezeUntil || '';
+    // Freeze time (split into HH and MM inputs)
+    const freezeVal = config.freezeUntil || '';
+    const hhInput = document.getElementById('freeze-hh');
+    const mmInput = document.getElementById('freeze-mm');
+    if (hhInput && mmInput) {
+        if (freezeVal && freezeVal.includes(':')) {
+            const [hh, mm] = freezeVal.split(':');
+            hhInput.value = parseInt(hh) || '';
+            mmInput.value = parseInt(mm) || 0;
+        } else {
+            hhInput.value = '';
+            mmInput.value = '';
+        }
+    }
 
-
-
+    // Force horizontal checkbox
+    updateCheckbox('check-force-horizontal', config.forceHorizontal && config.forceHorizontal['enabled']);
     // Footer
     document.getElementById('footer-cycle').textContent = config.cycleDuration + 's';
 }
@@ -748,10 +799,18 @@ function detectTV() {
     const tvKeywords = ['webos', 'tizen', 'smarttv', 'nexus player', 'viera', 'bravia', 'fios', 'hbbtv', 'opera tv', 'samsung', 'lg tv'];
     const isTv = tvKeywords.some(kw => ua.includes(kw));
 
-    if (isTv) {
-        console.log('TV Detected — Auto Rotating');
-        rotateScreen(90);
+    if (isTv && !localStorage.getItem('leaderboard_config')) {
+        // First visit on TV: default to 90° rotation
+        console.log('TV Detected — Setting default 90° rotation');
+        rotation = 90;
+        config.rotation = 90;
+        applyRotation();
     }
+}
+
+function toggleShortcutsHelp() {
+    const el = document.getElementById('shortcuts-help');
+    if (el) el.classList.toggle('hidden');
 }
 
 // ==========================================
