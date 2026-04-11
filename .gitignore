@@ -27,3 +27,6 @@ src/
 build/
 public/avatars/
 *.bak.*
+
+# Local deploy script
+deploy.ps1
