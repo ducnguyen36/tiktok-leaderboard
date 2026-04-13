@@ -311,7 +311,7 @@ function buildTalentAvatars(profiles) {
 }
 
 function buildProfileMap(profiles) {
-    // Returns { profileId: { name, avatar, username, talentNames[], updatedAt } }
+    // Returns { profileId: { name, avatar, username, talentNames[], updatedAt, locationId } }
     const map = {};
     for (const profile of profiles) {
         const pid = profile._id;
@@ -320,7 +320,8 @@ function buildProfileMap(profiles) {
             avatar: profile.avatar || '',
             username: profile.username || '',
             talentNames: profile.talents ? Object.keys(profile.talents) : [],
-            updatedAt: profile.updatedAt ? new Date(profile.updatedAt).getTime() : 0
+            updatedAt: profile.updatedAt ? new Date(profile.updatedAt).getTime() : 0,
+            locationId: profile.locationId || ''
         };
     }
     return map;
@@ -715,7 +716,8 @@ async function buildLeaderboardData(resetHour, freezeUntil) {
             return {
                 name: entry.name,
                 value: entry.totalDiamonds,
-                avatar
+                avatar,
+                locationId: pInfo.locationId || ''
             };
         }));
     }
@@ -755,10 +757,38 @@ async function buildLeaderboardData(resetHour, freezeUntil) {
     const finalIndDaily = isFrozen ? attachYesterday(indYesterday, indYesterday) : indDailyWithHistory;
     const finalGrpDaily = isFrozen ? attachYesterday(grpYesterday, grpYesterday) : grpDailyWithHistory;
 
+    // Load locations for client-side filtering
+    let locations = [];
+    try {
+        const locDocs = await db.collection('locations').find().sort({ createdAt: 1 }).toArray();
+        locations = locDocs.map(doc => ({ id: doc._id, name: doc.name || doc._id }));
+    } catch (e) { /* ignore */ }
+
+    // Build talent → locationId map for individual filtering
+    const talentLocationMap = {};
+    for (const [pid, pInfo] of Object.entries(profileMap)) {
+        for (const talentName of pInfo.talentNames) {
+            talentLocationMap[talentName] = pInfo.locationId || '';
+        }
+    }
+
+    // Attach locationId to individual entries
+    function attachLocationToIndividual(arr) {
+        return arr.map(entry => ({
+            ...entry,
+            locationId: talentLocationMap[entry.name] || ''
+        }));
+    }
+
     return {
-        individual: { daily: finalIndDaily, monthly: indMonthly, yesterday: indYesterday },
+        individual: {
+            daily: attachLocationToIndividual(finalIndDaily),
+            monthly: attachLocationToIndividual(indMonthly),
+            yesterday: attachLocationToIndividual(indYesterday)
+        },
         group: { daily: finalGrpDaily, monthly: grpMonthly, yesterday: grpYesterday },
-        frozen: isFrozen
+        frozen: isFrozen,
+        locations
     };
 }
 

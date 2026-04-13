@@ -8,8 +8,10 @@
 let rawData = {
     individual: { monthly: [], daily: [], yesterday: [] },
     group: { monthly: [], daily: [], yesterday: [] },
-    frozen: false
+    frozen: false,
+    locations: []
 };
+let allLocations = []; // { id, name } from server
 let viewingYesterday = false; // toggle for showing yesterday as full ranking
 let currentTab = 'group-monthly';
 let currentTheme = 'classic'; // 'classic' or 'modern'
@@ -54,6 +56,9 @@ let config = {
     listColumns: 3,
     forceHorizontal: {
         'enabled': false
+    },
+    visibleLocations: {
+        'loc_hcm': true  // Default: only HCM
     }
 };
 
@@ -102,8 +107,12 @@ function connectSSE() {
                 if (json.data.frozen !== undefined) {
                     rawData.frozen = json.data.frozen;
                 }
+                if (json.data.locations) {
+                    allLocations = json.data.locations;
+                    initLocationDefaults();
+                }
                 renderLeaderboard();
-                updateUIFromConfig(); // refresh frozen badge
+                updateUIFromConfig(); // refresh frozen badge + locations
                 updateConnectionStatus('live');
 
                 // Hide loader
@@ -180,8 +189,12 @@ async function fetchData() {
         if (json.data.frozen !== undefined) {
             rawData.frozen = json.data.frozen;
         }
+        if (json.data.locations) {
+            allLocations = json.data.locations;
+            initLocationDefaults();
+        }
         renderLeaderboard();
-        updateUIFromConfig(); // refresh frozen badge
+        updateUIFromConfig(); // refresh frozen badge + locations
         if (loader) loader.classList.add('hidden');
     } catch (error) {
         console.error('Fetch error:', error);
@@ -198,15 +211,49 @@ function getDataForTab(tab) {
     const isDaily = tab.includes('daily');
     
     // If viewing yesterday on a daily tab, return yesterday data
+    let data;
     if (isDaily && viewingYesterday && rawData[category] && rawData[category].yesterday) {
-        return rawData[category].yesterday;
+        data = rawData[category].yesterday;
+    } else {
+        const period = isDaily ? 'daily' : 'monthly';
+        data = (rawData[category] && rawData[category][period]) ? rawData[category][period] : [];
     }
     
-    const period = isDaily ? 'daily' : 'monthly';
-    if (rawData[category] && rawData[category][period]) {
-        return rawData[category][period];
+    // Filter by visible locations
+    return filterByLocation(data);
+}
+
+function filterByLocation(data) {
+    if (!data || data.length === 0) return data;
+    // If no locations configured or none checked, show all
+    const checkedIds = Object.keys(config.visibleLocations).filter(k => config.visibleLocations[k]);
+    if (checkedIds.length === 0 && allLocations.length === 0) return data;
+    
+    // If there are locations but none are checked, show nothing (user unchecked all)
+    if (allLocations.length > 0 && checkedIds.length === 0) return [];
+    
+    return data.filter(entry => {
+        if (!entry.locationId) return true; // Show unassigned entries always
+        return config.visibleLocations[entry.locationId] === true;
+    });
+}
+
+function initLocationDefaults() {
+    // Only initialize keys for locations we haven't seen before
+    // Don't override existing user preferences
+    for (const loc of allLocations) {
+        if (config.visibleLocations[loc.id] === undefined) {
+            // New location: default OFF (only loc_hcm is defaulted ON)
+            config.visibleLocations[loc.id] = false;
+        }
     }
-    return [];
+}
+
+function toggleLocation(locationId) {
+    config.visibleLocations[locationId] = !config.visibleLocations[locationId];
+    updateUIFromConfig();
+    renderLeaderboard();
+    saveSettings();
 }
 
 function getTabCategory(tab) {
@@ -612,8 +659,30 @@ function updateUIFromConfig() {
 
     // Force horizontal checkbox
     updateCheckbox('check-force-horizontal', config.forceHorizontal && config.forceHorizontal['enabled']);
+
+    // Location filter checkboxes
+    renderLocationSettings();
+
     // Footer
     document.getElementById('footer-cycle').textContent = config.cycleDuration + 's';
+}
+
+function renderLocationSettings() {
+    const container = document.getElementById('location-checkboxes');
+    if (!container) return;
+    
+    if (allLocations.length === 0) {
+        container.innerHTML = '<span style="color:var(--text-secondary); font-size:0.75rem;">No locations found</span>';
+        return;
+    }
+    
+    container.innerHTML = allLocations.map(loc => {
+        const checked = config.visibleLocations[loc.id] ? 'checked' : '';
+        return `<label class="checkbox-label" onclick="toggleLocation('${loc.id}')">
+            <div class="custom-checkbox ${checked}" id="check-loc-${loc.id}"><span class="checkbox-check">✓</span></div>
+            ${loc.name}
+        </label>`;
+    }).join('');
 }
 
 function updateCheckbox(id, isChecked) {
@@ -663,6 +732,7 @@ function loadSavedSettings() {
             if (parsed.showIncome) config.showIncome = { ...config.showIncome, ...parsed.showIncome };
             if (parsed.showAvatars) config.showAvatars = { ...config.showAvatars, ...parsed.showAvatars };
             if (parsed.showYesterday) config.showYesterday = { ...config.showYesterday, ...parsed.showYesterday };
+            if (parsed.visibleLocations) config.visibleLocations = { ...config.visibleLocations, ...parsed.visibleLocations };
 
             // Restore rotation
             if (parsed.rotation != null) {
