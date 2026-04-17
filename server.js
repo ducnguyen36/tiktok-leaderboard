@@ -6,6 +6,15 @@ const fs = require('fs');
 const { MongoClient } = require('mongodb');
 const dns = require('dns');
 
+// --- Global crash guards: prevent container from dying on unhandled errors ---
+process.on('uncaughtException', (err) => {
+    console.error('[FATAL] Uncaught exception (kept alive):', err.message);
+    console.error(err.stack);
+});
+process.on('unhandledRejection', (reason) => {
+    console.error('[FATAL] Unhandled rejection (kept alive):', reason);
+});
+
 // Fix DNS for SRV lookups (same as helioscontrol)
 dns.setDefaultResultOrder('ipv4first');
 try { dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']); } catch (e) { /* ignore */ }
@@ -84,6 +93,7 @@ app.get('/api/debug', async (req, res) => {
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 let db = null;
 let mongoClient = null;
+let isReconnecting = false;
 
 // --- SSE (Server-Sent Events) for real-time push ---
 const sseClients = new Set();
@@ -91,7 +101,15 @@ const sseClients = new Set();
 async function connectDB() {
     try {
         console.log('[Database] Connecting to MongoDB...');
-        mongoClient = new MongoClient(MONGODB_URI);
+        // Close existing client if any (reconnect scenario)
+        if (mongoClient) {
+            try { await mongoClient.close(true); } catch (e) { /* ignore */ }
+        }
+        mongoClient = new MongoClient(MONGODB_URI, {
+            serverSelectionTimeoutMS: 15000,
+            connectTimeoutMS: 15000,
+            socketTimeoutMS: 45000,
+        });
         await mongoClient.connect();
 
         const uriDb = new URL(MONGODB_URI.replace('mongodb+srv://', 'https://')).pathname.slice(1);
@@ -104,11 +122,51 @@ async function connectDB() {
         await db.collection('gifts').createIndex({ receivedTalent: 1 });
         await db.collection('profiles').createIndex({ updatedAt: -1 });
 
+        // Monitor for disconnects and auto-reconnect
+        mongoClient.on('close', () => {
+            console.warn('[Database] Connection closed unexpectedly');
+            db = null;
+            scheduleReconnect();
+        });
+        mongoClient.on('error', (err) => {
+            console.error('[Database] Client error:', err.message);
+        });
+
         return db;
     } catch (err) {
         console.error('[Database] Connection failed:', err.message);
         throw err;
     }
+}
+
+// Reconnect with exponential backoff (5s, 10s, 20s, 40s… max 5min)
+let reconnectAttempt = 0;
+function scheduleReconnect() {
+    if (isReconnecting) return;
+    isReconnecting = true;
+    const delay = Math.min(5000 * Math.pow(2, reconnectAttempt), 5 * 60 * 1000);
+    reconnectAttempt++;
+    console.log(`[Database] Reconnecting in ${delay / 1000}s (attempt #${reconnectAttempt})...`);
+    setTimeout(async () => {
+        isReconnecting = false;
+        try {
+            await connectDB();
+            reconnectAttempt = 0;
+            console.log('[Database] ✅ Reconnected successfully');
+            // Restart change streams after reconnect
+            startChangeStreams();
+            // Refresh cache
+            try {
+                const data = await buildLeaderboardData(lastResetHour, lastFreezeUntil);
+                cachedData = data;
+                cacheTimestamp = Date.now();
+                broadcastLeaderboard(data);
+            } catch (e) { /* cache refresh can fail gracefully */ }
+        } catch (err) {
+            console.error('[Database] Reconnect failed:', err.message);
+            scheduleReconnect(); // try again
+        }
+    }, delay);
 }
 
 // ==========================================
@@ -878,33 +936,54 @@ app.get('/api/leaderboard/stream', (req, res) => {
 // CHANGE STREAMS: WATCH MongoDB FOR CHANGES
 // ==========================================
 let debounceTimer = null;
+let activeGiftsStream = null;
+let activeProfilesStream = null;
+
+function stopChangeStreams() {
+    if (activeGiftsStream) {
+        try { activeGiftsStream.close(); } catch (e) { /* ignore */ }
+        activeGiftsStream = null;
+    }
+    if (activeProfilesStream) {
+        try { activeProfilesStream.close(); } catch (e) { /* ignore */ }
+        activeProfilesStream = null;
+    }
+}
 
 function startChangeStreams() {
     if (!db) return;
 
-    // Watch gifts collection
-    const giftsStream = db.collection('gifts').watch([], { fullDocument: 'updateLookup' });
-    giftsStream.on('change', (change) => {
-        console.log(`[ChangeStream] Gift ${change.operationType}`);
-        debouncedBroadcast();
-    });
-    giftsStream.on('error', (err) => {
-        console.error('[ChangeStream] Gifts stream error:', err.message);
-        // Restart after delay
-        setTimeout(() => startChangeStreams(), 5000);
-    });
+    // Close any existing streams first to avoid duplicates
+    stopChangeStreams();
 
-    // Watch profiles collection
-    const profilesStream = db.collection('profiles').watch([], { fullDocument: 'updateLookup' });
-    profilesStream.on('change', (change) => {
-        console.log(`[ChangeStream] Profile ${change.operationType}`);
-        debouncedBroadcast();
-    });
-    profilesStream.on('error', (err) => {
-        console.error('[ChangeStream] Profiles stream error:', err.message);
-    });
+    try {
+        // Watch gifts collection
+        activeGiftsStream = db.collection('gifts').watch([], { fullDocument: 'updateLookup' });
+        activeGiftsStream.on('change', (change) => {
+            console.log(`[ChangeStream] Gift ${change.operationType}`);
+            debouncedBroadcast();
+        });
+        activeGiftsStream.on('error', (err) => {
+            console.error('[ChangeStream] Gifts stream error:', err.message);
+            activeGiftsStream = null;
+            // Don't restart here — the MongoDB client 'close' event will trigger reconnection
+        });
 
-    console.log('[ChangeStream] Watching gifts + profiles collections for real-time updates');
+        // Watch profiles collection
+        activeProfilesStream = db.collection('profiles').watch([], { fullDocument: 'updateLookup' });
+        activeProfilesStream.on('change', (change) => {
+            console.log(`[ChangeStream] Profile ${change.operationType}`);
+            debouncedBroadcast();
+        });
+        activeProfilesStream.on('error', (err) => {
+            console.error('[ChangeStream] Profiles stream error:', err.message);
+            activeProfilesStream = null;
+        });
+
+        console.log('[ChangeStream] Watching gifts + profiles collections for real-time updates');
+    } catch (err) {
+        console.error('[ChangeStream] Failed to start:', err.message);
+    }
 }
 
 function debouncedBroadcast() {
@@ -912,6 +991,7 @@ function debouncedBroadcast() {
     // This prevents 100 rapid gifts from triggering 100 re-aggregations
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(async () => {
+        if (!db) return; // guard against broadcasting when DB is down
         try {
             const data = await buildLeaderboardData(lastResetHour, lastFreezeUntil);
             // Update cache
@@ -971,40 +1051,48 @@ app.use((req, res, next) => {
 });
 
 // --- Start Server ---
-connectDB()
-    .then(() => {
-        app.listen(PORT, '0.0.0.0', () => {
-            console.log(`✅ Leaderboard server running at http://0.0.0.0:${PORT}`);
-            console.log(`📁 Avatars: Electron=${ELECTRON_AVATARS} | Dev=${DEV_AVATARS} | Local=${LOCAL_AVATARS}`);
-            console.log(`🔴 SSE endpoint: /api/leaderboard/stream`);
-        });
+// Start HTTP server first — it should ALWAYS be running, even without DB
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`✅ Leaderboard server running at http://0.0.0.0:${PORT}`);
+    console.log(`📁 Avatars: Electron=${ELECTRON_AVATARS} | Dev=${DEV_AVATARS} | Local=${LOCAL_AVATARS}`);
+    console.log(`🔴 SSE endpoint: /api/leaderboard/stream`);
+});
+
+// Connect to MongoDB (with retry on failure — never exits the process)
+(async function initDB() {
+    try {
+        await connectDB();
+        reconnectAttempt = 0;
 
         // Start watching MongoDB for changes
         startChangeStreams();
 
         // Pre-warm cache on startup
-        buildLeaderboardData(lastResetHour, lastFreezeUntil)
-            .then(data => {
-                cachedData = data;
-                cacheTimestamp = Date.now();
-                console.log('[Cache] Pre-warmed leaderboard cache on startup');
-            })
-            .catch(err => console.error('[Cache] Pre-warm error:', err.message));
+        try {
+            const data = await buildLeaderboardData(lastResetHour, lastFreezeUntil);
+            cachedData = data;
+            cacheTimestamp = Date.now();
+            console.log('[Cache] Pre-warmed leaderboard cache on startup');
+        } catch (err) {
+            console.error('[Cache] Pre-warm error:', err.message);
+        }
+    } catch (err) {
+        console.error('[Startup] Initial DB connection failed:', err.message);
+        console.log('[Startup] Server is running WITHOUT database — will keep retrying...');
+        scheduleReconnect();
+    }
+})();
 
-        // Background refresh every hour when no clients connected
-        setInterval(async () => {
-            if (sseClients.size > 0) return; // clients connected = cache stays fresh via change streams
-            try {
-                const data = await buildLeaderboardData(lastResetHour, lastFreezeUntil);
-                cachedData = data;
-                cacheTimestamp = Date.now();
-                console.log('[Cache] Background refresh (no clients connected)');
-            } catch (err) {
-                console.error('[Cache] Background refresh error:', err.message);
-            }
-        }, CACHE_BG_INTERVAL);
-    })
-    .catch(err => {
-        console.error('Failed to start server:', err.message);
-        process.exit(1);
-    });
+// Background refresh every hour when no clients connected
+setInterval(async () => {
+    if (!db) return; // skip if DB is down
+    if (sseClients.size > 0) return; // clients connected = cache stays fresh via change streams
+    try {
+        const data = await buildLeaderboardData(lastResetHour, lastFreezeUntil);
+        cachedData = data;
+        cacheTimestamp = Date.now();
+        console.log('[Cache] Background refresh (no clients connected)');
+    } catch (err) {
+        console.error('[Cache] Background refresh error:', err.message);
+    }
+}, CACHE_BG_INTERVAL);
