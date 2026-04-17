@@ -702,7 +702,7 @@ function applyPreset(presetName) {
         // show score for both, avatar OFF for both, podium 3, columns 1,
         // location: 97A HCM only
         rotation = 90;
-        currentTheme = 'classic';
+        currentTheme = 'modern';
 
         config.visibleTabs = {
             'group-monthly': true,
@@ -734,7 +734,7 @@ function applyPreset(presetName) {
         // show score for both, avatar OFF for both, podium 5, columns 2,
         // location: 97A HCM only
         rotation = 90;
-        currentTheme = 'modern';
+        currentTheme = 'classic';
 
         config.visibleTabs = {
             'group-monthly': false,
