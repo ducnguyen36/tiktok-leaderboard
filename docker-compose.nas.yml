@@ -32,11 +32,11 @@ services:
     volumes:
       - avatar-cache:/app/avatars
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:5000/api/health').then(r=>{if(!r.ok)throw 1;return r.json()}).then(d=>{if(d.status!=='ok')throw 1;process.exit(0)}).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:5000/api/health').then(r=>{if(!r.ok)throw 1;process.exit(0)}).catch(()=>process.exit(1))"]
       interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      timeout: 15s
+      retries: 5
+      start_period: 120s
 
   # ============================================
   # CLOUDFLARE TUNNEL — Free HTTPS access

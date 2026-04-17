@@ -1,0 +1,105 @@
+{
+   "CapAdd" : null,
+   "CapDrop" : null,
+   "cmd" : "node server.js",
+   "cmd_v2" : "node server.js",
+   "cpu_priority" : 0,
+   "enable_publish_all_ports" : false,
+   "enable_restart_policy" : false,
+   "enabled" : true,
+   "env_variables" : [
+      {
+         "key" : "MONGODB_URI",
+         "value" : "mongodb+srv://admin:shin@cluster0.esecu0j.mongodb.net/?appName=Cluster0"
+      },
+      {
+         "key" : "NODE_TLS_REJECT_UNAUTHORIZED",
+         "value" : "0"
+      },
+      {
+         "key" : "TZ",
+         "value" : "Asia/Ho_Chi_Minh"
+      },
+      {
+         "key" : "NODE_ENV",
+         "value" : "production"
+      },
+      {
+         "key" : "TIKTOK_SESSION_ID",
+         "value" : "1d44f09c30ec14af6f970ae6d46f6977"
+      },
+      {
+         "key" : "PORT",
+         "value" : "5000"
+      },
+      {
+         "key" : "CLOUDFLARE_TUNNEL_TOKEN",
+         "value" : "eyJhIjoiNzdhOTU1Y2FlZjJiOTYxNmEyZDk2MGI5NGExMDVmNGMiLCJ0IjoiOGI0ZTY5NWQtOWFjZi00N2IxLWI4NmItZGNjYWUwMGY1YzdiIiwicyI6Ik16bGhOMkZsTURVdFpEVm1ZaTAwTldSaUxUaG1ZMlF0T0RBNE1HSmhPR1l6WmpBdyJ9"
+      },
+      {
+         "key" : "PATH",
+         "value" : "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      },
+      {
+         "key" : "NODE_VERSION",
+         "value" : "22.22.2"
+      },
+      {
+         "key" : "YARN_VERSION",
+         "value" : "1.22.22"
+      }
+   ],
+   "exporting" : false,
+   "id" : "01ed9cb5029ae417a4b1e5682f8ebeb5b3a7ee01345b381bcc12b4191a403c43",
+   "image" : "ghcr.io/ducnguyen36/tiktok-leaderboard:latest",
+   "is_ddsm" : false,
+   "is_package" : false,
+   "labels" : {
+      "com.docker.compose.config-hash" : "e34531c4207427ac096e98d9065c8aad5ca9107cac9119378be642ab28d6ad91",
+      "com.docker.compose.container-number" : "1",
+      "com.docker.compose.depends_on" : "",
+      "com.docker.compose.image" : "sha256:01004f0c66f0b8707c98ad81b8243d3b01027446311b9afb692b6cc67c54ae98",
+      "com.docker.compose.oneoff" : "False",
+      "com.docker.compose.project" : "helios-leaderboard",
+      "com.docker.compose.project.config_files" : "/volume1/docker/helios-leaderboard/docker-compose.yml",
+      "com.docker.compose.project.working_dir" : "/volume1/docker/helios-leaderboard",
+      "com.docker.compose.replace" : "068bee4c986e4c16eef712b9888b3db334e56c9fded797bfdc91dd32c1394bd4",
+      "com.docker.compose.service" : "leaderboard",
+      "com.docker.compose.version" : "2.20.1",
+      "org.opencontainers.image.created" : "2026-04-17T05:11:48.614Z",
+      "org.opencontainers.image.description" : "",
+      "org.opencontainers.image.licenses" : "",
+      "org.opencontainers.image.revision" : "192d15c6c1024051cda9f81c77ec45e91118dfdd",
+      "org.opencontainers.image.source" : "https://github.com/ducnguyen36/tiktok-leaderboard",
+      "org.opencontainers.image.title" : "tiktok-leaderboard",
+      "org.opencontainers.image.url" : "https://github.com/ducnguyen36/tiktok-leaderboard",
+      "org.opencontainers.image.version" : "latest"
+   },
+   "links" : [],
+   "memory_limit" : 0,
+   "name" : "helios-leaderboard",
+   "network" : [
+      {
+         "driver" : "bridge",
+         "name" : "helios-leaderboard_default"
+      }
+   ],
+   "network_mode" : "helios-leaderboard_default",
+   "port_bindings" : [
+      {
+         "container_port" : 5000,
+         "host_port" : 5050,
+         "type" : "tcp"
+      }
+   ],
+   "privileged" : false,
+   "shortcut" : {
+      "enable_shortcut" : false,
+      "enable_status_page" : false,
+      "enable_web_page" : false,
+      "web_page_url" : ""
+   },
+   "use_host_network" : false,
+   "version" : 2,
+   "volume_bindings" : []
+}
