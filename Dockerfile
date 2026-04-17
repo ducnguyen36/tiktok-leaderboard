@@ -30,4 +30,4 @@ EXPOSE 5000
 # Do NOT define HEALTHCHECK here — it would override compose
 
 # Start server
-CMD ["node", "server.js"]
+CMD ["node", "--max-old-space-size=256", "server.js"]

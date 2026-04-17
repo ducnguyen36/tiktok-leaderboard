@@ -15,6 +15,15 @@ process.on('unhandledRejection', (reason) => {
     console.error('[FATAL] Unhandled rejection (kept alive):', reason);
 });
 
+// --- Memory monitoring ---
+function logMemory(label) {
+    const mem = process.memoryUsage();
+    const rss = (mem.rss / 1024 / 1024).toFixed(1);
+    const heap = (mem.heapUsed / 1024 / 1024).toFixed(1);
+    const heapTotal = (mem.heapTotal / 1024 / 1024).toFixed(1);
+    console.log(`[Memory] ${label}: RSS=${rss}MB, Heap=${heap}/${heapTotal}MB`);
+}
+
 // Fix DNS for SRV lookups (same as helioscontrol)
 dns.setDefaultResultOrder('ipv4first');
 try { dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']); } catch (e) { /* ignore */ }
@@ -680,7 +689,23 @@ let cachedData = null;
 let cacheTimestamp = 0;
 const CACHE_BG_INTERVAL = 60 * 60 * 1000; // 1 hour background refresh when no clients
 
+let isBuilding = false; // guard against concurrent builds
+
 async function buildLeaderboardData(resetHour, freezeUntil) {
+    // Prevent concurrent builds from piling up memory
+    if (isBuilding) {
+        console.log('[Build] Skipping — another build is already running');
+        return cachedData; // return stale cache instead of building again
+    }
+    isBuilding = true;
+    try {
+    return await _buildLeaderboardDataInner(resetHour, freezeUntil);
+    } finally {
+        isBuilding = false;
+    }
+}
+
+async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
     const now = new Date();
 
     // Daily boundary
@@ -1096,3 +1121,14 @@ setInterval(async () => {
         console.error('[Cache] Background refresh error:', err.message);
     }
 }, CACHE_BG_INTERVAL);
+
+// Periodic memory log (every 10 minutes)
+setInterval(() => {
+    logMemory('periodic');
+    // Force garbage collection hint if available (run with --expose-gc)
+    if (global.gc) {
+        global.gc();
+        logMemory('post-gc');
+    }
+}, 10 * 60 * 1000);
+logMemory('startup');
