@@ -763,21 +763,19 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
 
     const giftProjection = { projection: { receivedTalent: 1, receivedTalents: 1, receivedTalentUid: 1, toMemberUid: 1, cost: 1, sessionId: 1, timeStamp: 1, user: 1 } };
 
-    // Fetch ALL gifts (including manual) — group view needs them, individual filters them out
-    const [allDailyGifts, allYesterdayGifts, allMonthlyGifts] = await Promise.all([
-        db.collection('gifts').find(
-            { timeStamp: { $gte: dailyStartMs } },
-            giftProjection
-        ).toArray(),
-        db.collection('gifts').find(
-            { timeStamp: { $gte: yesterdayStartMs, $lt: yesterdayEndMs } },
-            giftProjection
-        ).toArray(),
-        db.collection('gifts').find(
-            { timeStamp: { $gte: monthlyStartMs } },
-            giftProjection
-        ).toArray()
-    ]);
+    // Load ALL monthly gifts ONCE — daily and yesterday are subsets of this
+    // This avoids loading the same data 3x from MongoDB (was the #1 memory killer)
+    const allMonthlyGifts = await db.collection('gifts').find(
+        { timeStamp: { $gte: monthlyStartMs } },
+        giftProjection
+    ).toArray();
+
+    console.log(`[Build] Loaded ${allMonthlyGifts.length} monthly gifts`);
+    logMemory('after-gift-load');
+
+    // Split into daily and yesterday subsets (no extra MongoDB queries!)
+    const allDailyGifts = allMonthlyGifts.filter(g => g.timeStamp >= dailyStartMs);
+    const allYesterdayGifts = allMonthlyGifts.filter(g => g.timeStamp >= yesterdayStartMs && g.timeStamp < yesterdayEndMs);
 
     // Individual view excludes manual gifts
     const isNotManual = g => !(g.user && g.user.userId === 'Manual');
