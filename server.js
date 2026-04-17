@@ -1009,14 +1009,23 @@ function startChangeStreams() {
     }
 }
 
+let lastBroadcastTime = 0;
+const BROADCAST_THROTTLE = 10000; // At most 1 rebuild every 10 seconds
+
 function debouncedBroadcast() {
-    // Debounce: wait 500ms after last change before re-aggregating
-    // This prevents 100 rapid gifts from triggering 100 re-aggregations
+    // Throttle + debounce: ensure at most 1 rebuild per 10s
+    // If a build happened recently, schedule one for later
     if (debounceTimer) clearTimeout(debounceTimer);
+
+    const timeSinceLast = Date.now() - lastBroadcastTime;
+    const delay = Math.max(BROADCAST_THROTTLE - timeSinceLast, 2000); // at least 2s debounce
+
     debounceTimer = setTimeout(async () => {
         if (!db) return; // guard against broadcasting when DB is down
         try {
+            lastBroadcastTime = Date.now();
             const data = await buildLeaderboardData(lastResetHour, lastFreezeUntil);
+            if (!data) return; // skipped (concurrent guard)
             // Update cache
             cachedData = data;
             cacheTimestamp = Date.now();
@@ -1024,7 +1033,7 @@ function debouncedBroadcast() {
         } catch (err) {
             console.error('[ChangeStream] Broadcast error:', err.message);
         }
-    }, 500);
+    }, delay);
 }
 
 // ==========================================
