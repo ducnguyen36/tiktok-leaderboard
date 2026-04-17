@@ -995,26 +995,87 @@ function toggleShortcutsHelp() {
 }
 
 // ==========================================
-// WAKE LOCK
+// WAKE LOCK (with silent-video fallback for TVs)
 // ==========================================
+let _wakeLockSentinel = null;
+
 async function requestWakeLock() {
+    // Strategy 1: Native Wake Lock API (works on modern Chrome/Edge)
+    let nativeLockOk = false;
     try {
         if ('wakeLock' in navigator) {
-            const lock = await navigator.wakeLock.request('screen');
-            console.log('Wake Lock active');
-            lock.addEventListener('release', () => console.log('Wake Lock released'));
+            _wakeLockSentinel = await navigator.wakeLock.request('screen');
+            nativeLockOk = true;
+            console.log('[WakeLock] Native Wake Lock active');
+            _wakeLockSentinel.addEventListener('release', () => {
+                console.log('[WakeLock] Native lock released');
+                _wakeLockSentinel = null;
+            });
 
             document.addEventListener('visibilitychange', async () => {
-                if (document.visibilityState === 'visible') {
+                if (document.visibilityState === 'visible' && !_wakeLockSentinel) {
                     try {
-                        await navigator.wakeLock.request('screen');
+                        _wakeLockSentinel = await navigator.wakeLock.request('screen');
+                        console.log('[WakeLock] Re-acquired after visibility change');
                     } catch (e) { /* ignore */ }
                 }
             });
         }
     } catch (e) {
-        console.log('Wake Lock not available:', e.message);
+        console.log('[WakeLock] Native API failed:', e.message);
     }
+
+    // Strategy 2: Silent video loop fallback (keeps TV displays awake)
+    // This works on TVs and older browsers that don't support Wake Lock API
+    try {
+        startSilentVideoLoop();
+        console.log('[WakeLock] Silent video fallback active');
+    } catch (e) {
+        console.log('[WakeLock] Video fallback failed:', e.message);
+    }
+
+    // Strategy 3: Periodic title change to simulate activity
+    setInterval(() => {
+        document.title = document.title.endsWith(' ') 
+            ? document.title.trimEnd() 
+            : document.title + ' ';
+    }, 30000); // every 30 seconds
+}
+
+function startSilentVideoLoop() {
+    // Tiny base64-encoded silent webm video (< 1KB)
+    // This tricks the browser/TV into thinking media is playing
+    const silentWebm = 'data:video/webm;base64,GkXfo0AgQoaBAUL3gQFC8oEEQvOBCEKCQAR3ZWJtQoeBAkKFgQIYU4BnQI0VSalmQCgq17FAAw9CQE2AQAZ3aGFtbXlXQUAGd2hhbW15RIlACECPQAAAAAAAFlSua0AxrkAu14EBY8WBAZyBACK1nEADdW5khkAFVl9WUDglhohAA1ZQOIOBAeBABrCBCLqBCB9DtnVAIueBAKNAHIEAAIAwAQCdASoIAAgAAUAmJaQAA3AA/vz0AAA=';
+
+    const video = document.createElement('video');
+    video.setAttribute('playsinline', '');
+    video.setAttribute('muted', '');
+    video.setAttribute('loop', '');
+    video.muted = true;
+    video.style.cssText = 'position:fixed;top:-1px;left:-1px;width:1px;height:1px;opacity:0.01;pointer-events:none;z-index:-1;';
+    video.src = silentWebm;
+    document.body.appendChild(video);
+
+    // Try to play (may need user interaction on some devices)
+    const tryPlay = () => {
+        video.play().catch(() => {
+            // If autoplay blocked, try on next user interaction
+            const playOnInteract = () => {
+                video.play().catch(() => {});
+                document.removeEventListener('click', playOnInteract);
+                document.removeEventListener('touchstart', playOnInteract);
+            };
+            document.addEventListener('click', playOnInteract, { once: true });
+            document.addEventListener('touchstart', playOnInteract, { once: true });
+        });
+    };
+
+    tryPlay();
+
+    // Re-start video if it gets paused somehow
+    video.addEventListener('pause', () => {
+        setTimeout(() => video.play().catch(() => {}), 100);
+    });
 }
 
 // ==========================================
