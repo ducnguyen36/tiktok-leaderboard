@@ -982,6 +982,44 @@ body.theme-modern .idol-value {
     transform: translateY(0);
 }
 
+/* Preset Buttons */
+.preset-group {
+    display: flex;
+    gap: 10px;
+}
+
+.preset-btn {
+    flex: 1;
+    padding: 10px 14px;
+    border: none;
+    border-radius: 12px;
+    color: white;
+    font-weight: 700;
+    font-size: 0.82rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all 0.2s;
+    font-family: inherit;
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+}
+
+.preset-btn:nth-child(2) {
+    background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+}
+
+.preset-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    filter: brightness(1.1);
+}
+
+.preset-btn:active {
+    transform: translateY(0);
+}
+
 /* ==========================================
    FOOTER BAR
    ========================================== */

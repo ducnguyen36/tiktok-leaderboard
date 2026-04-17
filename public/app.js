@@ -693,6 +693,117 @@ function updateCheckbox(id, isChecked) {
 }
 
 // ==========================================
+// PRESETS
+// ==========================================
+function applyPreset(presetName) {
+    if (presetName === 'group') {
+        // Group leaderboard preset:
+        // Rotate 90°, theme light (classic), only GM + GD tabs,
+        // show score for both, avatar OFF for both, podium 3, columns 1,
+        // location: 97A HCM only
+        rotation = 90;
+        currentTheme = 'classic';
+
+        config.visibleTabs = {
+            'group-monthly': true,
+            'group-daily': true,
+            'individual-monthly': false,
+            'individual-daily': false
+        };
+        config.showIncome = {
+            'group-monthly': true,
+            'group-daily': true,
+            'individual-monthly': true,
+            'individual-daily': true
+        };
+        config.showAvatars = {
+            'group-monthly': false,
+            'group-daily': false,
+            'individual-monthly': false,
+            'individual-daily': false
+        };
+        config.podiumSlots = 3;
+        config.listColumns = 1;
+
+        // Switch to first visible tab
+        currentTab = 'group-monthly';
+
+    } else if (presetName === 'individual') {
+        // Individual leaderboard preset:
+        // Rotate 90°, theme dark (modern), only IM + ID tabs,
+        // show score for both, avatar OFF for both, podium 5, columns 2,
+        // location: 97A HCM only
+        rotation = 90;
+        currentTheme = 'modern';
+
+        config.visibleTabs = {
+            'group-monthly': false,
+            'group-daily': false,
+            'individual-monthly': true,
+            'individual-daily': true
+        };
+        config.showIncome = {
+            'group-monthly': true,
+            'group-daily': true,
+            'individual-monthly': true,
+            'individual-daily': true
+        };
+        config.showAvatars = {
+            'group-monthly': false,
+            'group-daily': false,
+            'individual-monthly': false,
+            'individual-daily': false
+        };
+        config.podiumSlots = 5;
+        config.listColumns = 2;
+
+        // Switch to first visible tab
+        currentTab = 'individual-monthly';
+    }
+
+    // Common for both presets: set location to 97A HCM only
+    // Find the location with "97A" in its name and enable only that one
+    const loc97A = allLocations.find(loc =>
+        loc.name.includes('97A') || loc.id.includes('97a') || loc.id.includes('97A')
+    );
+    if (loc97A) {
+        // Disable all locations first
+        for (const loc of allLocations) {
+            config.visibleLocations[loc.id] = false;
+        }
+        // Enable only 97A
+        config.visibleLocations[loc97A.id] = true;
+    }
+
+    // Apply rotation
+    config.rotation = rotation;
+    applyRotation();
+    const rotInput = document.getElementById('rotation-deg');
+    if (rotInput) rotInput.value = rotation;
+
+    // Apply theme
+    setTheme(currentTheme);
+
+    // Update active tab button
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    const btn = document.getElementById('btn-' + currentTab);
+    if (btn) btn.classList.add('active');
+
+    // Save, update UI, re-render
+    saveSettings();
+    updateUIFromConfig();
+    renderLeaderboard();
+
+    // Visual feedback
+    const fb = document.getElementById('save-feedback');
+    if (fb) {
+        fb.textContent = `✓ ${presetName === 'group' ? 'Group' : 'Individual'} preset applied!`;
+        fb.style.display = 'block';
+        setTimeout(() => { fb.style.display = 'none'; fb.textContent = '✓ Saved!'; }, 2000);
+    }
+}
+
+// ==========================================
 // PERSISTENCE
 // ==========================================
 function saveSettings() {
