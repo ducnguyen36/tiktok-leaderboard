@@ -2,100 +2,304 @@
 <html lang="en">
 
 <head>
-  <meta charset="utf-8" />
-  <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#000000" />
-  <meta name="description" content="Web site created using create-react-app" />
-  <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
-  <!--
-      manifest.json provides metadata used when your web app is installed on a
-      user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
-    -->
-  <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
-  <!--
-      Notice the use of %PUBLIC_URL% in the tags above.
-      It will be replaced with the URL of the `public` folder during the build.
-      Only files inside the `public` folder can be referenced from the HTML.
-
-      Unlike "/favicon.ico" or "favicon.ico", "%PUBLIC_URL%/favicon.ico" will
-      work correctly both with client-side routing and a non-root public URL.
-      Learn how to configure a non-root public URL by running `npm run build`.
-    -->
-  <title>React App</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Helios Talent</title>
+    <meta name="description" content="Helios Talent — live TikTok talent leaderboard rankings">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="/style.css">
 </head>
 
 <body>
-  <noscript>You need to enable JavaScript to run this app.</noscript>
-  <!-- Suppress React development error overlay on TV browsers (LG WebOS, etc.) -->
-  <script>
-    (function () {
-      var ua = navigator.userAgent.toLowerCase();
-      var tvKeywords = ['webos', 'tizen', 'smarttv', 'hbbtv', 'opera tv', 'viera', 'bravia'];
-      var isTV = tvKeywords.some(function (kw) { return ua.indexOf(kw) !== -1; });
 
-      if (isTV) {
-        // Add class to body to enable CSS hiding
-        document.addEventListener('DOMContentLoaded', function () {
-          document.body.classList.add('hide-error-overlay');
-        });
+    <!-- Main Content Wrapper (handles rotation) -->
+    <div id="app-wrapper">
 
-        // Override window.onerror to prevent React error overlay from showing
-        window.onerror = function (msg, url, line, col, error) {
-          console.warn('Suppressed error overlay on TV:', msg);
-          return true;
-        };
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="hidden">
+            <div class="settings-content">
+                <div class="settings-header">
+                    <h2>⚙️ Settings</h2>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <button class="close-btn" id="btn-shortcuts-help" onclick="toggleShortcutsHelp()" title="Keyboard Shortcuts"><i class="fas fa-question-circle"></i></button>
+                        <button class="close-btn" onclick="toggleSettings()"><i class="fas fa-times"></i></button>
+                    </div>
+                </div>
 
-        // Override unhandled promise rejections
-        window.onunhandledrejection = function (event) {
-          console.warn('Suppressed unhandled rejection on TV:', event.reason);
-          event.preventDefault();
-        };
+                <!-- Shortcuts tooltip (hidden by default) -->
+                <div id="shortcuts-help" class="shortcuts-tooltip hidden">
+                    <div class="shortcuts-list">
+                        <kbd>0</kbd> Rotate &nbsp; <kbd>1</kbd> Grp Mon &nbsp; <kbd>2</kbd> Grp Day &nbsp; <kbd>3</kbd> Ind Mon &nbsp; <kbd>4</kbd> Ind Day<br>
+                        <kbd>5</kbd> Toggle Income &nbsp; <kbd>6</kbd> Theme &nbsp; <kbd>7</kbd> Settings &nbsp; <kbd>8</kbd> Refresh
+                    </div>
+                </div>
 
-        // Use MutationObserver to remove error overlay iframes as they appear
-        var removeOverlay = function () {
-          // Target the webpack-dev-server error overlay iframe
-          var overlays = document.querySelectorAll('iframe[style*="position: fixed"], [id*="webpack-dev-server"], [id*="error-overlay"]');
-          overlays.forEach(function (el) {
-            if (el && el.parentNode) {
-              el.parentNode.removeChild(el);
-              console.log('Removed error overlay element');
-            }
-          });
-        };
+                <!-- Row 0: Presets -->
+                <div class="settings-row">
+                    <div class="settings-section" style="width:100%">
+                        <div class="settings-title">Quick Presets</div>
+                        <div class="preset-group">
+                            <button class="preset-btn" onclick="applyPreset('group')" title="Group: Rotate 90°, Dark, GM+GD, Score ON, Avatar OFF, Podium 3, Cols 1, 97A HCM">
+                                <i class="fas fa-users"></i> Group Board
+                            </button>
+                            <button class="preset-btn" onclick="applyPreset('individual')" title="Individual: Rotate 90°, Light, IM+ID, Score ON, Avatar OFF, Podium 5, Cols 2, 97A HCM">
+                                <i class="fas fa-user"></i> Individual Board
+                            </button>
+                        </div>
+                    </div>
+                </div>
 
-        // Run immediately and also observe for new elements
-        if (document.body) {
-          removeOverlay();
-        }
+                <!-- Row 1: Theme + Tabs -->
+                <div class="settings-row">
+                    <div class="settings-section settings-half">
+                        <div class="settings-title">Theme</div>
+                        <div class="checkbox-group">
+                            <label class="checkbox-label" onclick="setTheme('classic')">
+                                <div class="custom-checkbox" id="check-theme-classic"><span class="checkbox-check">✓</span></div>
+                                Classic
+                            </label>
+                            <label class="checkbox-label" onclick="setTheme('modern')">
+                                <div class="custom-checkbox" id="check-theme-modern"><span class="checkbox-check">✓</span></div>
+                                Modern
+                            </label>
+                        </div>
+                    </div>
+                    <div class="settings-section settings-half">
+                        <div class="settings-title">Enabled Tabs</div>
+                        <div class="checkbox-group">
+                            <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'group-monthly')">
+                                <div class="custom-checkbox" id="check-tab-group-monthly"><span class="checkbox-check">✓</span></div>
+                                GM
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'group-daily')">
+                                <div class="custom-checkbox" id="check-tab-group-daily"><span class="checkbox-check">✓</span></div>
+                                GD
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'individual-monthly')">
+                                <div class="custom-checkbox" id="check-tab-individual-monthly"><span class="checkbox-check">✓</span></div>
+                                IM
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'individual-daily')">
+                                <div class="custom-checkbox" id="check-tab-individual-daily"><span class="checkbox-check">✓</span></div>
+                                ID
+                            </label>
+                        </div>
+                    </div>
+                </div>
 
-        var observer = new MutationObserver(function (mutations) {
-          removeOverlay();
-        });
+                <!-- Row 2: Income + Avatars -->
+                <div class="settings-row">
+                    <div class="settings-section settings-half">
+                        <div class="settings-title">Show Income</div>
+                        <div class="checkbox-group">
+                            <label class="checkbox-label" onclick="toggleConfig('showIncome', 'group-monthly')">
+                                <div class="custom-checkbox" id="check-income-group-monthly"><span class="checkbox-check">✓</span></div>
+                                GM
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('showIncome', 'group-daily')">
+                                <div class="custom-checkbox" id="check-income-group-daily"><span class="checkbox-check">✓</span></div>
+                                GD
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('showIncome', 'individual-monthly')">
+                                <div class="custom-checkbox" id="check-income-individual-monthly"><span class="checkbox-check">✓</span></div>
+                                IM
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('showIncome', 'individual-daily')">
+                                <div class="custom-checkbox" id="check-income-individual-daily"><span class="checkbox-check">✓</span></div>
+                                ID
+                            </label>
+                        </div>
+                    </div>
+                    <div class="settings-section settings-half">
+                        <div class="settings-title">List Avatars</div>
+                        <div class="checkbox-group">
+                            <label class="checkbox-label" onclick="toggleConfig('showAvatars', 'group-monthly')">
+                                <div class="custom-checkbox" id="check-avatar-group-monthly"><span class="checkbox-check">✓</span></div>
+                                GM
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('showAvatars', 'group-daily')">
+                                <div class="custom-checkbox" id="check-avatar-group-daily"><span class="checkbox-check">✓</span></div>
+                                GD
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('showAvatars', 'individual-monthly')">
+                                <div class="custom-checkbox" id="check-avatar-individual-monthly"><span class="checkbox-check">✓</span></div>
+                                IM
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('showAvatars', 'individual-daily')">
+                                <div class="custom-checkbox" id="check-avatar-individual-daily"><span class="checkbox-check">✓</span></div>
+                                ID
+                            </label>
+                        </div>
+                    </div>
+                </div>
 
-        // Start observing when DOM is ready
-        if (document.body) {
-          observer.observe(document.body, { childList: true, subtree: true });
-        } else {
-          document.addEventListener('DOMContentLoaded', function () {
-            observer.observe(document.body, { childList: true, subtree: true });
-            removeOverlay();
-          });
-        }
-      }
-    })();
-  </script>
-  <div id="root"></div>
-  <!--
-      This HTML file is a template.
-      If you open it directly in the browser, you will see an empty page.
+                <!-- Row 3: Yesterday Points + Layout -->
+                <div class="settings-row">
+                    <div class="settings-section settings-half">
+                        <div class="settings-title">Yesterday Points</div>
+                        <div class="checkbox-group">
+                            <label class="checkbox-label" onclick="toggleConfig('showYesterday', 'group-daily')">
+                                <div class="custom-checkbox" id="check-yd-group-daily"><span class="checkbox-check">✓</span></div>
+                                Grp
+                            </label>
+                            <label class="checkbox-label" onclick="toggleConfig('showYesterday', 'individual-daily')">
+                                <div class="custom-checkbox" id="check-yd-individual-daily"><span class="checkbox-check">✓</span></div>
+                                Ind
+                            </label>
+                        </div>
+                    </div>
+                    <div class="settings-section settings-half">
+                        <div class="settings-title">Locations</div>
+                        <div class="checkbox-group" id="location-checkboxes">
+                            <!-- Populated dynamically by renderLocationSettings() -->
+                        </div>
+                    </div>
+                </div>
 
-      You can add webfonts, meta tags, or analytics to this file.
-      The build step will place the bundled scripts into the <body> tag.
+                <!-- Row 3b: Podium / Columns -->
+                <div class="settings-row">
+                    <div class="settings-section settings-half">
+                        <div class="settings-title">Podium / Columns</div>
+                        <div class="input-group compact">
+                            <i class="fas fa-trophy" style="color:var(--text-secondary); font-size:11px"></i>
+                            <input type="number" class="settings-input mini" id="podium-slots" min="1" max="5" value="5"
+                                onchange="updateConfigValue('podiumSlots', this.value); renderLeaderboard()">
+                            <i class="fas fa-columns" style="color:var(--text-secondary); font-size:11px; margin-left:8px"></i>
+                            <input type="number" class="settings-input mini" id="list-columns" min="1" max="5" value="3"
+                                onchange="updateConfigValue('listColumns', this.value); renderLeaderboard()">
+                        </div>
+                        <label class="checkbox-label" style="margin-top:6px; font-size:0.75rem;" onclick="toggleConfig('forceHorizontal', 'enabled')">
+                            <div class="custom-checkbox" id="check-force-horizontal"><span class="checkbox-check">✓</span></div>
+                            Force Horizontal
+                        </label>
+                    </div>
+                </div>
 
-      To begin the development, run `npm start` or `yarn start`.
-      To create a production bundle, use `npm run build` or `yarn build`.
-    -->
+                <!-- Row 4: Rotation + Cycle + Reset + Freeze -->
+                <div class="settings-row">
+                    <div class="settings-section settings-quarter">
+                        <div class="settings-title">Rotate</div>
+                        <div class="input-group compact">
+                            <input type="number" class="settings-input mini" id="rotation-deg" min="0" max="270" step="90" value="0"
+                                onchange="setRotation(parseInt(this.value))">
+                            <span style="color:var(--text-secondary); font-size:0.75rem">°</span>
+                        </div>
+                    </div>
+                    <div class="settings-section settings-quarter">
+                        <div class="settings-title">Cycle</div>
+                        <div class="input-group compact">
+                            <input type="number" class="settings-input mini" id="cycle-duration" min="1" value="10"
+                                onchange="updateConfigValue('cycleDuration', this.value)">
+                            <span style="color:var(--text-secondary); font-size:0.75rem">s</span>
+                        </div>
+                    </div>
+                    <div class="settings-section settings-quarter">
+                        <div class="settings-title">Reset</div>
+                        <div class="input-group compact">
+                            <input type="number" class="settings-input mini" id="reset-hour" min="0" max="23" value="0"
+                                onchange="updateConfigValue('resetHour', this.value)">
+                            <span style="color:var(--text-secondary); font-size:0.75rem">h</span>
+                        </div>
+                    </div>
+                    <div class="settings-section settings-quarter">
+                        <div class="settings-title">Freeze</div>
+                        <div class="input-group compact">
+                            <div class="freeze-box">
+                                <input type="number" class="freeze-hh" id="freeze-hh" min="0" max="23" placeholder="HH"
+                                    oninput="updateFreezeTime()">
+                                <span class="freeze-colon">:</span>
+                                <input type="number" class="freeze-mm" id="freeze-mm" min="0" max="59" placeholder="MM"
+                                    oninput="updateFreezeTime()">
+                            </div>
+                            <button class="clear-btn mini" onclick="clearFreezeTime()" title="Clear">
+                                <i class="fas fa-times" style="font-size:9px"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Save Button -->
+                <div class="settings-section" style="border-top: 1px solid var(--border-color); padding-top: 12px; margin-bottom: 0;">
+                    <button class="save-default-btn" onclick="saveAsDefault()">
+                        <i class="fas fa-save"></i> Save as Default
+                    </button>
+                    <div id="save-feedback" style="font-size: 0.75rem; color: #4ade80; margin-top: 4px; display:none;">✓ Saved!</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Container -->
+        <div class="container">
+            <header>
+                <div class="header-left">
+                    <img src="/default.jpg" alt="Helios" class="header-logo">
+                    <h1>Helios Talent <span id="header-loader" class="header-loader hidden"></span>
+                </h1>
+                </div>
+                <div class="controls">
+                    <button class="icon-btn" id="btn-yesterday-view" onclick="toggleYesterdayView()" title="View Yesterday">
+                        <i class="fas fa-clock"></i>
+                    </button>
+                    <button class="icon-btn theme-toggle" onclick="cycleTheme()" title="Toggle Theme (6)">
+                        <i class="fas fa-palette"></i>
+                    </button>
+                    <button class="icon-btn" onclick="rotateScreen()" title="Rotate (0)">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                    <button class="icon-btn" onclick="toggleSettings()" title="Settings (7)">
+                        <i class="fas fa-cog"></i>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Tabs -->
+            <div class="tabs-container">
+                <div class="tabs" id="tabs-group">
+                    <button class="tab-btn active" id="btn-group-monthly" onclick="switchTab('group-monthly')">Group Monthly</button>
+                    <button class="tab-btn" id="btn-group-daily" onclick="switchTab('group-daily')">Group Daily</button>
+                    <button class="tab-btn" id="btn-individual-monthly" onclick="switchTab('individual-monthly')">Ind. Monthly</button>
+                    <button class="tab-btn" id="btn-individual-daily" onclick="switchTab('individual-daily')">Ind. Daily</button>
+                </div>
+            </div>
+
+            <!-- Content -->
+            <div id="content" style="flex:1; display:flex; flex-direction:column; min-height:0;">
+                <!-- Podium (Top N) -->
+                <div id="podium" class="top-section">
+                    <!-- Injected via JS -->
+                </div>
+
+                <!-- List (Rank N+1) -->
+                <div id="list" class="list-container">
+                    <!-- Injected via JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer-bar" id="footer-bar">
+            <div class="footer-item">
+                <span id="footer-connection" style="font-weight:600; font-size:11px;">🟡 POLL</span>
+            </div>
+            <div class="footer-divider"></div>
+            <div class="footer-item">
+                <i class="fas fa-sync-alt" style="font-size:10px"></i>
+                <span id="footer-cycle" class="footer-highlight">10s</span>
+            </div>
+            <div class="footer-divider"></div>
+            <div class="footer-item">
+                <i class="fas fa-hourglass-half" style="font-size:10px"></i>
+                <span>Next: <span id="footer-countdown" class="footer-highlight">10s</span></span>
+            </div>
+            <div class="footer-divider"></div>
+            <div class="footer-item">
+                <i class="fas fa-clock" style="font-size:10px"></i>
+                <span id="footer-clock" class="footer-highlight"></span>
+            </div>
+        </div>
+    </div>
+
+    <script src="/app.js"></script>
 </body>
 
 </html>
