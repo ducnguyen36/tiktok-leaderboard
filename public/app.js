@@ -233,7 +233,7 @@ function filterByLocation(data) {
     if (allLocations.length > 0 && checkedIds.length === 0) return [];
     
     return data.filter(entry => {
-        if (!entry.locationId) return true; // Show unassigned entries always
+        if (!entry.locationId) return false; // Hide unassigned entries when filtering by location
         return config.visibleLocations[entry.locationId] === true;
     });
 }
