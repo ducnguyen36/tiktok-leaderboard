@@ -54,7 +54,8 @@ services:
     depends_on:
       leaderboard:
         condition: service_healthy
-    command: tunnel --no-autoupdate --url http://leaderboard:5000
+    # Named Tunnel — routes ranking.heliostalent.online → leaderboard
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
 
   # ============================================
   # WATCHTOWER — Auto-pull & restart on new images
