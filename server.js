@@ -306,6 +306,40 @@ function avatarFileExists(avatarUrl) {
     return paths.some(p => fs.existsSync(p));
 }
 
+// Sequential fetch queue — tikwm rate-limits concurrent requests
+// This ensures only one avatar fetch runs at a time with a small delay
+const fetchQueue = [];
+let isFetchingAvatars = false;
+const FETCH_DELAY_MS = 200; // 200ms between requests
+
+function enqueueAvatarFetch(fn) {
+    return new Promise((resolve, reject) => {
+        fetchQueue.push({ fn, resolve, reject });
+        processQueue();
+    });
+}
+
+async function processQueue() {
+    if (isFetchingAvatars || fetchQueue.length === 0) return;
+    isFetchingAvatars = true;
+
+    while (fetchQueue.length > 0) {
+        const { fn, resolve, reject } = fetchQueue.shift();
+        try {
+            const result = await fn();
+            resolve(result);
+        } catch (err) {
+            reject(err);
+        }
+        // Small delay between requests to avoid rate limiting
+        if (fetchQueue.length > 0) {
+            await new Promise(r => setTimeout(r, FETCH_DELAY_MS));
+        }
+    }
+
+    isFetchingAvatars = false;
+}
+
 // In-flight fetch tracker to avoid duplicate TikTok fetches
 const pendingFetches = new Map();
 
@@ -342,7 +376,8 @@ async function resolveAvatar(avatarUrl, tiktokUsername) {
 
     const fetchPromise = (async () => {
         try {
-            const result = await fetchTikTokAvatar(tiktokUsername);
+            // Use queue to avoid overwhelming tikwm with concurrent requests
+            const result = await enqueueAvatarFetch(() => fetchTikTokAvatar(tiktokUsername));
             // Find last good URL from a previous successful file
             const previousGood = cached ? cached.lastGoodUrl : '';
             // Cache the result
