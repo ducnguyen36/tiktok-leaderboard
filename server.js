@@ -180,7 +180,8 @@ function scheduleReconnect() {
 
 // ==========================================
 // TikTok Avatar Fetcher (fallback)
-// Same logic as helioscontrol's /api/fetch-tiktok-user
+// Strategy 1: tikwm.com API (no auth, reliable in Docker)
+// Strategy 2: TikTok page scraping (fallback)
 // ==========================================
 async function fetchTikTokAvatar(username) {
     if (!username) return '';
@@ -188,65 +189,92 @@ async function fetchTikTokAvatar(username) {
 
     try {
         console.log(`[TikTokAPI] Fetching avatar for: ${cleanUsername}`);
-        const url = `https://www.tiktok.com/@${cleanUsername}`;
-        const response = await fetch(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Cookie': `sessionid=${process.env.TIKTOK_SESSION_ID || ''}`
-            }
-        });
+        let avatarSource = '';
 
-        if (!response.ok) {
-            console.error(`[TikTokAPI] TikTok responded with ${response.status} for ${cleanUsername}`);
-            return '';
-        }
-
-        const html = await response.text();
-        let avatarLarger = '';
-
-        // Strategy 1: SIGI_STATE
-        const sigiMatch = html.match(/<script id="SIGI_STATE" type="application\/json">(.*?)<\/script>/);
-        if (sigiMatch && sigiMatch[1]) {
-            try {
-                const sigiData = JSON.parse(sigiMatch[1]);
-                const userModule = sigiData.UserModule;
-                if (userModule && userModule.users && userModule.users[cleanUsername]) {
-                    avatarLarger = userModule.users[cleanUsername].avatarLarger || '';
+        // Strategy 1: tikwm.com API (no auth needed, returns JSON with avatar)
+        try {
+            const tikwmRes = await fetch(`https://www.tikwm.com/api/user/info?unique_id=${cleanUsername}`, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+            });
+            if (tikwmRes.ok) {
+                const tikwmData = await tikwmRes.json();
+                if (tikwmData.data && tikwmData.data.user) {
+                    const u = tikwmData.data.user;
+                    avatarSource = u.avatarLarger || u.avatarMedium || u.avatarThumb || '';
+                    if (avatarSource) {
+                        console.log(`[TikTokAPI] Found avatar via tikwm for: ${cleanUsername}`);
+                    }
                 }
-            } catch (e) { /* ignore parse error */ }
+            }
+        } catch (e) {
+            console.log('[TikTokAPI] tikwm failed:', e.message);
         }
 
-        // Strategy 2: userInfo pattern
-        if (!avatarLarger) {
-            const userMatch = html.match(/"userInfo"\s*:\s*\{\s*"user"\s*:\s*(\{.+?\})\s*,\s*"stats"/);
-            if (userMatch && userMatch[1]) {
-                try {
-                    const userData = JSON.parse(userMatch[1]);
-                    avatarLarger = userData.avatarLarger || '';
-                } catch (e) { /* ignore */ }
+        // Strategy 2: TikTok webapp page scraping (fallback)
+        if (!avatarSource) {
+            try {
+                const url = `https://www.tiktok.com/@${cleanUsername}?is_from_webapp=1&sender_device=pc`;
+                const response = await fetch(url, {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                        'Accept-Language': 'en-US,en;q=0.5',
+                        'Cookie': `sessionid=${process.env.TIKTOK_SESSION_ID || ''}`
+                    }
+                });
+
+                if (response.ok) {
+                    const html = await response.text();
+
+                    // Try SIGI_STATE
+                    const sigiMatch = html.match(/<script id="SIGI_STATE" type="application\/json">(.*?)<\/script>/);
+                    if (sigiMatch && sigiMatch[1]) {
+                        try {
+                            const sigiData = JSON.parse(sigiMatch[1]);
+                            const userModule = sigiData.UserModule;
+                            if (userModule && userModule.users && userModule.users[cleanUsername]) {
+                                avatarSource = userModule.users[cleanUsername].avatarLarger || '';
+                                if (avatarSource) console.log(`[TikTokAPI] Found avatar via SIGI_STATE`);
+                            }
+                        } catch (e) { /* ignore parse error */ }
+                    }
+
+                    // Try userInfo regex
+                    if (!avatarSource) {
+                        const userMatch = html.match(/"userInfo"\s*:\s*\{\s*"user"\s*:\s*(\{.+?\})\s*,\s*"stats"/);
+                        if (userMatch && userMatch[1]) {
+                            try {
+                                const userData = JSON.parse(userMatch[1]);
+                                avatarSource = userData.avatarLarger || '';
+                                if (avatarSource) console.log(`[TikTokAPI] Found avatar via regex fallback`);
+                            } catch (e) { /* ignore */ }
+                        }
+                    }
+
+                    // Try hydration pattern
+                    if (!avatarSource) {
+                        const hydrationMatch = html.match(/"webapp\.user-detail"\s*:\s*(\{.+"userInfo".+\})(?=,\s*"webapp)/);
+                        if (hydrationMatch && hydrationMatch[1]) {
+                            try {
+                                const detail = JSON.parse(hydrationMatch[1]);
+                                avatarSource = detail.userInfo.user.avatarLarger || '';
+                                if (avatarSource) console.log(`[TikTokAPI] Found avatar via hydration regex`);
+                            } catch (e) { /* ignore */ }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.log('[TikTokAPI] Webapp scraping failed:', e.message);
             }
         }
 
-        // Strategy 3: webapp.user-detail hydration
-        if (!avatarLarger) {
-            const hydrationMatch = html.match(/"webapp\.user-detail"\s*:\s*(\{.+"userInfo".+\})(?=,\s*"webapp)/);
-            if (hydrationMatch && hydrationMatch[1]) {
-                try {
-                    const detail = JSON.parse(hydrationMatch[1]);
-                    avatarLarger = detail.userInfo.user.avatarLarger || '';
-                } catch (e) { /* ignore */ }
-            }
-        }
-
-        if (!avatarLarger) {
+        if (!avatarSource) {
             console.log(`[TikTokAPI] No avatar found for ${cleanUsername}`);
             return '';
         }
 
         // Download avatar image
-        const imgRes = await fetch(avatarLarger);
+        const imgRes = await fetch(avatarSource);
         if (imgRes.ok) {
             const arrayBuffer = await imgRes.arrayBuffer();
             const buffer = Buffer.from(arrayBuffer);
