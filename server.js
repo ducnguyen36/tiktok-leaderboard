@@ -802,6 +802,8 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
     const monthlyStart = new Date(now.getFullYear(), now.getMonth(), 1, resetHour, 0, 0, 0);
     const monthlyStartMs = monthlyStart.getTime();
 
+
+
     // Load profiles
     const profiles = await loadProfiles();
     const talentAvatarMap = buildTalentAvatars(profiles);
@@ -845,6 +847,7 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
     const dailyGifts = allDailyGifts.filter(isNotManual);
     const yesterdayGifts = allYesterdayGifts.filter(isNotManual);
     const monthlyGifts = allMonthlyGifts.filter(isNotManual);
+
 
     // Run all 6 aggregations (today + yesterday for daily)
     // Individual uses non-manual gifts; Group uses ALL gifts + session map
@@ -1135,6 +1138,98 @@ app.get('/api/leaderboard', async (req, res) => {
         res.json({ status: 'ok', data });
     } catch (err) {
         console.error('[Leaderboard] Error:', err);
+        res.json({ status: 'error', message: err.message });
+    }
+});
+
+// ==========================================
+// API: LAST MONTH (on-demand, heavily cached)
+// Historical data — fetched only when user clicks the button
+// ==========================================
+let lastMonthCache = null;
+let lastMonthCacheTimestamp = 0;
+let lastMonthCacheMonth = -1; // track which month was cached
+const LAST_MONTH_CACHE_TTL = 60 * 60 * 1000; // 1 hour (data doesn't change)
+
+app.get('/api/leaderboard/lastmonth', async (req, res) => {
+    if (!db) {
+        return res.status(503).json({ status: 'error', message: 'Database not connected' });
+    }
+
+    const parsed = parseInt(req.query.resetHour);
+    const resetHour = isNaN(parsed) ? 0 : parsed;
+    const now = new Date();
+    const currentMonth = now.getMonth();
+
+    // Return cached if same month and not expired
+    if (lastMonthCache && lastMonthCacheMonth === currentMonth &&
+        Date.now() - lastMonthCacheTimestamp < LAST_MONTH_CACHE_TTL) {
+        return res.json({ status: 'ok', data: lastMonthCache });
+    }
+
+    try {
+        console.log('[LastMonth] Building last month data...');
+        const monthlyStart = new Date(now.getFullYear(), now.getMonth(), 1, resetHour, 0, 0, 0);
+        const monthlyStartMs = monthlyStart.getTime();
+        const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, resetHour, 0, 0, 0);
+        const lastMonthStartMs = lastMonthStart.getTime();
+        const lastMonthEndMs = monthlyStartMs;
+
+        const profiles = await loadProfiles();
+        const talentAvatarMap = buildTalentAvatars(profiles);
+        const profileMap = buildProfileMap(profiles);
+        const talentToProfile = buildTalentToProfileMap(profiles);
+        const profileNameToId = buildProfileNameToIdMap(profiles);
+        const { uidToTalent, uidToProfile } = buildUidMaps(profiles);
+
+        const sessionProfileMap = {};
+        try {
+            const sessions = await db.collection('sessions').find({}, { projection: { profileId: 1 } }).toArray();
+            for (const s of sessions) {
+                if (s.profileId) sessionProfileMap[s._id.toString()] = s.profileId;
+            }
+        } catch (e) { /* ignore */ }
+
+        const giftProjection = { projection: { receivedTalent: 1, receivedTalents: 1, receivedTalentUid: 1, toMemberUid: 1, cost: 1, sessionId: 1, timeStamp: 1, user: 1 } };
+        const allLastMonthGifts = await db.collection('gifts').find(
+            { timeStamp: { $gte: lastMonthStartMs, $lt: lastMonthEndMs } },
+            giftProjection
+        ).toArray();
+
+        console.log(`[LastMonth] Loaded ${allLastMonthGifts.length} gifts`);
+
+        const isNotManual = g => !(g.user && g.user.userId === 'Manual');
+        const lastMonthGifts = allLastMonthGifts.filter(isNotManual);
+
+        const [individualLastMonth, groupLastMonth] = await Promise.all([
+            aggregateIndividual(lastMonthGifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
+            aggregateGroup(allLastMonthGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap)
+        ]);
+
+        // Format
+        const [indLastMonth, grpLastMonth] = await Promise.all([
+            Promise.all(individualLastMonth.map(async entry => {
+                const talentInfo = talentAvatarMap[entry._id] || {};
+                const avatar = await resolveAvatar(talentInfo.avatarUrl, talentInfo.uniqueId);
+                const pInfo = Object.entries(profileMap).find(([, p]) => p.talentNames.includes(entry._id));
+                return { name: entry._id, value: entry.totalDiamonds, avatar, locationId: pInfo ? pInfo[1].locationId : '' };
+            })),
+            Promise.all(groupLastMonth.map(async entry => {
+                const pInfo = profileMap[entry._id] || {};
+                const avatar = await resolveAvatar(pInfo.avatar, pInfo.username);
+                return { name: entry.name, value: entry.totalDiamonds, avatar, locationId: pInfo.locationId || '' };
+            }))
+        ]);
+
+        const data = { individual: indLastMonth, group: grpLastMonth };
+        lastMonthCache = data;
+        lastMonthCacheTimestamp = Date.now();
+        lastMonthCacheMonth = currentMonth;
+
+        console.log('[LastMonth] ✅ Built and cached');
+        res.json({ status: 'ok', data });
+    } catch (err) {
+        console.error('[LastMonth] Error:', err.message);
         res.json({ status: 'error', message: err.message });
     }
 });
