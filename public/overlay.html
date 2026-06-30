@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Helios — OBS Overlay</title>
+    <style>
+        /* ==========================================================
+           OBS OVERLAY — Top 3 Monthly Individuals (live, no scores)
+           Transparent background so it composites over any scene.
+           ========================================================== */
+        :root {
+            --gold: #ffd34d;
+            --gold-deep: #f5a623;
+            --silver: #d7dde6;
+            --silver-deep: #9aa6b8;
+            --bronze: #e8a06a;
+            --bronze-deep: #c06a35;
+            --up: #4ade80;
+            --down: #f87171;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        html, body {
+            background: transparent;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            overflow: hidden;
+        }
+
+        #overlay {
+            display: inline-flex;
+            flex-direction: column;
+            gap: 5px;
+            padding: 8px;
+        }
+
+        #rows {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            position: relative;
+        }
+
+        .row {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 268px;
+            height: 38px;
+            padding: 0 10px 0 7px;
+            border-radius: 9px;
+            background: rgba(18, 20, 28, .42);
+            backdrop-filter: blur(9px) saturate(140%);
+            -webkit-backdrop-filter: blur(9px) saturate(140%);
+            border: 1px solid rgba(255, 255, 255, .10);
+            box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+            overflow: hidden;
+            will-change: transform;
+        }
+        /* accent stripe on the left edge per rank */
+        .row::before {
+            content: '';
+            position: absolute;
+            left: 0; top: 0; bottom: 0;
+            width: 4px;
+        }
+        .row.rank-1::before { background: linear-gradient(var(--gold), var(--gold-deep)); }
+        .row.rank-2::before { background: linear-gradient(var(--silver), var(--silver-deep)); }
+        .row.rank-3::before { background: linear-gradient(var(--bronze), var(--bronze-deep)); }
+
+        .row.rank-1 { border-color: rgba(255, 211, 77, .55); }
+
+        .medal {
+            flex: 0 0 auto;
+            width: 24px; height: 24px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 17px;
+            filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .5));
+        }
+
+        .name {
+            flex: 1 1 auto;
+            min-width: 0;
+            font-size: 15px;
+            font-weight: 700;
+            color: #fff;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            text-shadow: 0 1px 4px rgba(0, 0, 0, .7);
+        }
+        .row.rank-1 .name {
+            background: linear-gradient(92deg, #fff, var(--gold));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .arrow {
+            flex: 0 0 auto;
+            font-size: 12px;
+            font-weight: 900;
+            line-height: 1;
+            opacity: 0;
+            transform: translateY(4px);
+            transition: opacity .3s ease, transform .3s ease;
+        }
+        .arrow.show { opacity: 1; transform: translateY(0); }
+        .arrow.up { color: var(--up); text-shadow: 0 0 10px rgba(74, 222, 128, .7); }
+        .arrow.down { color: var(--down); text-shadow: 0 0 10px rgba(248, 113, 113, .7); }
+
+        /* enter animation for new rows */
+        .row.enter { animation: slideIn .45s cubic-bezier(.2, .8, .2, 1); }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-24px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .empty {
+            color: rgba(255, 255, 255, .85);
+            font-size: 12px;
+            text-shadow: 0 1px 4px rgba(0, 0, 0, .7);
+            padding: 4px 6px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="overlay">
+        <div id="rows"></div>
+    </div>
+
+    <script>
+        // ----------------------------------------------------------
+        // Live data via SSE (same stream the main board uses),
+        // falling back to polling. We only ever read individual.monthly.
+        // ----------------------------------------------------------
+        const MEDALS = { 1: '🥇', 2: '🥈', 3: '🥉' };
+        const rowsEl = document.getElementById('rows');
+
+        // name -> rank across the FULL ranking (so moves into/out of the top 3 are detected)
+        let prevRanks = null;
+        // name -> row element (persisted so FLIP reordering animates smoothly)
+        const rowEls = new Map();
+        // name -> timeout id for clearing the movement arrow
+        const arrowTimers = new Map();
+
+        function escapeText(s) { return (s == null ? '' : String(s)); }
+
+        function buildRow(name) {
+            const row = document.createElement('div');
+            row.className = 'row enter';
+            row.dataset.name = name;
+
+            const medal = document.createElement('div');
+            medal.className = 'medal';
+
+            const nameEl = document.createElement('div');
+            nameEl.className = 'name';
+            nameEl.textContent = escapeText(name);
+
+            const arrow = document.createElement('div');
+            arrow.className = 'arrow';
+
+            row.appendChild(medal);
+            row.appendChild(nameEl);
+            row.appendChild(arrow);
+            return row;
+        }
+
+        function flashArrow(row, dir) {
+            const arrow = row.querySelector('.arrow');
+            arrow.classList.remove('up', 'down', 'show');
+            // force reflow so the transition replays
+            void arrow.offsetWidth;
+            arrow.textContent = dir === 'up' ? '▲' : '▼';
+            arrow.classList.add(dir, 'show');
+
+            const name = row.dataset.name;
+            if (arrowTimers.has(name)) clearTimeout(arrowTimers.get(name));
+            arrowTimers.set(name, setTimeout(() => {
+                arrow.classList.remove('show');
+            }, 5000));
+        }
+
+        function render(fullRanking) {
+            const top3 = (fullRanking || []).slice(0, 3);
+
+            if (top3.length === 0) {
+                rowsEl.innerHTML = '<div class="empty">Waiting for data…</div>';
+                rowEls.clear();
+                return;
+            }
+            // clear the placeholder if present
+            const placeholder = rowsEl.querySelector('.empty');
+            if (placeholder) placeholder.remove();
+
+            // current full-ranking map for movement detection next round
+            const newRanks = {};
+            fullRanking.forEach((e, i) => { newRanks[e.name] = i + 1; });
+
+            // 1) FLIP: capture current positions before reordering
+            const firstPos = new Map();
+            rowEls.forEach((el, name) => { firstPos.set(name, el.getBoundingClientRect().top); });
+
+            // 2) build/update + reorder DOM to match top3
+            const keep = new Set();
+            top3.forEach((entry, idx) => {
+                const rank = idx + 1;
+                const name = entry.name;
+                keep.add(name);
+
+                let row = rowEls.get(name);
+                const isNew = !row;
+                if (isNew) {
+                    row = buildRow(name);
+                    rowEls.set(name, row);
+                }
+                row.className = `row rank-${rank}` + (isNew ? ' enter' : '');
+                row.querySelector('.medal').textContent = MEDALS[rank] || rank;
+                row.querySelector('.name').textContent = escapeText(name);
+
+                rowsEl.appendChild(row); // append in ranked order
+
+                // movement arrow (skip on very first paint and for brand-new rows)
+                if (prevRanks && !isNew) {
+                    const prev = prevRanks[name];
+                    if (prev != null && prev !== rank) {
+                        flashArrow(row, rank < prev ? 'up' : 'down');
+                    }
+                } else if (prevRanks && isNew) {
+                    // entered the top 3 from below — that's an upward move
+                    flashArrow(row, 'up');
+                }
+            });
+
+            // 3) remove rows that dropped out of the top 3
+            rowEls.forEach((el, name) => {
+                if (!keep.has(name)) {
+                    if (arrowTimers.has(name)) { clearTimeout(arrowTimers.get(name)); arrowTimers.delete(name); }
+                    el.remove();
+                    rowEls.delete(name);
+                }
+            });
+
+            // 4) FLIP: invert + play
+            rowEls.forEach((el, name) => {
+                const before = firstPos.get(name);
+                if (before == null) return; // newly added → handled by .enter animation
+                const after = el.getBoundingClientRect().top;
+                const dy = before - after;
+                if (dy) {
+                    el.style.transition = 'none';
+                    el.style.transform = `translateY(${dy}px)`;
+                    requestAnimationFrame(() => {
+                        el.style.transition = 'transform .5s cubic-bezier(.2,.8,.2,1)';
+                        el.style.transform = '';
+                    });
+                }
+            });
+
+            prevRanks = newRanks;
+        }
+
+        function handlePayload(json) {
+            if (!json || json.status !== 'ok' || !json.data) return;
+            const ind = json.data.individual;
+            const monthly = (ind && ind.monthly) ? ind.monthly : [];
+            render(monthly);
+        }
+
+        // ---- SSE primary ----
+        let pollTimer = null;
+        function startPolling() {
+            if (pollTimer) return;
+            const poll = async () => {
+                try {
+                    const r = await fetch('/api/leaderboard?resetHour=0');
+                    handlePayload(await r.json());
+                } catch (e) { /* ignore, retry next tick */ }
+            };
+            poll();
+            pollTimer = setInterval(poll, 10000);
+        }
+        function stopPolling() {
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        }
+
+        function connect() {
+            if (!window.EventSource) { startPolling(); return; }
+            const es = new EventSource('/api/leaderboard/stream');
+            es.onmessage = (ev) => {
+                try { handlePayload(JSON.parse(ev.data)); stopPolling(); }
+                catch (e) { /* keep-alive / non-JSON, ignore */ }
+            };
+            es.onerror = () => { startPolling(); }; // EventSource auto-reconnects; poll meanwhile
+        }
+
+        connect();
+    </script>
+</body>
+
+</html>

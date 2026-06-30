@@ -35,6 +35,15 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
+// OBS overlay: /?overlay=true serves a transparent top-3 monthly individual overlay.
+// Must be registered BEFORE express.static, which would otherwise serve index.html for '/'.
+app.get('/', (req, res, next) => {
+    if (req.query.overlay === 'true') {
+        return res.sendFile(path.join(__dirname, 'public', 'overlay.html'));
+    }
+    next();
+});
+
 // Serve static files from public/
 app.use(express.static(path.join(__dirname, 'public')));
 
