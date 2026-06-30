@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { MongoClient } = require('mongodb');
 const dns = require('dns');
 const { computeMonthlyWindows, MONTHLY_RESET_HOUR, computeDailyWindows } = require('./monthlyWindows');
@@ -35,13 +36,40 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// OBS overlay: /?overlay=true serves a transparent top-3 monthly individual overlay.
-// Must be registered BEFORE express.static, which would otherwise serve index.html for '/'.
-app.get('/', (req, res, next) => {
+// Cache-busting version for static assets: a content hash of app.js + style.css.
+// Cloudflare/browsers cache these with a 4h TTL, so without this a deploy can
+// leave stale JS running against fresh HTML (e.g. empty Groups panel). The hash
+// changes only when the client code changes, so each deploy invalidates the cache.
+function computeAssetVersion() {
+    try {
+        const h = crypto.createHash('sha1');
+        h.update(fs.readFileSync(path.join(__dirname, 'public', 'app.js')));
+        h.update(fs.readFileSync(path.join(__dirname, 'public', 'style.css')));
+        return h.digest('hex').slice(0, 10);
+    } catch (e) {
+        return String(Date.now());
+    }
+}
+const ASSET_VERSION = computeAssetVersion();
+
+// OBS overlay (/?overlay=true) + cache-busted index.html.
+// Registered BEFORE express.static, which would otherwise serve index.html for '/'.
+app.get('/', (req, res) => {
     if (req.query.overlay === 'true') {
+        res.set('Cache-Control', 'no-cache');
         return res.sendFile(path.join(__dirname, 'public', 'overlay.html'));
     }
-    next();
+    // Serve index.html with versioned asset URLs so JS/CSS updates take effect on the
+    // next load instead of waiting out the CDN/browser TTL. HTML itself is not cached.
+    try {
+        const html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8')
+            .replace('/style.css', `/style.css?v=${ASSET_VERSION}`)
+            .replace('/app.js', `/app.js?v=${ASSET_VERSION}`);
+        res.set('Cache-Control', 'no-cache');
+        res.type('html').send(html);
+    } catch (e) {
+        res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    }
 });
 
 // Serve static files from public/
