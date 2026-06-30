@@ -15,6 +15,7 @@ RUN npm ci --omit=dev
 
 # Copy application files
 COPY server.js ./
+COPY monthlyWindows.js ./
 COPY public/ ./public/
 
 # Create local avatars cache directory
