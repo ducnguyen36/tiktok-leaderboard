@@ -1159,7 +1159,7 @@ app.get('/api/leaderboard', async (req, res) => {
 // ==========================================
 let lastMonthCache = null;
 let lastMonthCacheTimestamp = 0;
-let lastMonthCacheMonth = -1; // track which month was cached
+let lastMonthCacheKey = ''; // e.g. "2:false" — monthIndex + ':' + inGrace
 const LAST_MONTH_CACHE_TTL = 60 * 60 * 1000; // 1 hour (data doesn't change)
 
 app.get('/api/leaderboard/lastmonth', async (req, res) => {
@@ -1167,24 +1167,24 @@ app.get('/api/leaderboard/lastmonth', async (req, res) => {
         return res.status(503).json({ status: 'error', message: 'Database not connected' });
     }
 
-    const parsed = parseInt(req.query.resetHour);
-    const resetHour = isNaN(parsed) ? 0 : parsed;
     const now = new Date();
-    const currentMonth = now.getMonth();
+    const mw = computeMonthlyWindows(now, MONTHLY_RESET_HOUR);
+    const cacheKey = `${mw.monthlyStart.getMonth()}:${mw.inGrace}`;
 
-    // Return cached if same month and not expired
-    if (lastMonthCache && lastMonthCacheMonth === currentMonth &&
+    // Return cached if same window and not expired
+    if (lastMonthCache && lastMonthCacheKey === cacheKey &&
         Date.now() - lastMonthCacheTimestamp < LAST_MONTH_CACHE_TTL) {
         return res.json({ status: 'ok', data: lastMonthCache });
     }
 
     try {
         console.log('[LastMonth] Building last month data...');
-        const monthlyStart = new Date(now.getFullYear(), now.getMonth(), 1, resetHour, 0, 0, 0);
-        const monthlyStartMs = monthlyStart.getTime();
-        const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, resetHour, 0, 0, 0);
+        // The button shows the window immediately BEFORE the currently displayed monthly window.
+        const lastMonthEndMs = mw.displayStart.getTime();
+        const lastMonthStart = new Date(
+            mw.displayStart.getFullYear(), mw.displayStart.getMonth() - 1, 1, MONTHLY_RESET_HOUR, 0, 0, 0
+        );
         const lastMonthStartMs = lastMonthStart.getTime();
-        const lastMonthEndMs = monthlyStartMs;
 
         const profiles = await loadProfiles();
         const talentAvatarMap = buildTalentAvatars(profiles);
@@ -1235,7 +1235,7 @@ app.get('/api/leaderboard/lastmonth', async (req, res) => {
         const data = { individual: indLastMonth, group: grpLastMonth };
         lastMonthCache = data;
         lastMonthCacheTimestamp = Date.now();
-        lastMonthCacheMonth = currentMonth;
+        lastMonthCacheKey = cacheKey;
 
         console.log('[LastMonth] ✅ Built and cached');
         res.json({ status: 'ok', data });
