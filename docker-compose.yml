@@ -53,9 +53,9 @@ services:
       leaderboard:
         condition: service_healthy
     # --- Option A: Quick Tunnel (free, no domain needed) ---
-    command: tunnel --no-autoupdate --url http://leaderboard:5000
+    # command: tunnel --no-autoupdate --url http://leaderboard:5000
     # --- Option B: Named Tunnel (requires domain + token in .env) ---
-    # command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
 
 volumes:
   avatar-cache:

@@ -11,8 +11,10 @@ let rawData = {
     frozen: false,
     locations: []
 };
+let lastMonthData = null; // fetched on-demand, cached client-side
 let allLocations = []; // { id, name } from server
 let viewingYesterday = false; // toggle for showing yesterday as full ranking
+let viewingLastMonth = false; // toggle for showing last month's scores on monthly tabs
 let currentTab = 'group-monthly';
 let currentTheme = 'classic'; // 'classic' or 'modern'
 let rotation = 0;
@@ -209,10 +211,14 @@ function getDataForTab(tab) {
     // Map tab name to the correct data path
     const category = getTabCategory(tab); // 'group' or 'individual'
     const isDaily = tab.includes('daily');
+    const isMonthly = tab.includes('monthly');
     
-    // If viewing yesterday on a daily tab, return yesterday data
+    // If viewing last month on a monthly tab, return last month data
     let data;
-    if (isDaily && viewingYesterday && rawData[category] && rawData[category].yesterday) {
+    if (isMonthly && viewingLastMonth && lastMonthData) {
+        data = lastMonthData[category] || [];
+    } else if (isDaily && viewingYesterday && rawData[category] && rawData[category].yesterday) {
+        // If viewing yesterday on a daily tab, return yesterday data
         data = rawData[category].yesterday;
     } else {
         const period = isDaily ? 'daily' : 'monthly';
@@ -233,7 +239,7 @@ function filterByLocation(data) {
     if (allLocations.length > 0 && checkedIds.length === 0) return [];
     
     return data.filter(entry => {
-        if (!entry.locationId) return true; // Show unassigned entries always
+        if (!entry.locationId) return false; // Hide unassigned entries when filtering by location
         return config.visibleLocations[entry.locationId] === true;
     });
 }
@@ -312,8 +318,10 @@ function toggleYesterdayView() {
     } else {
         // Normal mode: toggle yesterday view
         viewingYesterday = !viewingYesterday;
+        if (viewingYesterday) viewingLastMonth = false; // mutually exclusive
         renderLeaderboard();
         updateHistoryIcon();
+        updateLastMonthIcon();
     }
 }
 
@@ -353,6 +361,44 @@ function updateHistoryIcon(unfreezeRemaining) {
         // Normal
         icon.className = 'fas fa-clock';
         btn.title = 'View yesterday\'s daily ranking';
+    }
+}
+
+async function toggleLastMonthView() {
+    if (!viewingLastMonth && !lastMonthData) {
+        // Fetch on first click
+        try {
+            const btn = document.getElementById('btn-lastmonth-view');
+            if (btn) btn.style.opacity = '0.5';
+            const res = await fetch(`/api/leaderboard/lastmonth?resetHour=${config.resetHour}`);
+            const json = await res.json();
+            if (json.status === 'ok') {
+                lastMonthData = json.data;
+            }
+            if (btn) btn.style.opacity = '';
+        } catch (err) {
+            console.error('[LastMonth] Fetch error:', err);
+            return;
+        }
+    }
+    viewingLastMonth = !viewingLastMonth;
+    if (viewingLastMonth) viewingYesterday = false; // mutually exclusive
+    renderLeaderboard();
+    updateLastMonthIcon();
+    updateHistoryIcon();
+}
+
+function updateLastMonthIcon() {
+    const btn = document.getElementById('btn-lastmonth-view');
+    if (!btn) return;
+    
+    btn.classList.remove('lastmonth-active');
+    
+    if (viewingLastMonth) {
+        btn.classList.add('lastmonth-active');
+        btn.title = 'Viewing last month — click to go back to this month';
+    } else {
+        btn.title = 'View last month\'s scores';
     }
 }
 
@@ -626,6 +672,7 @@ function updateUIFromConfig() {
 
     // Update the unified history/freeze icon button
     updateHistoryIcon();
+    updateLastMonthIcon();
 
     // Theme checkboxes
     updateCheckbox('check-theme-classic', currentTheme === 'classic');

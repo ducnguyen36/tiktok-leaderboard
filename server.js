@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { MongoClient } = require('mongodb');
 const dns = require('dns');
+const { computeMonthlyWindows, MONTHLY_RESET_HOUR, computeDailyWindows } = require('./monthlyWindows');
 
 // --- Global crash guards: prevent container from dying on unhandled errors ---
 process.on('uncaughtException', (err) => {
@@ -180,7 +181,8 @@ function scheduleReconnect() {
 
 // ==========================================
 // TikTok Avatar Fetcher (fallback)
-// Same logic as helioscontrol's /api/fetch-tiktok-user
+// Strategy 1: tikwm.com API (no auth, reliable in Docker)
+// Strategy 2: TikTok page scraping (fallback)
 // ==========================================
 async function fetchTikTokAvatar(username) {
     if (!username) return '';
@@ -188,65 +190,92 @@ async function fetchTikTokAvatar(username) {
 
     try {
         console.log(`[TikTokAPI] Fetching avatar for: ${cleanUsername}`);
-        const url = `https://www.tiktok.com/@${cleanUsername}`;
-        const response = await fetch(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Cookie': `sessionid=${process.env.TIKTOK_SESSION_ID || ''}`
-            }
-        });
+        let avatarSource = '';
 
-        if (!response.ok) {
-            console.error(`[TikTokAPI] TikTok responded with ${response.status} for ${cleanUsername}`);
-            return '';
-        }
-
-        const html = await response.text();
-        let avatarLarger = '';
-
-        // Strategy 1: SIGI_STATE
-        const sigiMatch = html.match(/<script id="SIGI_STATE" type="application\/json">(.*?)<\/script>/);
-        if (sigiMatch && sigiMatch[1]) {
-            try {
-                const sigiData = JSON.parse(sigiMatch[1]);
-                const userModule = sigiData.UserModule;
-                if (userModule && userModule.users && userModule.users[cleanUsername]) {
-                    avatarLarger = userModule.users[cleanUsername].avatarLarger || '';
+        // Strategy 1: tikwm.com API (no auth needed, returns JSON with avatar)
+        try {
+            const tikwmRes = await fetch(`https://www.tikwm.com/api/user/info?unique_id=${cleanUsername}`, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+            });
+            if (tikwmRes.ok) {
+                const tikwmData = await tikwmRes.json();
+                if (tikwmData.data && tikwmData.data.user) {
+                    const u = tikwmData.data.user;
+                    avatarSource = u.avatarLarger || u.avatarMedium || u.avatarThumb || '';
+                    if (avatarSource) {
+                        console.log(`[TikTokAPI] Found avatar via tikwm for: ${cleanUsername}`);
+                    }
                 }
-            } catch (e) { /* ignore parse error */ }
+            }
+        } catch (e) {
+            console.log('[TikTokAPI] tikwm failed:', e.message);
         }
 
-        // Strategy 2: userInfo pattern
-        if (!avatarLarger) {
-            const userMatch = html.match(/"userInfo"\s*:\s*\{\s*"user"\s*:\s*(\{.+?\})\s*,\s*"stats"/);
-            if (userMatch && userMatch[1]) {
-                try {
-                    const userData = JSON.parse(userMatch[1]);
-                    avatarLarger = userData.avatarLarger || '';
-                } catch (e) { /* ignore */ }
+        // Strategy 2: TikTok webapp page scraping (fallback)
+        if (!avatarSource) {
+            try {
+                const url = `https://www.tiktok.com/@${cleanUsername}?is_from_webapp=1&sender_device=pc`;
+                const response = await fetch(url, {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                        'Accept-Language': 'en-US,en;q=0.5',
+                        'Cookie': `sessionid=${process.env.TIKTOK_SESSION_ID || ''}`
+                    }
+                });
+
+                if (response.ok) {
+                    const html = await response.text();
+
+                    // Try SIGI_STATE
+                    const sigiMatch = html.match(/<script id="SIGI_STATE" type="application\/json">(.*?)<\/script>/);
+                    if (sigiMatch && sigiMatch[1]) {
+                        try {
+                            const sigiData = JSON.parse(sigiMatch[1]);
+                            const userModule = sigiData.UserModule;
+                            if (userModule && userModule.users && userModule.users[cleanUsername]) {
+                                avatarSource = userModule.users[cleanUsername].avatarLarger || '';
+                                if (avatarSource) console.log(`[TikTokAPI] Found avatar via SIGI_STATE`);
+                            }
+                        } catch (e) { /* ignore parse error */ }
+                    }
+
+                    // Try userInfo regex
+                    if (!avatarSource) {
+                        const userMatch = html.match(/"userInfo"\s*:\s*\{\s*"user"\s*:\s*(\{.+?\})\s*,\s*"stats"/);
+                        if (userMatch && userMatch[1]) {
+                            try {
+                                const userData = JSON.parse(userMatch[1]);
+                                avatarSource = userData.avatarLarger || '';
+                                if (avatarSource) console.log(`[TikTokAPI] Found avatar via regex fallback`);
+                            } catch (e) { /* ignore */ }
+                        }
+                    }
+
+                    // Try hydration pattern
+                    if (!avatarSource) {
+                        const hydrationMatch = html.match(/"webapp\.user-detail"\s*:\s*(\{.+"userInfo".+\})(?=,\s*"webapp)/);
+                        if (hydrationMatch && hydrationMatch[1]) {
+                            try {
+                                const detail = JSON.parse(hydrationMatch[1]);
+                                avatarSource = detail.userInfo.user.avatarLarger || '';
+                                if (avatarSource) console.log(`[TikTokAPI] Found avatar via hydration regex`);
+                            } catch (e) { /* ignore */ }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.log('[TikTokAPI] Webapp scraping failed:', e.message);
             }
         }
 
-        // Strategy 3: webapp.user-detail hydration
-        if (!avatarLarger) {
-            const hydrationMatch = html.match(/"webapp\.user-detail"\s*:\s*(\{.+"userInfo".+\})(?=,\s*"webapp)/);
-            if (hydrationMatch && hydrationMatch[1]) {
-                try {
-                    const detail = JSON.parse(hydrationMatch[1]);
-                    avatarLarger = detail.userInfo.user.avatarLarger || '';
-                } catch (e) { /* ignore */ }
-            }
-        }
-
-        if (!avatarLarger) {
+        if (!avatarSource) {
             console.log(`[TikTokAPI] No avatar found for ${cleanUsername}`);
             return '';
         }
 
         // Download avatar image
-        const imgRes = await fetch(avatarLarger);
+        const imgRes = await fetch(avatarSource);
         if (imgRes.ok) {
             const arrayBuffer = await imgRes.arrayBuffer();
             const buffer = Buffer.from(arrayBuffer);
@@ -276,6 +305,40 @@ function avatarFileExists(avatarUrl) {
         path.join(LOCAL_AVATARS, filename)
     ];
     return paths.some(p => fs.existsSync(p));
+}
+
+// Sequential fetch queue — tikwm rate-limits concurrent requests
+// This ensures only one avatar fetch runs at a time with a small delay
+const fetchQueue = [];
+let isFetchingAvatars = false;
+const FETCH_DELAY_MS = 200; // 200ms between requests
+
+function enqueueAvatarFetch(fn) {
+    return new Promise((resolve, reject) => {
+        fetchQueue.push({ fn, resolve, reject });
+        processQueue();
+    });
+}
+
+async function processQueue() {
+    if (isFetchingAvatars || fetchQueue.length === 0) return;
+    isFetchingAvatars = true;
+
+    while (fetchQueue.length > 0) {
+        const { fn, resolve, reject } = fetchQueue.shift();
+        try {
+            const result = await fn();
+            resolve(result);
+        } catch (err) {
+            reject(err);
+        }
+        // Small delay between requests to avoid rate limiting
+        if (fetchQueue.length > 0) {
+            await new Promise(r => setTimeout(r, FETCH_DELAY_MS));
+        }
+    }
+
+    isFetchingAvatars = false;
 }
 
 // In-flight fetch tracker to avoid duplicate TikTok fetches
@@ -314,7 +377,8 @@ async function resolveAvatar(avatarUrl, tiktokUsername) {
 
     const fetchPromise = (async () => {
         try {
-            const result = await fetchTikTokAvatar(tiktokUsername);
+            // Use queue to avoid overwhelming tikwm with concurrent requests
+            const result = await enqueueAvatarFetch(() => fetchTikTokAvatar(tiktokUsername));
             // Find last good URL from a previous successful file
             const previousGood = cached ? cached.lastGoodUrl : '';
             // Cache the result
@@ -708,15 +772,9 @@ async function buildLeaderboardData(resetHour, freezeUntil) {
 async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
     const now = new Date();
 
-    // Daily boundary
-    const dailyStart = new Date(now);
-    dailyStart.setHours(resetHour, 0, 0, 0);
-    if (now < dailyStart) dailyStart.setDate(dailyStart.getDate() - 1);
+    // Daily + yesterday boundaries (use the daily resetHour, independent of the monthly 07:00 reset)
+    const { dailyStart, yesterdayStart } = computeDailyWindows(now, resetHour);
     const dailyStartMs = dailyStart.getTime();
-
-    // Yesterday boundary (the 24h window before dailyStart)
-    const yesterdayStart = new Date(dailyStart);
-    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
     const yesterdayStartMs = yesterdayStart.getTime();
     const yesterdayEndMs = dailyStartMs; // yesterday ends where today starts
 
@@ -735,9 +793,12 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
         }
     }
 
-    // Monthly boundary
-    const monthlyStart = new Date(now.getFullYear(), now.getMonth(), 1, resetHour, 0, 0, 0);
-    const monthlyStartMs = monthlyStart.getTime();
+    // Monthly boundary + grace-period display (decoupled from daily resetHour).
+    // monthlyStart = active accumulating window (gifts count from 07:00 on the 1st).
+    // During grace, the DISPLAYED monthly window is the previous month [displayStart, displayEnd).
+    const mw = computeMonthlyWindows(now, MONTHLY_RESET_HOUR);
+    const displayStartMs = mw.displayStart.getTime();
+    const displayEndMs = mw.displayEnd ? mw.displayEnd.getTime() : null;
 
     // Load profiles
     const profiles = await loadProfiles();
@@ -763,10 +824,13 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
 
     const giftProjection = { projection: { receivedTalent: 1, receivedTalents: 1, receivedTalentUid: 1, toMemberUid: 1, cost: 1, sessionId: 1, timeStamp: 1, user: 1 } };
 
-    // Load ALL monthly gifts ONCE — daily and yesterday are subsets of this
-    // This avoids loading the same data 3x from MongoDB (was the #1 memory killer)
+    // Load gifts once from the EARLIEST window start so daily, yesterday, and the displayed
+    // monthly window are all fully covered. The monthly window uses the 07:00 reset while
+    // daily/yesterday use the daily resetHour, so displayStart is NOT always the earliest
+    // (on the 2nd, yesterdayStart can precede it). Take the min of all three.
+    const loadStartMs = Math.min(displayStartMs, dailyStartMs, yesterdayStartMs);
     const allMonthlyGifts = await db.collection('gifts').find(
-        { timeStamp: { $gte: monthlyStartMs } },
+        { timeStamp: { $gte: loadStartMs } },
         giftProjection
     ).toArray();
 
@@ -776,12 +840,15 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
     // Split into daily and yesterday subsets (no extra MongoDB queries!)
     const allDailyGifts = allMonthlyGifts.filter(g => g.timeStamp >= dailyStartMs);
     const allYesterdayGifts = allMonthlyGifts.filter(g => g.timeStamp >= yesterdayStartMs && g.timeStamp < yesterdayEndMs);
+    // Displayed monthly window: previous month during grace, current month otherwise.
+    const inDisplayWindow = g => g.timeStamp >= displayStartMs && (displayEndMs === null || g.timeStamp < displayEndMs);
+    const allDisplayedMonthlyGifts = allMonthlyGifts.filter(inDisplayWindow);
 
     // Individual view excludes manual gifts
     const isNotManual = g => !(g.user && g.user.userId === 'Manual');
     const dailyGifts = allDailyGifts.filter(isNotManual);
     const yesterdayGifts = allYesterdayGifts.filter(isNotManual);
-    const monthlyGifts = allMonthlyGifts.filter(isNotManual);
+    const monthlyGifts = allDisplayedMonthlyGifts.filter(isNotManual);
 
     // Run all 6 aggregations (today + yesterday for daily)
     // Individual uses non-manual gifts; Group uses ALL gifts + session map
@@ -791,7 +858,7 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
         aggregateIndividual(monthlyGifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
         aggregateGroup(allDailyGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap),
         aggregateGroup(allYesterdayGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap),
-        aggregateGroup(allMonthlyGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap)
+        aggregateGroup(allDisplayedMonthlyGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap)
     ]);
 
     // Format individual: resolve avatar with TikTok fallback
@@ -887,6 +954,7 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
         },
         group: { daily: finalGrpDaily, monthly: grpMonthly, yesterday: grpYesterday },
         frozen: isFrozen,
+        monthlyGrace: mw.inGrace,
         locations
     };
 }
@@ -1072,6 +1140,101 @@ app.get('/api/leaderboard', async (req, res) => {
         res.json({ status: 'ok', data });
     } catch (err) {
         console.error('[Leaderboard] Error:', err);
+        res.json({ status: 'error', message: err.message });
+    }
+});
+
+// ==========================================
+// API: LAST MONTH (on-demand, heavily cached)
+// Historical data — fetched only when user clicks the button
+// ==========================================
+let lastMonthCache = null;
+let lastMonthCacheTimestamp = 0;
+let lastMonthCacheKey = ''; // e.g. "2:false" — monthIndex + ':' + inGrace
+const LAST_MONTH_CACHE_TTL = 60 * 60 * 1000; // 1 hour (data doesn't change)
+
+app.get('/api/leaderboard/lastmonth', async (req, res) => {
+    if (!db) {
+        return res.status(503).json({ status: 'error', message: 'Database not connected' });
+    }
+
+    const now = new Date();
+    const mw = computeMonthlyWindows(now, MONTHLY_RESET_HOUR);
+    // Cache key uses the ACCUMULATING month index + grace flag (not the displayed month).
+    // This still uniquely bounds the served window and forces a fresh query across both the
+    // grace flip (00:00 on the 2nd) and any month change.
+    const cacheKey = `${mw.monthlyStart.getMonth()}:${mw.inGrace}`;
+
+    // Return cached if same window and not expired
+    if (lastMonthCache && lastMonthCacheKey === cacheKey &&
+        Date.now() - lastMonthCacheTimestamp < LAST_MONTH_CACHE_TTL) {
+        return res.json({ status: 'ok', data: lastMonthCache });
+    }
+
+    try {
+        console.log('[LastMonth] Building last month data...');
+        // The button shows the window immediately BEFORE the currently displayed monthly window.
+        const lastMonthEndMs = mw.displayStart.getTime();
+        const lastMonthStart = new Date(
+            mw.displayStart.getFullYear(), mw.displayStart.getMonth() - 1, 1, MONTHLY_RESET_HOUR, 0, 0, 0
+        );
+        const lastMonthStartMs = lastMonthStart.getTime();
+
+        const profiles = await loadProfiles();
+        const talentAvatarMap = buildTalentAvatars(profiles);
+        const profileMap = buildProfileMap(profiles);
+        const talentToProfile = buildTalentToProfileMap(profiles);
+        const profileNameToId = buildProfileNameToIdMap(profiles);
+        const { uidToTalent, uidToProfile } = buildUidMaps(profiles);
+
+        const sessionProfileMap = {};
+        try {
+            const sessions = await db.collection('sessions').find({}, { projection: { profileId: 1 } }).toArray();
+            for (const s of sessions) {
+                if (s.profileId) sessionProfileMap[s._id.toString()] = s.profileId;
+            }
+        } catch (e) { /* ignore */ }
+
+        const giftProjection = { projection: { receivedTalent: 1, receivedTalents: 1, receivedTalentUid: 1, toMemberUid: 1, cost: 1, sessionId: 1, timeStamp: 1, user: 1 } };
+        const allLastMonthGifts = await db.collection('gifts').find(
+            { timeStamp: { $gte: lastMonthStartMs, $lt: lastMonthEndMs } },
+            giftProjection
+        ).toArray();
+
+        console.log(`[LastMonth] Loaded ${allLastMonthGifts.length} gifts`);
+
+        const isNotManual = g => !(g.user && g.user.userId === 'Manual');
+        const lastMonthGifts = allLastMonthGifts.filter(isNotManual);
+
+        const [individualLastMonth, groupLastMonth] = await Promise.all([
+            aggregateIndividual(lastMonthGifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
+            aggregateGroup(allLastMonthGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap)
+        ]);
+
+        // Format
+        const [indLastMonth, grpLastMonth] = await Promise.all([
+            Promise.all(individualLastMonth.map(async entry => {
+                const talentInfo = talentAvatarMap[entry._id] || {};
+                const avatar = await resolveAvatar(talentInfo.avatarUrl, talentInfo.uniqueId);
+                const pInfo = Object.entries(profileMap).find(([, p]) => p.talentNames.includes(entry._id));
+                return { name: entry._id, value: entry.totalDiamonds, avatar, locationId: pInfo ? pInfo[1].locationId : '' };
+            })),
+            Promise.all(groupLastMonth.map(async entry => {
+                const pInfo = profileMap[entry._id] || {};
+                const avatar = await resolveAvatar(pInfo.avatar, pInfo.username);
+                return { name: entry.name, value: entry.totalDiamonds, avatar, locationId: pInfo.locationId || '' };
+            }))
+        ]);
+
+        const data = { individual: indLastMonth, group: grpLastMonth };
+        lastMonthCache = data;
+        lastMonthCacheTimestamp = Date.now();
+        lastMonthCacheKey = cacheKey;
+
+        console.log('[LastMonth] ✅ Built and cached');
+        res.json({ status: 'ok', data });
+    } catch (err) {
+        console.error('[LastMonth] Error:', err.message);
         res.json({ status: 'error', message: err.message });
     }
 });
