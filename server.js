@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { MongoClient } = require('mongodb');
 const dns = require('dns');
-const { computeMonthlyWindows, MONTHLY_RESET_HOUR } = require('./monthlyWindows');
+const { computeMonthlyWindows, MONTHLY_RESET_HOUR, computeDailyWindows } = require('./monthlyWindows');
 
 // --- Global crash guards: prevent container from dying on unhandled errors ---
 process.on('uncaughtException', (err) => {
@@ -772,15 +772,9 @@ async function buildLeaderboardData(resetHour, freezeUntil) {
 async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
     const now = new Date();
 
-    // Daily boundary
-    const dailyStart = new Date(now);
-    dailyStart.setHours(resetHour, 0, 0, 0);
-    if (now < dailyStart) dailyStart.setDate(dailyStart.getDate() - 1);
+    // Daily + yesterday boundaries (use the daily resetHour, independent of the monthly 07:00 reset)
+    const { dailyStart, yesterdayStart } = computeDailyWindows(now, resetHour);
     const dailyStartMs = dailyStart.getTime();
-
-    // Yesterday boundary (the 24h window before dailyStart)
-    const yesterdayStart = new Date(dailyStart);
-    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
     const yesterdayStartMs = yesterdayStart.getTime();
     const yesterdayEndMs = dailyStartMs; // yesterday ends where today starts
 
@@ -803,11 +797,8 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
     // monthlyStart = active accumulating window (gifts count from 07:00 on the 1st).
     // During grace, the DISPLAYED monthly window is the previous month [displayStart, displayEnd).
     const mw = computeMonthlyWindows(now, MONTHLY_RESET_HOUR);
-    const monthlyStartMs = mw.monthlyStart.getTime();
     const displayStartMs = mw.displayStart.getTime();
     const displayEndMs = mw.displayEnd ? mw.displayEnd.getTime() : null;
-
-
 
     // Load profiles
     const profiles = await loadProfiles();
@@ -833,12 +824,13 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
 
     const giftProjection = { projection: { receivedTalent: 1, receivedTalents: 1, receivedTalentUid: 1, toMemberUid: 1, cost: 1, sessionId: 1, timeStamp: 1, user: 1 } };
 
-    // Load ALL monthly gifts ONCE — daily and yesterday are subsets of this
-    // This avoids loading the same data 3x from MongoDB (was the #1 memory killer)
-    // Load from displayStart so the displayed window (previous month during grace) is covered.
-    // displayStart <= monthlyStart always, so daily/yesterday subsets remain within the set.
+    // Load gifts once from the EARLIEST window start so daily, yesterday, and the displayed
+    // monthly window are all fully covered. The monthly window uses the 07:00 reset while
+    // daily/yesterday use the daily resetHour, so displayStart is NOT always the earliest
+    // (on the 2nd, yesterdayStart can precede it). Take the min of all three.
+    const loadStartMs = Math.min(displayStartMs, dailyStartMs, yesterdayStartMs);
     const allMonthlyGifts = await db.collection('gifts').find(
-        { timeStamp: { $gte: displayStartMs } },
+        { timeStamp: { $gte: loadStartMs } },
         giftProjection
     ).toArray();
 
@@ -857,7 +849,6 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
     const dailyGifts = allDailyGifts.filter(isNotManual);
     const yesterdayGifts = allYesterdayGifts.filter(isNotManual);
     const monthlyGifts = allDisplayedMonthlyGifts.filter(isNotManual);
-
 
     // Run all 6 aggregations (today + yesterday for daily)
     // Individual uses non-manual gifts; Group uses ALL gifts + session map
@@ -1169,6 +1160,9 @@ app.get('/api/leaderboard/lastmonth', async (req, res) => {
 
     const now = new Date();
     const mw = computeMonthlyWindows(now, MONTHLY_RESET_HOUR);
+    // Cache key uses the ACCUMULATING month index + grace flag (not the displayed month).
+    // This still uniquely bounds the served window and forces a fresh query across both the
+    // grace flip (00:00 on the 2nd) and any month change.
     const cacheKey = `${mw.monthlyStart.getMonth()}:${mw.inGrace}`;
 
     // Return cached if same window and not expired

@@ -37,4 +37,23 @@ function computeMonthlyWindows(now, resetHour) {
     };
 }
 
-module.exports = { MONTHLY_RESET_HOUR, computeMonthlyWindows };
+/**
+ * Daily + yesterday windows (server-local Vietnam time), matching the daily reset logic.
+ * Extracted so the gift-load lower bound can be reasoned about and unit-tested.
+ * @param {Date} now
+ * @param {number} resetHour - the daily reset hour (independent of MONTHLY_RESET_HOUR)
+ * @returns {{dailyStart: Date, yesterdayStart: Date, yesterdayEnd: Date}}
+ */
+function computeDailyWindows(now, resetHour) {
+    const dailyStart = new Date(now);
+    dailyStart.setHours(resetHour, 0, 0, 0);
+    if (now < dailyStart) dailyStart.setDate(dailyStart.getDate() - 1);
+
+    const yesterdayStart = new Date(dailyStart);
+    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+
+    const yesterdayEnd = new Date(dailyStart); // yesterday ends where today starts
+    return { dailyStart, yesterdayStart, yesterdayEnd };
+}
+
+module.exports = { MONTHLY_RESET_HOUR, computeMonthlyWindows, computeDailyWindows };
