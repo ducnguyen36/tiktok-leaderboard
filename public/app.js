@@ -13,6 +13,7 @@ let rawData = {
 };
 let lastMonthData = null; // fetched on-demand, cached client-side
 let allLocations = []; // { id, name } from server
+let allGroups = []; // { id, name, locationId } from server
 let viewingYesterday = false; // toggle for showing yesterday as full ranking
 let viewingLastMonth = false; // toggle for showing last month's scores on monthly tabs
 let currentTab = 'group-monthly';
@@ -61,7 +62,10 @@ let config = {
     },
     visibleLocations: {
         'loc_hcm': true  // Default: only HCM
-    }
+    },
+    // Group filtering is an exclusion model: a group is shown unless its id is
+    // explicitly set to false here. New/unseen groups default to visible.
+    visibleGroups: {}
 };
 
 // ==========================================
@@ -105,6 +109,7 @@ function connectSSE() {
         try {
             const json = JSON.parse(event.data);
             if (json.status === 'ok') {
+                if (!json.data) return; // build still warming up — keep current view
                 rawData = json.data;
                 if (json.data.frozen !== undefined) {
                     rawData.frozen = json.data.frozen;
@@ -112,6 +117,9 @@ function connectSSE() {
                 if (json.data.locations) {
                     allLocations = json.data.locations;
                     initLocationDefaults();
+                }
+                if (json.data.groups) {
+                    allGroups = json.data.groups;
                 }
                 renderLeaderboard();
                 updateUIFromConfig(); // refresh frozen badge + locations
@@ -186,6 +194,11 @@ async function fetchData() {
             return;
         }
 
+        if (!json.data) { // build still warming up — keep current view, no crash
+            if (loader) loader.classList.add('hidden');
+            return;
+        }
+
         rawData = json.data;
         // Track frozen state
         if (json.data.frozen !== undefined) {
@@ -194,6 +207,9 @@ async function fetchData() {
         if (json.data.locations) {
             allLocations = json.data.locations;
             initLocationDefaults();
+        }
+        if (json.data.groups) {
+            allGroups = json.data.groups;
         }
         renderLeaderboard();
         updateUIFromConfig(); // refresh frozen badge + locations
@@ -225,8 +241,19 @@ function getDataForTab(tab) {
         data = (rawData[category] && rawData[category][period]) ? rawData[category][period] : [];
     }
     
-    // Filter by visible locations
-    return filterByLocation(data);
+    // Filter by visible locations, then by excluded groups
+    return filterByGroup(filterByLocation(data));
+}
+
+// Exclusion model: hide an entry only when its group is explicitly turned off.
+// Works for both group entries (groupId = their own id) and individual entries
+// (groupId = the member's group). Entries with no groupId are unaffected.
+function filterByGroup(data) {
+    if (!data || data.length === 0) return data;
+    return data.filter(entry => {
+        if (!entry.groupId) return true;
+        return config.visibleGroups[entry.groupId] !== false;
+    });
 }
 
 function filterByLocation(data) {
@@ -257,6 +284,24 @@ function initLocationDefaults() {
 
 function toggleLocation(locationId) {
     config.visibleLocations[locationId] = !config.visibleLocations[locationId];
+    updateUIFromConfig();
+    renderLeaderboard();
+    saveSettings();
+}
+
+function toggleGroup(groupId) {
+    // Default (undefined) is visible; first click hides it.
+    const currentlyVisible = config.visibleGroups[groupId] !== false;
+    config.visibleGroups[groupId] = !currentlyVisible;
+    updateUIFromConfig();
+    renderLeaderboard();
+    saveSettings();
+}
+
+function toggleAllGroupsInLocation(locationId, visible) {
+    allGroups
+        .filter(g => (g.locationId || '__none__') === locationId)
+        .forEach(g => { config.visibleGroups[g.id] = visible; });
     updateUIFromConfig();
     renderLeaderboard();
     saveSettings();
@@ -710,6 +755,9 @@ function updateUIFromConfig() {
     // Location filter checkboxes
     renderLocationSettings();
 
+    // Group filter checkboxes (nested under their location)
+    renderGroupSettings();
+
     // Footer
     document.getElementById('footer-cycle').textContent = config.cycleDuration + 's';
 }
@@ -729,6 +777,52 @@ function renderLocationSettings() {
             <div class="custom-checkbox ${checked}" id="check-loc-${loc.id}"><span class="checkbox-check">✓</span></div>
             ${loc.name}
         </label>`;
+    }).join('');
+}
+
+function renderGroupSettings() {
+    const container = document.getElementById('group-checkboxes');
+    if (!container) return;
+
+    if (!allGroups || allGroups.length === 0) {
+        container.innerHTML = '<span style="color:var(--text-secondary); font-size:0.75rem;">No groups found</span>';
+        return;
+    }
+
+    // Bucket groups by location
+    const byLoc = {};
+    for (const g of allGroups) {
+        const lid = g.locationId || '__none__';
+        (byLoc[lid] = byLoc[lid] || []).push(g);
+    }
+
+    // Location id -> display name
+    const locName = { '__none__': 'No location' };
+    allLocations.forEach(l => { locName[l.id] = l.name; });
+
+    // Show locations in the same order as the location list, then any leftovers
+    const orderedLocIds = allLocations.map(l => l.id).filter(id => byLoc[id]);
+    Object.keys(byLoc).forEach(id => { if (!orderedLocIds.includes(id)) orderedLocIds.push(id); });
+
+    container.innerHTML = orderedLocIds.map(lid => {
+        const groups = byLoc[lid].slice().sort((a, b) => a.name.localeCompare(b.name));
+        const rows = groups.map(g => {
+            const checked = config.visibleGroups[g.id] !== false ? 'checked' : '';
+            return `<label class="checkbox-label" onclick="toggleGroup('${g.id}')">
+                <div class="custom-checkbox ${checked}" id="check-grp-${g.id}"><span class="checkbox-check">✓</span></div>
+                ${g.name}
+            </label>`;
+        }).join('');
+        return `<div class="group-loc-block">
+            <div class="group-loc-head">
+                <span class="group-loc-title">${locName[lid] || lid}</span>
+                <span class="group-loc-actions">
+                    <button class="group-bulk-btn" onclick="toggleAllGroupsInLocation('${lid}', true)">All</button>
+                    <button class="group-bulk-btn" onclick="toggleAllGroupsInLocation('${lid}', false)">None</button>
+                </span>
+            </div>
+            <div class="checkbox-group">${rows}</div>
+        </div>`;
     }).join('');
 }
 
@@ -891,6 +985,7 @@ function loadSavedSettings() {
             if (parsed.showAvatars) config.showAvatars = { ...config.showAvatars, ...parsed.showAvatars };
             if (parsed.showYesterday) config.showYesterday = { ...config.showYesterday, ...parsed.showYesterday };
             if (parsed.visibleLocations) config.visibleLocations = { ...config.visibleLocations, ...parsed.visibleLocations };
+            if (parsed.visibleGroups) config.visibleGroups = { ...config.visibleGroups, ...parsed.visibleGroups };
 
             // Restore rotation
             if (parsed.rotation != null) {

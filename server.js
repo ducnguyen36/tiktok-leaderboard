@@ -188,6 +188,14 @@ function scheduleReconnect() {
     }, delay);
 }
 
+// fetch() with a hard timeout so a slow/hung TikTok response can never stall
+// the background avatar queue indefinitely.
+function fetchWithTimeout(url, opts = {}, ms = 8000) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), ms);
+    return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(t));
+}
+
 // ==========================================
 // TikTok Avatar Fetcher (fallback)
 // Strategy 1: tikwm.com API (no auth, reliable in Docker)
@@ -203,7 +211,7 @@ async function fetchTikTokAvatar(username) {
 
         // Strategy 1: tikwm.com API (no auth needed, returns JSON with avatar)
         try {
-            const tikwmRes = await fetch(`https://www.tikwm.com/api/user/info?unique_id=${cleanUsername}`, {
+            const tikwmRes = await fetchWithTimeout(`https://www.tikwm.com/api/user/info?unique_id=${cleanUsername}`, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
             });
             if (tikwmRes.ok) {
@@ -224,7 +232,7 @@ async function fetchTikTokAvatar(username) {
         if (!avatarSource) {
             try {
                 const url = `https://www.tiktok.com/@${cleanUsername}?is_from_webapp=1&sender_device=pc`;
-                const response = await fetch(url, {
+                const response = await fetchWithTimeout(url, {
                     headers: {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -284,12 +292,13 @@ async function fetchTikTokAvatar(username) {
         }
 
         // Download avatar image
-        const imgRes = await fetch(avatarSource);
+        const imgRes = await fetchWithTimeout(avatarSource);
         if (imgRes.ok) {
             const arrayBuffer = await imgRes.arrayBuffer();
             const buffer = Buffer.from(arrayBuffer);
             const fileName = `${cleanUsername}_${Date.now()}.jpg`;
             fs.writeFileSync(path.join(LOCAL_AVATARS, fileName), buffer);
+            recordDiskAvatar(fileName); // keep the username→file index fresh
             const avatarUrl = `userdata/avatars/${fileName}`;
             console.log(`[TikTokAPI] ✅ Avatar saved for ${cleanUsername}: ${avatarUrl}`);
             return avatarUrl;
@@ -357,6 +366,68 @@ const pendingFetches = new Map();
 const avatarCache = new Map();
 const AVATAR_CACHE_TTL = 8 * 60 * 60 * 1000;   // 8 hours for successful fetches
 const AVATAR_FAIL_TTL = 30 * 1000;              // 30 seconds before retrying failed fetches
+
+// ------------------------------------------------------------------
+// Disk avatar index — maps a TikTok username to a previously-fetched
+// avatar file on the persistent volume (LOCAL_AVATARS). Rebuilt at
+// startup so fetched avatars survive container restarts WITHOUT
+// re-hitting TikTok. Files are named "<username>_<timestamp>.jpg".
+// ------------------------------------------------------------------
+const diskAvatarIndex = new Map(); // username -> 'userdata/avatars/<file>'
+const diskAvatarTs = new Map();    // username -> newest timestamp seen
+
+function normAvatarKey(u) {
+    return (u || '').replace('@', '');
+}
+
+function recordDiskAvatar(file) {
+    const m = file.match(/^(.+)_(\d+)\.jpg$/);
+    if (!m) return;
+    const key = m[1];
+    const ts = Number(m[2]);
+    if (ts >= (diskAvatarTs.get(key) || 0)) {
+        diskAvatarTs.set(key, ts);
+        diskAvatarIndex.set(key, `userdata/avatars/${file}`);
+    }
+}
+
+function buildDiskAvatarIndex() {
+    diskAvatarIndex.clear();
+    diskAvatarTs.clear();
+    try {
+        for (const file of fs.readdirSync(LOCAL_AVATARS)) recordDiskAvatar(file);
+        console.log(`[Avatars] Indexed ${diskAvatarIndex.size} cached avatars on disk`);
+    } catch (e) {
+        console.log('[Avatars] Disk index build failed:', e.message);
+    }
+}
+
+// Non-blocking avatar resolution used during leaderboard builds.
+// Returns instantly from local/cached sources; on a miss it kicks off a
+// background fetch (fire-and-forget) and returns the best value available
+// now, so the build NEVER waits on the network. The fetched avatar shows
+// up on the next rebuild (change-stream/poll/refresh).
+function resolveAvatarFast(avatarUrl, tiktokUsername) {
+    // 1. Stored avatar file already present on disk
+    if (avatarUrl && avatarFileExists(avatarUrl)) return avatarUrl;
+
+    const key = normAvatarKey(tiktokUsername);
+
+    // 2. Previously-fetched file on the persistent volume
+    if (key && diskAvatarIndex.has(key)) return diskAvatarIndex.get(key);
+
+    // 3. In-memory cache hit (this process)
+    if (key) {
+        const cached = avatarCache.get(key) || avatarCache.get(tiktokUsername);
+        if (cached && Date.now() - cached.fetchedAt < (cached.failed ? AVATAR_FAIL_TTL : AVATAR_CACHE_TTL)) {
+            return cached.url || cached.lastGoodUrl || avatarUrl || '';
+        }
+    }
+
+    // 4. Miss — fetch in the background (fire-and-forget), return best-effort now
+    if (tiktokUsername) resolveAvatar(avatarUrl, tiktokUsername).catch(() => {});
+    return avatarUrl || '';
+}
 
 async function resolveAvatar(avatarUrl, tiktokUsername) {
     // If avatar URL exists and the file is present, use it directly
@@ -870,31 +941,33 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
         aggregateGroup(allDisplayedMonthlyGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap)
     ]);
 
-    // Format individual: resolve avatar with TikTok fallback
-    async function formatIndividual(raw) {
-        return Promise.all(raw.map(async entry => {
+    // Format individual: resolve avatar from cache/disk only (non-blocking).
+    // Missing avatars are fetched in the background and appear on the next build.
+    function formatIndividual(raw) {
+        return raw.map(entry => {
             const talentInfo = talentAvatarMap[entry._id] || {};
-            const avatar = await resolveAvatar(talentInfo.avatarUrl, talentInfo.uniqueId);
+            const avatar = resolveAvatarFast(talentInfo.avatarUrl, talentInfo.uniqueId);
             return {
                 name: entry._id,
                 value: entry.totalDiamonds,
                 avatar
             };
-        }));
+        });
     }
 
-    // Format group: use profile avatar with TikTok fallback
-    async function formatGroup(raw) {
-        return Promise.all(raw.map(async entry => {
+    // Format group: use profile avatar from cache/disk only (non-blocking).
+    function formatGroup(raw) {
+        return raw.map(entry => {
             const pInfo = profileMap[entry._id] || {};
-            const avatar = await resolveAvatar(pInfo.avatar, pInfo.username);
+            const avatar = resolveAvatarFast(pInfo.avatar, pInfo.username);
             return {
                 name: entry.name,
                 value: entry.totalDiamonds,
                 avatar,
-                locationId: pInfo.locationId || ''
+                locationId: pInfo.locationId || '',
+                groupId: String(entry._id)
             };
-        }));
+        });
     }
 
     const [indDaily, indYesterday, indMonthly, grpDaily, grpYesterday, grpMonthly] = await Promise.all([
@@ -939,21 +1012,29 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
         locations = locDocs.map(doc => ({ id: doc._id, name: doc.name || doc._id }));
     } catch (e) { /* ignore */ }
 
-    // Build talent → locationId map for individual filtering
+    // Build talent → locationId and talent → groupId maps for individual filtering
     const talentLocationMap = {};
+    const talentGroupMap = {};
     for (const [pid, pInfo] of Object.entries(profileMap)) {
         for (const talentName of pInfo.talentNames) {
             talentLocationMap[talentName] = pInfo.locationId || '';
+            talentGroupMap[talentName] = String(pid);
         }
     }
 
-    // Attach locationId to individual entries
+    // Attach locationId + groupId to individual entries (groupId = the talent's profile/group)
     function attachLocationToIndividual(arr) {
         return arr.map(entry => ({
             ...entry,
-            locationId: talentLocationMap[entry.name] || ''
+            locationId: talentLocationMap[entry.name] || '',
+            groupId: talentGroupMap[entry.name] || ''
         }));
     }
+
+    // Groups list (every profile = a group) for client-side group filtering, grouped by location
+    const groups = Object.entries(profileMap)
+        .map(([pid, p]) => ({ id: String(pid), name: p.name, locationId: p.locationId || '' }))
+        .sort((a, b) => a.name.localeCompare(b.name));
 
     return {
         individual: {
@@ -964,7 +1045,8 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
         group: { daily: finalGrpDaily, monthly: grpMonthly, yesterday: grpYesterday },
         frozen: isFrozen,
         monthlyGrace: mw.inGrace,
-        locations
+        locations,
+        groups
     };
 }
 
@@ -1224,13 +1306,13 @@ app.get('/api/leaderboard/lastmonth', async (req, res) => {
         const [indLastMonth, grpLastMonth] = await Promise.all([
             Promise.all(individualLastMonth.map(async entry => {
                 const talentInfo = talentAvatarMap[entry._id] || {};
-                const avatar = await resolveAvatar(talentInfo.avatarUrl, talentInfo.uniqueId);
+                const avatar = resolveAvatarFast(talentInfo.avatarUrl, talentInfo.uniqueId);
                 const pInfo = Object.entries(profileMap).find(([, p]) => p.talentNames.includes(entry._id));
                 return { name: entry._id, value: entry.totalDiamonds, avatar, locationId: pInfo ? pInfo[1].locationId : '' };
             })),
             Promise.all(groupLastMonth.map(async entry => {
                 const pInfo = profileMap[entry._id] || {};
-                const avatar = await resolveAvatar(pInfo.avatar, pInfo.username);
+                const avatar = resolveAvatarFast(pInfo.avatar, pInfo.username);
                 return { name: entry.name, value: entry.totalDiamonds, avatar, locationId: pInfo.locationId || '' };
             }))
         ]);
@@ -1265,6 +1347,7 @@ app.listen(PORT, '0.0.0.0', () => {
 // Connect to MongoDB (with retry on failure — never exits the process)
 (async function initDB() {
     try {
+        buildDiskAvatarIndex(); // index cached avatars so cold starts don't re-fetch
         await connectDB();
         reconnectAttempt = 0;
 
