@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { MongoClient } = require('mongodb');
 const dns = require('dns');
+const { computeMonthlyWindows, MONTHLY_RESET_HOUR } = require('./monthlyWindows');
 
 // --- Global crash guards: prevent container from dying on unhandled errors ---
 process.on('uncaughtException', (err) => {
@@ -798,9 +799,13 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
         }
     }
 
-    // Monthly boundary
-    const monthlyStart = new Date(now.getFullYear(), now.getMonth(), 1, resetHour, 0, 0, 0);
-    const monthlyStartMs = monthlyStart.getTime();
+    // Monthly boundary + grace-period display (decoupled from daily resetHour).
+    // monthlyStart = active accumulating window (gifts count from 07:00 on the 1st).
+    // During grace, the DISPLAYED monthly window is the previous month [displayStart, displayEnd).
+    const mw = computeMonthlyWindows(now, MONTHLY_RESET_HOUR);
+    const monthlyStartMs = mw.monthlyStart.getTime();
+    const displayStartMs = mw.displayStart.getTime();
+    const displayEndMs = mw.displayEnd ? mw.displayEnd.getTime() : null;
 
 
 
@@ -830,8 +835,10 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
 
     // Load ALL monthly gifts ONCE — daily and yesterday are subsets of this
     // This avoids loading the same data 3x from MongoDB (was the #1 memory killer)
+    // Load from displayStart so the displayed window (previous month during grace) is covered.
+    // displayStart <= monthlyStart always, so daily/yesterday subsets remain within the set.
     const allMonthlyGifts = await db.collection('gifts').find(
-        { timeStamp: { $gte: monthlyStartMs } },
+        { timeStamp: { $gte: displayStartMs } },
         giftProjection
     ).toArray();
 
@@ -841,12 +848,15 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
     // Split into daily and yesterday subsets (no extra MongoDB queries!)
     const allDailyGifts = allMonthlyGifts.filter(g => g.timeStamp >= dailyStartMs);
     const allYesterdayGifts = allMonthlyGifts.filter(g => g.timeStamp >= yesterdayStartMs && g.timeStamp < yesterdayEndMs);
+    // Displayed monthly window: previous month during grace, current month otherwise.
+    const inDisplayWindow = g => g.timeStamp >= displayStartMs && (displayEndMs === null || g.timeStamp < displayEndMs);
+    const allDisplayedMonthlyGifts = allMonthlyGifts.filter(inDisplayWindow);
 
     // Individual view excludes manual gifts
     const isNotManual = g => !(g.user && g.user.userId === 'Manual');
     const dailyGifts = allDailyGifts.filter(isNotManual);
     const yesterdayGifts = allYesterdayGifts.filter(isNotManual);
-    const monthlyGifts = allMonthlyGifts.filter(isNotManual);
+    const monthlyGifts = allDisplayedMonthlyGifts.filter(isNotManual);
 
 
     // Run all 6 aggregations (today + yesterday for daily)
@@ -857,7 +867,7 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
         aggregateIndividual(monthlyGifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
         aggregateGroup(allDailyGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap),
         aggregateGroup(allYesterdayGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap),
-        aggregateGroup(allMonthlyGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap)
+        aggregateGroup(allDisplayedMonthlyGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap)
     ]);
 
     // Format individual: resolve avatar with TikTok fallback
@@ -953,6 +963,7 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
         },
         group: { daily: finalGrpDaily, monthly: grpMonthly, yesterday: grpYesterday },
         frozen: isFrozen,
+        monthlyGrace: mw.inGrace,
         locations
     };
 }
