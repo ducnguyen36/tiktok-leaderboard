@@ -835,6 +835,38 @@ const CACHE_BG_INTERVAL = 60 * 60 * 1000; // 1 hour background refresh when no c
 
 let isBuilding = false; // guard against concurrent builds
 
+// ==========================================
+// PERSISTENT SNAPSHOT — instant cold start
+// The last computed result is stored in MongoDB so a fresh container can
+// serve it in <100ms while the (slow) full rebuild runs in the background.
+// Survives restarts AND container replacement (each deploy = new container).
+// ==========================================
+const SNAPSHOT_COLLECTION = 'leaderboard_cache';
+const SNAPSHOT_ID = 'latest';
+const SNAPSHOT_SAVE_THROTTLE = 60 * 1000; // persist at most once/min (builds run every ~10s)
+let lastSnapshotSave = 0;
+
+async function loadSnapshot() {
+    if (!db) return null;
+    try {
+        const doc = await db.collection(SNAPSHOT_COLLECTION).findOne({ _id: SNAPSHOT_ID });
+        return doc && doc.data ? doc.data : null;
+    } catch (e) {
+        console.error('[Snapshot] Load failed:', e.message);
+        return null;
+    }
+}
+
+function saveSnapshot(data) {
+    if (!db || !data) return;
+    const now = Date.now();
+    if (now - lastSnapshotSave < SNAPSHOT_SAVE_THROTTLE) return;
+    lastSnapshotSave = now;
+    db.collection(SNAPSHOT_COLLECTION)
+        .updateOne({ _id: SNAPSHOT_ID }, { $set: { data, computedAt: now } }, { upsert: true })
+        .catch(e => console.error('[Snapshot] Save failed:', e.message));
+}
+
 async function buildLeaderboardData(resetHour, freezeUntil) {
     // Prevent concurrent builds from piling up memory
     if (isBuilding) {
@@ -843,7 +875,9 @@ async function buildLeaderboardData(resetHour, freezeUntil) {
     }
     isBuilding = true;
     try {
-    return await _buildLeaderboardDataInner(resetHour, freezeUntil);
+        const data = await _buildLeaderboardDataInner(resetHour, freezeUntil);
+        saveSnapshot(data); // persist for the next cold start (throttled, fire-and-forget)
+        return data;
     } finally {
         isBuilding = false;
     }
@@ -1354,15 +1388,28 @@ app.listen(PORT, '0.0.0.0', () => {
         // Start watching MongoDB for changes
         startChangeStreams();
 
-        // Pre-warm cache on startup
+        // Instant cold start: serve the last snapshot immediately (<100ms),
+        // then rebuild from raw gifts in the background without blocking serving.
         try {
-            const data = await buildLeaderboardData(lastResetHour, lastFreezeUntil);
-            cachedData = data;
-            cacheTimestamp = Date.now();
-            console.log('[Cache] Pre-warmed leaderboard cache on startup');
+            const snap = await loadSnapshot();
+            if (snap) {
+                cachedData = snap;
+                cacheTimestamp = Date.now();
+                console.log('[Cache] Served leaderboard snapshot for instant cold start');
+            }
         } catch (err) {
-            console.error('[Cache] Pre-warm error:', err.message);
+            console.error('[Cache] Snapshot load error:', err.message);
         }
+
+        buildLeaderboardData(lastResetHour, lastFreezeUntil)
+            .then(data => {
+                if (!data) return;
+                cachedData = data;
+                cacheTimestamp = Date.now();
+                broadcastLeaderboard(data); // push fresh data to any clients connected during warm-up
+                console.log('[Cache] Background rebuild complete (snapshot refreshed)');
+            })
+            .catch(err => console.error('[Cache] Startup rebuild error:', err.message));
     } catch (err) {
         console.error('[Startup] Initial DB connection failed:', err.message);
         console.log('[Startup] Server is running WITHOUT database — will keep retrying...');
