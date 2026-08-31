@@ -986,14 +986,17 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
     const inDisplayWindow = g => g.timeStamp >= displayStartMs && (displayEndMs === null || g.timeStamp < displayEndMs);
     const allDisplayedMonthlyGifts = allMonthlyGifts.filter(inDisplayWindow);
 
-    // Individual view excludes manual gifts
-    const isNotManual = g => !(g.user && g.user.userId === 'Manual');
-    const dailyGifts = allDailyGifts.filter(isNotManual);
-    const yesterdayGifts = allYesterdayGifts.filter(isNotManual);
-    const monthlyGifts = allDisplayedMonthlyGifts.filter(isNotManual);
+    // Manual gifts are explicit talent credits/adjustments (helioscontrol createManualEntry,
+    // assigned:true) and must count toward BOTH individual and group totals — same as the
+    // group board. Previously the individual view filtered them out, so manual corrections
+    // (positive and negative) were invisible on the individual board while still counting
+    // for the group. Include them here so the two boards agree.
+    const dailyGifts = allDailyGifts;
+    const yesterdayGifts = allYesterdayGifts;
+    const monthlyGifts = allDisplayedMonthlyGifts;
 
     // Run all 6 aggregations (today + yesterday for daily)
-    // Individual uses non-manual gifts; Group uses ALL gifts + session map
+    // Individual + Group both include manual gifts; Group also uses the session map
     const [individualDaily, individualYesterday, individualMonthly, groupDaily, groupYesterday, groupMonthly] = await Promise.all([
         aggregateIndividual(dailyGifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
         aggregateIndividual(yesterdayGifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
@@ -1356,8 +1359,8 @@ app.get('/api/leaderboard/lastmonth', async (req, res) => {
 
         console.log(`[LastMonth] Loaded ${allLastMonthGifts.length} gifts`);
 
-        const isNotManual = g => !(g.user && g.user.userId === 'Manual');
-        const lastMonthGifts = allLastMonthGifts.filter(isNotManual);
+        // Manual gifts count toward individual too (see main board) — no filtering.
+        const lastMonthGifts = allLastMonthGifts;
 
         const [individualLastMonth, groupLastMonth] = await Promise.all([
             aggregateIndividual(lastMonthGifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
