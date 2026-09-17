@@ -6,6 +6,7 @@ const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const net = require('node:net');
 const { createLeaderboardAuth } = require('../leaderboardAuth');
+const { createAuthStore } = require('../authStore');
 
 class MemoryStore {
   records = new Map();
@@ -14,8 +15,8 @@ class MemoryStore {
   async get(id) { this.check(); return structuredClone(this.records.get(id) || null); }
   async put(record) { this.check(); this.records.set(record._id, structuredClone(record)); }
   async consume(id, now) { this.check(); const value = this.records.get(id); this.records.delete(id); return value && value.expiresAt > now ? structuredClone(value) : null; }
-  async approve(id, now, values) { this.check(); const record = this.records.get(id); if (!record || record.kind !== 'pending' || record.expiresAt <= now) return false; Object.assign(record, values); return true; }
-  async setPair(id, pairId, now) { return this.approve(id, now, {pairId}); }
+  async approve(id, now, values, pairId) { this.check(); const record = this.records.get(id); if (!record || record.kind !== 'pending' || record.expiresAt <= now || record.pairId !== pairId) return false; Object.assign(record, values); return true; }
+  async setPair(id, pairId, now, previousPairId) { return this.approve(id, now, {pairId}, previousPairId); }
   async remove(id) { this.check(); this.records.delete(id); }
   async devices(now) { this.check(); return [...this.records.values()].filter(r => r.kind === 'device' && r.expiresAt > now).map(r => structuredClone(r)); }
   async touch(id, now) { this.check(); const r = this.records.get(id); if (r) r.lastSeen = now; }
@@ -111,6 +112,37 @@ test('a concurrent approval is never overwritten by a stale pairing request',asy
  h.store.put=async record=>{await oldPut(record);if(record._id.startsWith('pair:')){const browser=h.store.records.get(record.browserId);browser.kind='device';browser.name='Concurrent approval';browser.expiresAt=new Date(Date.now()+86400000);}};
  const response=await tv.request('/auth/pair',{method:'POST',body:{}});assert.equal(response.status,409);
  assert.equal((await tv.status()).authorized,true);
+});
+test('concurrent pairing rotations leave exactly one current approvable code',async t=>{
+ const h=await harness(t);const admin=h.browser();await admin.login();await admin.status();const tv=h.browser();await tv.status();
+ const original=await (await tv.request('/auth/pair',{method:'POST',body:{}})).json();
+ const get=h.store.get.bind(h.store);let reads=0,release;const bothRead=new Promise(resolve=>release=resolve);
+ h.store.get=async id=>{const record=await get(id);if(record?.kind==='pending'&&reads<2){reads++;if(reads===2)release();await bothRead;}return record;};
+ const results=await Promise.all([tv.request('/auth/pair',{method:'POST',body:{}}),tv.request('/auth/pair',{method:'POST',body:{}})]);
+ assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);
+ const current=await results.find(r=>r.status===200).json();
+ assert.equal([...h.store.records.values()].filter(record=>record._id.startsWith('pair:')).length,1);
+ assert.equal((await admin.request('/auth/approve',{method:'POST',body:{code:original.code,name:'Old code'}})).status,400);
+ assert.equal((await admin.request('/auth/approve',{method:'POST',body:{code:current.code,name:'Current code'}})).status,200);
+ assert.equal((await tv.status()).authorized,true);
+});
+test('approval already holding a consumed old code cannot authorize after rotation',async t=>{
+ const h=await harness(t);const admin=h.browser();await admin.login();await admin.status();const tv=h.browser();await tv.status();
+ const original=await (await tv.request('/auth/pair',{method:'POST',body:{}})).json();
+ const approve=h.store.approve.bind(h.store);let arrived,release;const paused=new Promise(resolve=>arrived=resolve),resume=new Promise(resolve=>release=resolve);let intercept=true;
+ h.store.approve=async(...args)=>{if(intercept&&args[2].kind==='device'){intercept=false;arrived();await resume;}return approve(...args);};
+ const oldApproval=admin.request('/auth/approve',{method:'POST',body:{code:original.code,name:'Superseded'}});await paused;
+ const current=await (await tv.request('/auth/pair',{method:'POST',body:{}})).json();release();
+ assert.equal((await oldApproval).status,400);assert.equal((await tv.status()).authorized,false);
+ assert.equal((await admin.request('/auth/approve',{method:'POST',body:{code:current.code,name:'Current'}})).status,200);
+});
+test('Mongo auth adapter lists every active device so the oldest can still be revoked',async()=>{
+ const now=new Date('2026-09-18T00:00:00Z');
+ const documents=Array.from({length:501},(_,i)=>({_id:`device-${i}`,kind:'device',expiresAt:new Date('2027-01-01'),lastSeen:new Date(+now+i)}));
+ documents.push({_id:'expired',kind:'device',expiresAt:new Date('2026-01-01'),lastSeen:now},{_id:'admin',kind:'admin',expiresAt:new Date('2027-01-01'),lastSeen:now});
+ const collection={async createIndex(){},find(query){let rows=documents.filter(row=>row.kind===query.kind&&row.expiresAt>query.expiresAt.$gt);return{sort(){rows.sort((a,b)=>b.lastSeen-a.lastSeen);return this;},limit(n){rows=rows.slice(0,n);return this;},async toArray(){return rows;}};}};
+ const db={collection:()=>collection};const store=createAuthStore(()=>db);const listed=await store.devices(now);
+ assert.equal(listed.length,501);assert.equal(listed.at(-1)._id,'device-0');assert.equal(listed.some(row=>row._id==='expired'||row._id==='admin'),false);
 });
 test('OAuth transaction expires, wrong browser cannot use callback, and HTTPS cookies are hardened',async t=>{
  const h=await harness(t,{publicOrigin:'https://ranking.example.test'});const b=h.browser();await b.status();const start=await b.request('/auth/google');

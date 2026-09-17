@@ -123,11 +123,11 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
   router.post('/auth/pair', endpoint(async (req, res) => {
     const record = await mutation(req, res); if (!record) return;
     if (record.kind !== 'pending') return fail(res, 400, 'already_authorized');
-    if (record.pairId) await store.remove(record.pairId);
     const code = crypto.randomBytes(5).toString('hex').toUpperCase(), pairId = `pair:${hash(code)}`;
     const expiresAt = new Date(Math.min(+record.expiresAt, +now() + TEN_MINUTES));
     await store.put({ _id: pairId, browserId: record._id, expiresAt });
-    if (!await store.setPair(record._id, pairId, now())) { await store.remove(pairId); return fail(res, 409, 'pairing_changed'); }
+    if (!await store.setPair(record._id, pairId, now(), record.pairId)) { await store.remove(pairId); return fail(res, 409, 'pairing_changed'); }
+    if (record.pairId) await store.remove(record.pairId);
     res.json({ code, expiresAt });
   }));
   router.post('/auth/approve', endpoint(async (req, res) => {
@@ -136,7 +136,7 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
     if (!/^[A-F0-9]{10}$/.test(code) || !name || name.length > 80) return fail(res, 400, 'invalid_pairing');
     const pair = await store.consume(`pair:${hash(code)}`, now());
-    if (!pair || !await store.approve(pair.browserId, now(), { kind: 'device', name, approvedAt: now(), lastSeen: now(), expiresAt: new Date(+now() + DEVICE_LIFETIME) })) return fail(res, 400, 'expired_or_used_code');
+    if (!pair || !await store.approve(pair.browserId, now(), { kind: 'device', name, approvedAt: now(), lastSeen: now(), expiresAt: new Date(+now() + DEVICE_LIFETIME) }, pair._id)) return fail(res, 400, 'expired_or_used_code');
     res.json({ ok: true });
   }));
   router.get('/auth/devices', endpoint(async (req, res) => {

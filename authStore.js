@@ -15,16 +15,16 @@ function createAuthStore(getDb) {
     async get(id) { return (await collection()).findOne({ _id: id }); },
     async put(record) { await (await collection()).replaceOne({ _id: record._id }, record, { upsert: true }); },
     async consume(id, now) { return (await collection()).findOneAndDelete({ _id: id, expiresAt: { $gt: now } }); },
-    async approve(id, now, values) {
-      const result = await (await collection()).updateOne({ _id: id, kind: 'pending', expiresAt: { $gt: now } }, { $set: values });
+    async approve(id, now, values, pairId) {
+      const result = await (await collection()).updateOne({ _id: id, kind: 'pending', pairId, expiresAt: { $gt: now } }, { $set: values });
       return result.modifiedCount === 1;
     },
-    async setPair(id, pairId, now) {
-      const result = await (await collection()).updateOne({ _id: id, kind: 'pending', expiresAt: { $gt: now } }, { $set: { pairId } });
+    async setPair(id, pairId, now, previousPairId) {
+      const result = await (await collection()).updateOne({ _id: id, kind: 'pending', pairId: previousPairId ?? { $exists: false }, expiresAt: { $gt: now } }, { $set: { pairId } });
       return result.modifiedCount === 1;
     },
     async remove(id) { await (await collection()).deleteOne({ _id: id }); },
-    async devices(now) { return (await collection()).find({ kind: 'device', expiresAt: { $gt: now } }).sort({ lastSeen: -1 }).limit(500).toArray(); },
+    async devices(now) { return (await collection()).find({ kind: 'device', expiresAt: { $gt: now } }).sort({ lastSeen: -1 }).toArray(); },
     async touch(id, now) { await (await collection()).updateOne({ _id: id }, { $set: { lastSeen: now } }); },
     async limit(id, max, now) {
       const window = Math.floor(+now / 60000);
