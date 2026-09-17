@@ -9,7 +9,7 @@ test('talent checkboxes support remote toggling, pagination and saved defaults',
  const page=await browser.newPage({viewport:{width:1366,height:768}});
  await page.goto('http://127.0.0.1:'+server.address().port);await page.waitForSelector('.row');
  const total=await page.locator('.kpi b').textContent();
- await page.keyboard.press('7');await page.getByRole('button',{name:'Talents',exact:true}).click();
+ await page.keyboard.press('7');await page.getByRole('button',{name:'Visibility',exact:true}).click();await page.locator('#visibility-kind').selectOption('talents');
  const alpha=page.locator('#talent-items input[aria-label="TEST ALPHA"]');await alpha.focus();await page.keyboard.press('Enter');
  assert.equal(await alpha.isChecked(),false);
  assert.equal(await page.locator('.board').nth(1).locator('.name').first().textContent(),'TEST IDOL 2');
@@ -21,7 +21,7 @@ test('talent checkboxes support remote toggling, pagination and saved defaults',
  assert.equal(await page.locator('.board').nth(1).locator('.name').first().textContent(),'TEST ALPHA');
  await page.keyboard.press('7');await page.getByRole('button',{name:'Defaults',exact:true}).click();await page.locator('#restore-default').click();
  assert.equal(await page.locator('.board').nth(1).locator('.name').first().textContent(),'TEST IDOL 2');
- await page.getByRole('button',{name:'Talents',exact:true}).click();
+ await page.getByRole('button',{name:'Visibility',exact:true}).click();
  for(const size of [{width:1366,height:768},{width:800,height:600}]){
   await page.setViewportSize(size);
   assert.equal(await page.locator('.settings-box').evaluate(e=>e.scrollHeight>e.clientHeight+1),false);

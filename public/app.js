@@ -152,15 +152,20 @@ function refreshColumn(index){return index===5?loadHistory(true):loadCurrent([in
 function refreshAll(){return Promise.all([loadCurrent([0,1,2,3,4],true),...(config.lastMonth?[loadHistory(true)]:[])])}
 let page=0,selectedLocation='';
 function renderLocations(){
- const select=document.getElementById('location-choice');const locations=allLocations.length?allLocations:[{id:'',name:'All / unassigned'}];
- if(!locations.some(l=>l.id===selectedLocation))selectedLocation=locations.find(l=>config.locations[l.id])?.id||locations[0].id;
+ const select=document.getElementById('location-choice');const locations=[{id:'',name:'All locations'},...allLocations];
+ if(!locations.some(l=>l.id===selectedLocation))selectedLocation='';
  const signature=JSON.stringify(locations);if(select.dataset.signature!==signature){select.replaceChildren();locations.forEach(l=>{const option=document.createElement('option');option.value=l.id;option.textContent=l.name;select.append(option)});select.dataset.signature=signature}
  select.value=selectedLocation;renderGroups();renderTalents();
 }
 function renderGroups(){
- const groupList=allGroups.filter(g=>g.locationId===selectedLocation),size=innerWidth<700?4:6,total=Math.max(1,Math.ceil(groupList.length/size));page=Math.max(0,Math.min(page,total-1));
- const holder=document.getElementById('location-toggles');let locInput=holder.querySelector('input');if(!locInput){const label=document.createElement('label');label.textContent='Show this location';locInput=document.createElement('input');locInput.type='checkbox';locInput.id='location-visible';label.append(locInput);holder.append(label);locInput.onchange=()=>{if(selectedLocation){config.locations[selectedLocation]=locInput.checked;apply()}}}
- locInput.checked=selectedLocation?config.locations[selectedLocation]===true:true;locInput.disabled=!selectedLocation;
+ const groupList=allGroups.filter(g=>!selectedLocation||g.locationId===selectedLocation),size=innerWidth<700?4:6,total=Math.max(1,Math.ceil(groupList.length/size));page=Math.max(0,Math.min(page,total-1));
+ const holder=document.getElementById('location-toggles');let locInput=holder.querySelector('input');if(!locInput){const label=document.createElement('label'),span=document.createElement('span');locInput=document.createElement('input');locInput.type='checkbox';locInput.id='location-visible';label.append(span,locInput);holder.append(label);locInput.onchange=()=>{for(const l of allLocations.filter(l=>!selectedLocation||l.id===selectedLocation))config.locations[l.id]=locInput.checked;apply();renderGroups()}}
+ holder.querySelector('span').textContent=selectedLocation?'Show this location':'Show all locations';
+ const selected=allLocations.filter(l=>!selectedLocation||l.id===selectedLocation),enabled=selected.filter(l=>config.locations[l.id]===true).length;
+ locInput.checked=selected.length>0&&enabled===selected.length;locInput.indeterminate=enabled>0&&enabled<selected.length;locInput.disabled=!selected.length;
+ const branches=document.getElementById('branch-items');branches.hidden=Boolean(selectedLocation);
+ const branchSignature=JSON.stringify(allLocations);if(branches.dataset.signature!==branchSignature){branches.replaceChildren();for(const l of allLocations){const label=document.createElement('label'),span=document.createElement('span'),input=document.createElement('input');span.textContent=l.name;input.type='checkbox';input.dataset.location=l.id;input.setAttribute('aria-label','Show '+l.name);label.append(span,input);branches.append(label);input.onchange=()=>{config.locations[l.id]=input.checked;apply();renderGroups()}}branches.dataset.signature=branchSignature}
+ branches.querySelectorAll('input').forEach(input=>input.checked=config.locations[input.dataset.location]===true);
  const container=document.getElementById('group-items');const signature=JSON.stringify([selectedLocation,page,size,groupList.map(g=>[g.id,g.name,config.groups[g.id]!==false])]);
  if(container.dataset.signature!==signature){container.replaceChildren();groupList.slice(page*size,page*size+size).forEach(g=>{const label=document.createElement('label'),span=document.createElement('span'),input=document.createElement('input');span.textContent=g.name;span.title=g.name;input.type='checkbox';input.checked=config.groups[g.id]!==false;input.setAttribute('aria-label',g.name);label.append(span,input);container.append(label);input.onchange=()=>{config.groups[g.id]=input.checked;apply()}});container.dataset.signature=signature}
  document.getElementById('groups-page').textContent=(page+1)+' / '+total;document.getElementById('groups-prev').disabled=page===0;document.getElementById('groups-next').disabled=page>=total-1;
@@ -169,9 +174,9 @@ function renderGroups(){
 
 let talentPage=0;
 function renderTalents(){
- const sources=[rawData,...columnData.slice(0,5)],names=new Set(Object.keys(config.talents||{}));
- for(const source of sources)for(const rows of Object.values(source?.individual||{}))for(const row of rows||[])if(typeof row.name==='string')names.add(row.name);
- for(const row of historyPayload?.data?.individual||[])if(typeof row.name==='string')names.add(row.name);
+ const sources=[rawData,...columnData.slice(0,5)],names=new Set(selectedLocation?[]:Object.keys(config.talents||{}));
+ for(const source of sources)for(const rows of Object.values(source?.individual||{}))for(const row of rows||[])if(typeof row.name==='string'&&(!selectedLocation||String(row.locationId)===selectedLocation))names.add(row.name);
+ for(const row of historyPayload?.data?.individual||[])if(typeof row.name==='string'&&(!selectedLocation||String(row.locationId)===selectedLocation))names.add(row.name);
  const list=[...names].sort((a,b)=>a.localeCompare(b)),size=innerWidth<700?4:6,total=Math.max(1,Math.ceil(list.length/size));talentPage=Math.max(0,Math.min(talentPage,total-1));
  const container=document.getElementById('talent-items'),shown=list.slice(talentPage*size,(talentPage+1)*size),signature=JSON.stringify(shown);
  if(container.dataset.signature!==signature){
@@ -237,7 +242,7 @@ function finishEdit(commit){
  const el=editing;editing=null;
  if(!commit)el.value=editOriginal;
  el.classList.remove('remote-editing');
- if(commit)el.dispatchEvent(new Event('change',{bubbles:true}));
+ if(commit||el.id==='location-choice'||el.id==='visibility-kind')el.dispatchEvent(new Event('change',{bubbles:true}));
  document.getElementById('save-status').textContent=commit?'Changes applied':'Edit cancelled';
  el.focus();
 }
@@ -328,7 +333,8 @@ document.getElementById('refresh-all').onclick=refreshAll;
 document.getElementById('refresh-last').onclick=()=>loadHistory(true);
 document.getElementById('daily-history').onclick=()=>{dailyHistory=!dailyHistory;apply();notify(dailyHistory?'Showing yesterday':'Showing current daily scores')};
 document.getElementById('unfreeze').onclick=()=>{dailyHistory=false;unfreezeUntil=Date.now()+120000;lastContext='';apply();notify('Live daily scores for 2 minutes')};
-document.getElementById('location-choice').onchange=e=>{if(editing===e.target)return;selectedLocation=e.target.value;page=0;renderGroups()};
+document.getElementById('location-choice').onchange=e=>{selectedLocation=e.target.value;page=0;talentPage=0;renderGroups();renderTalents()};
+document.getElementById('visibility-kind').onchange=e=>{document.getElementById('visibility-groups').hidden=e.target.value!=='groups';document.getElementById('visibility-talents').hidden=e.target.value!=='talents';renderGroups();renderTalents()};
 document.getElementById('groups-prev').onclick=()=>{page--;renderGroups()};
 document.getElementById('groups-next').onclick=()=>{page++;renderGroups()};
 let streamConnected=false,stream=null,lastStreamFetch=0,streamTimer=null;

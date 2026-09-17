@@ -202,6 +202,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,.board-head:focus-
 .quick-toolbar .quick-button svg{display:block;flex:none;width:24px;height:24px}
 
 /* Live data states and responsive settings. */
+#branch-items[hidden],#visibility-groups[hidden],#visibility-talents[hidden]{display:none}
+#visibility-groups .pager,#visibility-talents .pager{margin-top:8px}
 .avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%}
 .empty-state{height:100%;display:grid;place-items:center;padding:12px;text-align:center;color:#baa996;font-size:clamp(12px,1vw,20px)}
 .board.loading .board-head{opacity:.65}.column-refresh[disabled]{opacity:.4}

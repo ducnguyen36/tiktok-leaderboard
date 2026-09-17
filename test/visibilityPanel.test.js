@@ -1,0 +1,24 @@
+const {test}=require('node:test'),assert=require('node:assert/strict');
+const {chromium}=require('playwright');
+const {createFixtureServer}=require('./support/command-center-server');
+test('unified visibility updates location immediately and exposes both branch switches',async t=>{
+ const {app}=createFixtureServer(),server=app.listen(0);await new Promise(r=>server.once('listening',r));
+ const browser=await chromium.launch({channel:'chrome',headless:true});t.after(async()=>{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r))});
+ const page=await browser.newPage({viewport:{width:800,height:600}});await page.goto('http://localhost:'+server.address().port);await page.waitForSelector('.row');
+ await page.keyboard.press('7');await page.getByRole('button',{name:'Visibility',exact:true}).click();
+ assert.equal(await page.locator('#location-choice').inputValue(),'');
+ assert.equal(await page.locator('#branch-items input').count(),2);
+ await page.locator('#location-visible').check();
+ assert.equal(await page.locator('#branch-items input:checked').count(),2);
+ await page.locator('#branch-items input').last().uncheck();assert.equal(await page.locator('#location-visible').evaluate(e=>e.indeterminate),true);
+ const choice=page.locator('#location-choice');await choice.dispatchEvent('pointerdown');await choice.selectOption('loc_hn');
+ assert.equal(await page.locator('#group-items input').count(),0);
+ await choice.selectOption('loc_hcm');assert.ok(await page.locator('#group-items input').count()>0);
+ await page.keyboard.press('Enter');await choice.focus();await page.keyboard.press('Enter');await choice.selectOption('loc_hn');await page.keyboard.press('Escape');
+ assert.equal(await choice.inputValue(),'loc_hcm');assert.ok(await page.locator('#group-items input').count()>0);
+ await page.locator('#visibility-kind').selectOption('talents');assert.ok(await page.locator('#talent-items input:visible').count()>0);
+ assert.equal(await page.locator('#group-items').isVisible(),false);
+ assert.equal(await page.locator('.settings-box').evaluate(e=>e.scrollHeight>e.clientHeight+1),false);
+ await choice.selectOption('');await page.locator('#location-visible').check();await page.locator('#location-visible').uncheck();assert.equal(await page.locator('#branch-items input:checked').count(),0);
+ assert.equal(await page.locator('.board .row').count(),0);
+});
