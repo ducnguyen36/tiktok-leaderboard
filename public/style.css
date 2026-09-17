@@ -186,13 +186,16 @@ button:focus-visible,input:focus-visible,select:focus-visible,.board-head:focus-
 
 /* V17: center the logo lockup within the left header region. */
 .head .brand{justify-content:center;padding-left:0}
-/* Larger identity lockup, without changing header or leaderboard geometry. */
-@media(min-width:701px){
- .head .brand{gap:1.98vw}
- .head .logo{width:clamp(81px,9.5vw,198px)}
- .head .brand-name{font-size:clamp(32px,3.96vw,90px)}
- .head .brand-sub{font-size:clamp(10px,.858vw,19px)}
-}
+/* Fit the complete header to BOTH viewport axes, retaining the large 16:9 lockup. */
+.head{grid-template-columns:minmax(0,1fr) minmax(0,48%);column-gap:calc(var(--unit)*.8)}
+.head .brand{height:100%;min-height:0;gap:calc(var(--unit)*1.98)}
+.head .brand>div:last-child{min-width:0}
+.head .logo{width:calc(var(--unit)*9.5);height:calc(var(--unit)*9.5)}
+.head .brand-name{font-size:calc(var(--unit)*3.96);white-space:nowrap}
+.head .brand-sub{font-size:calc(var(--unit)*.858);margin-top:calc(var(--unit)*.62);white-space:nowrap}
+.head .kpi{min-height:0;padding:calc(var(--unit)*.94);gap:calc(var(--unit)*.56)}
+.head .kpi span{font-size:calc(var(--unit)*1.25);line-height:1.2}
+.head .kpi b{font-size:calc(var(--unit)*3.33);line-height:1.1;white-space:nowrap}
 
 /* V19: font-independent, geometrically centered toolbar icons. */
 .quick-toolbar .quick-button{display:flex;align-items:center;justify-content:center;line-height:1}
