@@ -2,7 +2,7 @@
   "name": "helios-leaderboard",
   "version": "2.0.0",
   "private": true,
-  "description": "Unified TikTok talent leaderboard — MongoDB-backed, dual-theme, 4 tabs",
+  "description": "Helios Talent TV command center — MongoDB-backed, five columns plus optional history",
   "main": "server.js",
   "dependencies": {
     "cors": "^2.8.5",
@@ -13,6 +13,12 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node --test"
+    "test": "node --test test/*.test.js",
+    "test:unit": "node --test test/monthlyWindows.test.js test/leaderboardCore.test.js test/leaderboardHistory.test.js",
+    "test:browser": "node --test test/commandCenterBrowser.test.js",
+    "preview:test": "node test/support/command-center-server.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
   }
 }

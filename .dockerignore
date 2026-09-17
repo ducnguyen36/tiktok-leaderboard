@@ -52,3 +52,10 @@ docker-compose.yml
 
 # Documentation
 README.md
+
+# Local design sessions and verification artifacts
+.superpowers
+.tmp-brand
+.tmp-reference-frames
+test
+docs

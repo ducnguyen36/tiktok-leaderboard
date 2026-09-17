@@ -1,4 +1,5 @@
 require('dotenv').config();
+process.env.TZ = 'Asia/Ho_Chi_Minh';
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -7,6 +8,16 @@ const crypto = require('crypto');
 const { MongoClient } = require('mongodb');
 const dns = require('dns');
 const { computeMonthlyWindows, MONTHLY_RESET_HOUR, computeDailyWindows } = require('./monthlyWindows');
+const {
+    createHistoryArchiveService,
+    createSerializedContextBuilder,
+    leaderboardBuildContextKey,
+    latestClosedHistoryMonth,
+    loadLeaderboardDependencies,
+    parseFreshContext,
+    previousCalendarMonth,
+    validateRequestedHistoryMonth,
+} = require('./leaderboardHistory');
 
 // --- Global crash guards: prevent container from dying on unhandled errors ---
 process.on('uncaughtException', (err) => {
@@ -36,15 +47,17 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// Cache-busting version for static assets: a content hash of app.js + style.css.
+// Cache-busting version for static assets: a content hash of every client runtime file.
 // Cloudflare/browsers cache these with a 4h TTL, so without this a deploy can
 // leave stale JS running against fresh HTML (e.g. empty Groups panel). The hash
 // changes only when the client code changes, so each deploy invalidates the cache.
 function computeAssetVersion() {
     try {
         const h = crypto.createHash('sha1');
-        h.update(fs.readFileSync(path.join(__dirname, 'public', 'app.js')));
-        h.update(fs.readFileSync(path.join(__dirname, 'public', 'style.css')));
+        for (const file of ['app.js', 'style.css', 'leaderboard-core.js', 'keep-awake.js']) {
+            const filePath = path.join(__dirname, 'public', file);
+            if (fs.existsSync(filePath)) h.update(fs.readFileSync(filePath));
+        }
         return h.digest('hex').slice(0, 10);
     } catch (e) {
         return String(Date.now());
@@ -64,7 +77,9 @@ app.get('/', (req, res) => {
     try {
         const html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8')
             .replace('/style.css', `/style.css?v=${ASSET_VERSION}`)
-            .replace('/app.js', `/app.js?v=${ASSET_VERSION}`);
+            .replace('/app.js', `/app.js?v=${ASSET_VERSION}`)
+            .replace('/leaderboard-core.js', `/leaderboard-core.js?v=${ASSET_VERSION}`)
+            .replace('/keep-awake.js', `/keep-awake.js?v=${ASSET_VERSION}`);
         res.set('Cache-Control', 'no-cache');
         res.type('html').send(html);
     } catch (e) {
@@ -161,6 +176,7 @@ async function connectDB() {
 
         const uriDb = new URL(MONGODB_URI.replace('mongodb+srv://', 'https://')).pathname.slice(1);
         db = mongoClient.db(uriDb || 'helioscontrol');
+        lastEnsuredClosedMonth = ''; // reconnects must re-check durable history state
 
         console.log(`[Database] Connected to: ${db.databaseName}`);
 
@@ -168,6 +184,10 @@ async function connectDB() {
         await db.collection('gifts').createIndex({ timeStamp: 1 });
         await db.collection('gifts').createIndex({ receivedTalent: 1 });
         await db.collection('profiles').createIndex({ updatedAt: -1 });
+        await db.collection('leaderboard_monthly_snapshots').createIndex(
+            { month: 1, aggregationVersion: 1, timezone: 1, periodStart: 1, periodEnd: 1 },
+            { unique: true }
+        );
 
         // Monitor for disconnects and auto-reconnect
         mongoClient.on('close', () => {
@@ -202,6 +222,8 @@ function scheduleReconnect() {
             console.log('[Database] ✅ Reconnected successfully');
             // Restart change streams after reconnect
             startChangeStreams();
+            ensureLatestClosedHistory()
+                .catch(err => console.error('[History] Reconnect backfill failed:', err.message));
             // Refresh cache
             try {
                 const data = await buildLeaderboardData(lastResetHour, lastFreezeUntil);
@@ -519,19 +541,37 @@ async function resolveAvatar(avatarUrl, tiktokUsername) {
 // ==========================================
 // PROFILE & TALENT DATA HELPERS
 // ==========================================
-async function loadProfiles() {
-    try {
-        const all = await db.collection('profiles').find().toArray();
-        // Filter out accidental "new profile" entries
-        return all.filter(p => {
-            const name = (p.name || '').toLowerCase().trim();
-            return name !== 'new profile';
-        });
-    } catch (err) {
-        console.error('[Profiles] Error loading:', err.message);
-        return [];
-    }
+async function readProfilesFromDb() {
+    const all = await db.collection('profiles').find().toArray();
+    // Filter out accidental "new profile" entries.
+    return all.filter(profile => {
+        const name = (profile.name || '').toLowerCase().trim();
+        return name !== 'new profile';
+    });
 }
+
+async function readSessionProfileMapFromDb() {
+    const sessions = await db.collection('sessions').find(
+        {},
+        { projection: { profileId: 1 } }
+    ).toArray();
+    const sessionProfileMap = {};
+    for (const session of sessions) {
+        if (session.profileId) sessionProfileMap[session._id.toString()] = session.profileId;
+    }
+    return sessionProfileMap;
+}
+
+async function readLocationsFromDb() {
+    const documents = await db.collection('locations').find().sort({ createdAt: 1 }).toArray();
+    return documents.map(document => ({ id: document._id, name: document.name || document._id }));
+}
+
+const liveDependencyRepository = {
+    readProfiles: readProfilesFromDb,
+    readSessionProfileMap: readSessionProfileMapFromDb,
+    readLocations: readLocationsFromDb,
+};
 
 function buildTalentAvatars(profiles) {
     // Returns { talentName: { avatarUrl, uniqueId } }
@@ -540,6 +580,7 @@ function buildTalentAvatars(profiles) {
         if (profile.talents) {
             for (const [name, info] of Object.entries(profile.talents)) {
                 map[name] = {
+                    id: info.id || info.uniqueId || name,
                     avatarUrl: info.avatarUrl || '',
                     uniqueId: info.uniqueId || ''
                 };
@@ -861,8 +902,6 @@ let cachedData = null;
 let cacheTimestamp = 0;
 const CACHE_BG_INTERVAL = 60 * 60 * 1000; // 1 hour background refresh when no clients
 
-let isBuilding = false; // guard against concurrent builds
-
 // ==========================================
 // PERSISTENT SNAPSHOT — instant cold start
 // The last computed result is stored in MongoDB so a fresh container can
@@ -895,23 +934,28 @@ function saveSnapshot(data) {
         .catch(e => console.error('[Snapshot] Save failed:', e.message));
 }
 
-async function buildLeaderboardData(resetHour, freezeUntil) {
-    // Prevent concurrent builds from piling up memory
-    if (isBuilding) {
-        console.log('[Build] Skipping — another build is already running');
-        return cachedData; // return stale cache instead of building again
-    }
-    isBuilding = true;
-    try {
-        const data = await _buildLeaderboardDataInner(resetHour, freezeUntil);
-        saveSnapshot(data); // persist for the next cold start (throttled, fire-and-forget)
-        return data;
-    } finally {
-        isBuilding = false;
-    }
+const runSerializedLeaderboardBuild = createSerializedContextBuilder(
+    (_contextKey, resetHour, freezeUntil, strictDependencies) =>
+        _buildLeaderboardDataInner(resetHour, freezeUntil, { strictDependencies })
+);
+
+async function buildLeaderboardData(
+    resetHour,
+    freezeUntil,
+    { persist = true, strictDependencies = false } = {}
+) {
+    const normalizedFreeze = freezeUntil || '';
+    const data = await runSerializedLeaderboardBuild(
+        leaderboardBuildContextKey(resetHour, normalizedFreeze, strictDependencies),
+        resetHour,
+        normalizedFreeze,
+        strictDependencies
+    );
+    if (persist) saveSnapshot(data); // persist normal shared-cache builds, never scoped forced refreshes
+    return data;
 }
 
-async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
+async function _buildLeaderboardDataInner(resetHour, freezeUntil, { strictDependencies = false } = {}) {
     const now = new Date();
 
     // Daily + yesterday boundaries (use the daily resetHour, independent of the monthly 07:00 reset)
@@ -942,27 +986,22 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
     const displayStartMs = mw.displayStart.getTime();
     const displayEndMs = mw.displayEnd ? mw.displayEnd.getTime() : null;
 
-    // Load profiles
-    const profiles = await loadProfiles();
+    const { profiles, sessionProfileMap, locations } = await loadLeaderboardDependencies(
+        liveDependencyRepository,
+        {
+            strict: strictDependencies,
+            onOptionalError(name, error) {
+                if (name === 'readProfiles') {
+                    console.error('[Profiles] Error loading:', error.message);
+                }
+            },
+        }
+    );
     const talentAvatarMap = buildTalentAvatars(profiles);
     const profileMap = buildProfileMap(profiles);
     const talentToProfile = buildTalentToProfileMap(profiles);
     const profileNameToId = buildProfileNameToIdMap(profiles);
     const { uidToTalent, uidToProfile } = buildUidMaps(profiles);
-
-    // Build session → profileId map from sessions collection
-    const sessionProfileMap = {};
-    try {
-        const sessions = await db.collection('sessions').find(
-            {},
-            { projection: { profileId: 1 } }
-        ).toArray();
-        for (const s of sessions) {
-            if (s.profileId) {
-                sessionProfileMap[s._id.toString()] = s.profileId;
-            }
-        }
-    } catch (e) { /* sessions collection may not exist */ }
 
     const giftProjection = { projection: { receivedTalent: 1, receivedTalents: 1, receivedTalentUid: 1, toMemberUid: 1, cost: 1, sessionId: 1, timeStamp: 1, user: 1 } };
 
@@ -1067,13 +1106,6 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
     const finalIndDaily = isFrozen ? attachYesterday(indYesterday, indYesterday) : indDailyWithHistory;
     const finalGrpDaily = isFrozen ? attachYesterday(grpYesterday, grpYesterday) : grpDailyWithHistory;
 
-    // Load locations for client-side filtering
-    let locations = [];
-    try {
-        const locDocs = await db.collection('locations').find().sort({ createdAt: 1 }).toArray();
-        locations = locDocs.map(doc => ({ id: doc._id, name: doc.name || doc._id }));
-    } catch (e) { /* ignore */ }
-
     // Build talent → locationId and talent → groupId maps for individual filtering
     const talentLocationMap = {};
     const talentGroupMap = {};
@@ -1110,6 +1142,127 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil) {
         locations,
         groups
     };
+}
+
+// ==========================================
+// EXACT MONTH HISTORY — durable, unfiltered snapshots
+// ==========================================
+const HISTORY_SNAPSHOT_COLLECTION = 'leaderboard_monthly_snapshots';
+
+async function buildHistoricalLeaderboardData(period) {
+    // History is publish-once when complete. Unlike the live board, every dependency
+    // read is strict so a transient profile/session error cannot publish partial data.
+    const profiles = await readProfilesFromDb();
+    const talentAvatarMap = buildTalentAvatars(profiles);
+    const profileMap = buildProfileMap(profiles);
+    const talentToProfile = buildTalentToProfileMap(profiles);
+    const profileNameToId = buildProfileNameToIdMap(profiles);
+    const { uidToTalent, uidToProfile } = buildUidMaps(profiles);
+
+    const sessionProfileMap = await readSessionProfileMapFromDb();
+
+    const giftProjection = {
+        projection: {
+            receivedTalent: 1,
+            receivedTalents: 1,
+            receivedTalentUid: 1,
+            toMemberUid: 1,
+            cost: 1,
+            sessionId: 1,
+            timeStamp: 1,
+            user: 1,
+        },
+    };
+    const allGifts = await db.collection('gifts').find(
+        { timeStamp: { $gte: Date.parse(period.start), $lt: Date.parse(period.end) } },
+        giftProjection
+    ).toArray();
+    const individualGifts = allGifts.filter(gift => !(gift.user && gift.user.userId === 'Manual'));
+
+    const individualRaw = aggregateIndividual(
+        individualGifts,
+        talentAvatarMap,
+        profileNameToId,
+        uidToTalent,
+        talentToProfile,
+        profileMap,
+        uidToProfile
+    );
+    const groupRaw = aggregateGroup(
+        allGifts,
+        talentToProfile,
+        profileMap,
+        profileNameToId,
+        uidToTalent,
+        uidToProfile,
+        sessionProfileMap
+    );
+
+    const talentLocationMap = {};
+    const talentGroupMap = {};
+    for (const [profileId, profile] of Object.entries(profileMap)) {
+        for (const talentName of profile.talentNames) {
+            talentLocationMap[talentName] = profile.locationId || '';
+            talentGroupMap[talentName] = String(profileId);
+        }
+    }
+
+    return {
+        individual: individualRaw.map(entry => {
+            const talent = talentAvatarMap[entry._id] || {};
+            return {
+                id: String(talent.id || entry._id),
+                name: entry._id,
+                value: entry.totalDiamonds,
+                avatar: resolveAvatarFast(talent.avatarUrl, talent.uniqueId),
+                groupId: talentGroupMap[entry._id] || '',
+                locationId: talentLocationMap[entry._id] || '',
+            };
+        }),
+        group: groupRaw.map(entry => {
+            const profile = profileMap[entry._id] || {};
+            const id = String(entry._id);
+            return {
+                id,
+                name: entry.name,
+                value: entry.totalDiamonds,
+                avatar: resolveAvatarFast(profile.avatar, profile.username),
+                groupId: id,
+                locationId: profile.locationId || '',
+            };
+        }),
+    };
+}
+
+const historyRepository = {
+    async findById(id) {
+        if (!db) throw new Error('Database not connected');
+        return db.collection(HISTORY_SNAPSHOT_COLLECTION).findOne({ _id: id });
+    },
+    async upsertComplete(document) {
+        if (!db) throw new Error('Database not connected');
+        if (!document.complete) throw new Error('Refusing to persist an incomplete history period');
+        await db.collection(HISTORY_SNAPSHOT_COLLECTION).updateOne(
+            { _id: document._id },
+            { $setOnInsert: document },
+            { upsert: true }
+        );
+    },
+};
+
+const historyArchive = createHistoryArchiveService({
+    repository: historyRepository,
+    build: buildHistoricalLeaderboardData,
+});
+
+let lastEnsuredClosedMonth = '';
+async function ensureLatestClosedHistory() {
+    if (!db) return;
+    const month = latestClosedHistoryMonth(new Date());
+    if (lastEnsuredClosedMonth === month) return;
+    await historyArchive.get(month);
+    lastEnsuredClosedMonth = month;
+    console.log(`[History] Ensured closed snapshot ${month}`);
 }
 
 // ==========================================
@@ -1260,6 +1413,32 @@ function debouncedBroadcast() {
 // ==========================================
 // API: LEADERBOARD (polling fallback)
 // ==========================================
+app.get('/api/leaderboard/fresh', async (req, res) => {
+    let context;
+    try {
+        context = parseFreshContext(req.query);
+    } catch (err) {
+        return res.status(400).json({ status: 'error', message: err.message });
+    }
+    if (!db) {
+        return res.status(503).json({ status: 'error', message: 'Database not connected' });
+    }
+
+    try {
+        const data = await buildLeaderboardData(
+            context.resetHour,
+            context.freezeUntil,
+            { persist: false, strictDependencies: true }
+        );
+        // A forced scoped build is returned only to its requester. It must not overwrite
+        // the shared live cache or broadcast a reset/freeze context to other devices.
+        res.json({ status: 'ok', data });
+    } catch (err) {
+        console.error('[LeaderboardFresh] Error:', err.message);
+        res.status(500).json({ status: 'error', message: err.message });
+    }
+});
+
 app.get('/api/leaderboard', async (req, res) => {
     const parsed = parseInt(req.query.resetHour);
     const resetHour = isNaN(parsed) ? 0 : parsed;
@@ -1298,97 +1477,37 @@ app.get('/api/leaderboard', async (req, res) => {
 });
 
 // ==========================================
-// API: LAST MONTH (on-demand, heavily cached)
-// Historical data — fetched only when user clicks the button
+// API: EXACT MONTH HISTORY + legacy last-month compatibility
 // ==========================================
-let lastMonthCache = null;
-let lastMonthCacheTimestamp = 0;
-let lastMonthCacheKey = ''; // e.g. "2:false" — monthIndex + ':' + inGrace
-const LAST_MONTH_CACHE_TTL = 60 * 60 * 1000; // 1 hour (data doesn't change)
+app.get('/api/leaderboard/history', async (req, res) => {
+    try {
+        validateRequestedHistoryMonth(req.query.month, new Date());
+    } catch (err) {
+        return res.status(400).json({ status: 'error', message: err.message });
+    }
+    if (!db) {
+        return res.status(503).json({ status: 'error', message: 'Database not connected' });
+    }
+
+    try {
+        const result = await historyArchive.get(req.query.month);
+        res.json({ status: 'ok', ...result });
+    } catch (err) {
+        console.error('[History] Error:', err.message);
+        res.status(500).json({ status: 'error', message: err.message });
+    }
+});
 
 app.get('/api/leaderboard/lastmonth', async (req, res) => {
     if (!db) {
         return res.status(503).json({ status: 'error', message: 'Database not connected' });
     }
-
-    const now = new Date();
-    const mw = computeMonthlyWindows(now, MONTHLY_RESET_HOUR);
-    // Cache key uses the ACCUMULATING month index + grace flag (not the displayed month).
-    // This still uniquely bounds the served window and forces a fresh query across both the
-    // grace flip (00:00 on the 2nd) and any month change.
-    const cacheKey = `${mw.monthlyStart.getMonth()}:${mw.inGrace}`;
-
-    // Return cached if same window and not expired
-    if (lastMonthCache && lastMonthCacheKey === cacheKey &&
-        Date.now() - lastMonthCacheTimestamp < LAST_MONTH_CACHE_TTL) {
-        return res.json({ status: 'ok', data: lastMonthCache });
-    }
-
     try {
-        console.log('[LastMonth] Building last month data...');
-        // The button shows the window immediately BEFORE the currently displayed monthly window.
-        const lastMonthEndMs = mw.displayStart.getTime();
-        const lastMonthStart = new Date(
-            mw.displayStart.getFullYear(), mw.displayStart.getMonth() - 1, 1, MONTHLY_RESET_HOUR, 0, 0, 0
-        );
-        const lastMonthStartMs = lastMonthStart.getTime();
-
-        const profiles = await loadProfiles();
-        const talentAvatarMap = buildTalentAvatars(profiles);
-        const profileMap = buildProfileMap(profiles);
-        const talentToProfile = buildTalentToProfileMap(profiles);
-        const profileNameToId = buildProfileNameToIdMap(profiles);
-        const { uidToTalent, uidToProfile } = buildUidMaps(profiles);
-
-        const sessionProfileMap = {};
-        try {
-            const sessions = await db.collection('sessions').find({}, { projection: { profileId: 1 } }).toArray();
-            for (const s of sessions) {
-                if (s.profileId) sessionProfileMap[s._id.toString()] = s.profileId;
-            }
-        } catch (e) { /* ignore */ }
-
-        const giftProjection = { projection: { receivedTalent: 1, receivedTalents: 1, receivedTalentUid: 1, toMemberUid: 1, cost: 1, sessionId: 1, timeStamp: 1, user: 1 } };
-        const allLastMonthGifts = await db.collection('gifts').find(
-            { timeStamp: { $gte: lastMonthStartMs, $lt: lastMonthEndMs } },
-            giftProjection
-        ).toArray();
-
-        console.log(`[LastMonth] Loaded ${allLastMonthGifts.length} gifts`);
-
-        const isNotManual = g => !(g.user && g.user.userId === 'Manual');
-        const lastMonthGifts = allLastMonthGifts.filter(isNotManual);
-
-        const [individualLastMonth, groupLastMonth] = await Promise.all([
-            aggregateIndividual(lastMonthGifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
-            aggregateGroup(allLastMonthGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap)
-        ]);
-
-        // Format
-        const [indLastMonth, grpLastMonth] = await Promise.all([
-            Promise.all(individualLastMonth.map(async entry => {
-                const talentInfo = talentAvatarMap[entry._id] || {};
-                const avatar = resolveAvatarFast(talentInfo.avatarUrl, talentInfo.uniqueId);
-                const pInfo = Object.entries(profileMap).find(([, p]) => p.talentNames.includes(entry._id));
-                return { name: entry._id, value: entry.totalDiamonds, avatar, locationId: pInfo ? pInfo[1].locationId : '' };
-            })),
-            Promise.all(groupLastMonth.map(async entry => {
-                const pInfo = profileMap[entry._id] || {};
-                const avatar = resolveAvatarFast(pInfo.avatar, pInfo.username);
-                return { name: entry.name, value: entry.totalDiamonds, avatar, locationId: pInfo.locationId || '' };
-            }))
-        ]);
-
-        const data = { individual: indLastMonth, group: grpLastMonth };
-        lastMonthCache = data;
-        lastMonthCacheTimestamp = Date.now();
-        lastMonthCacheKey = cacheKey;
-
-        console.log('[LastMonth] ✅ Built and cached');
-        res.json({ status: 'ok', data });
+        const result = await historyArchive.get(previousCalendarMonth(new Date()));
+        res.json({ status: 'ok', data: result.data });
     } catch (err) {
         console.error('[LastMonth] Error:', err.message);
-        res.json({ status: 'error', message: err.message });
+        res.status(500).json({ status: 'error', message: err.message });
     }
 });
 
@@ -1415,6 +1534,8 @@ app.listen(PORT, '0.0.0.0', () => {
 
         // Start watching MongoDB for changes
         startChangeStreams();
+        ensureLatestClosedHistory()
+            .catch(err => console.error('[History] Startup backfill failed:', err.message));
 
         // Instant cold start: serve the last snapshot immediately (<100ms),
         // then rebuild from raw gifts in the background without blocking serving.
@@ -1458,6 +1579,13 @@ setInterval(async () => {
         console.error('[Cache] Background refresh error:', err.message);
     }
 }, CACHE_BG_INTERVAL);
+
+// Ensure the latest closed calendar month exists even when no browser is open.
+// A failed attempt is intentionally not memoized, so the next minute retries.
+setInterval(() => {
+    ensureLatestClosedHistory()
+        .catch(err => console.error('[History] Periodic backfill failed:', err.message));
+}, 60 * 1000);
 
 // Periodic memory log (every 10 minutes)
 setInterval(() => {

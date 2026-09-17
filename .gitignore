@@ -30,3 +30,8 @@ public/avatars/
 
 # Local deploy script
 deploy.ps1
+
+# Local design and visual verification artifacts
+.superpowers/
+.tmp-brand/
+.tmp-reference-frames/

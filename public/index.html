@@ -1,318 +1,38 @@
-<!DOCTYPE html>
-<html lang="en">
-
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Helios Talent</title>
-    <meta name="description" content="Helios Talent — live TikTok talent leaderboard rankings">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-    <link rel="stylesheet" href="/style.css">
-</head>
-
-<body>
-
-    <!-- Main Content Wrapper (handles rotation) -->
-    <div id="app-wrapper">
-
-        <!-- Settings Modal -->
-        <div id="settings-modal" class="hidden">
-            <div class="settings-content">
-                <div class="settings-header">
-                    <h2>⚙️ Settings</h2>
-                    <div style="display:flex; gap:8px; align-items:center;">
-                        <button class="close-btn" id="btn-shortcuts-help" onclick="toggleShortcutsHelp()" title="Keyboard Shortcuts"><i class="fas fa-question-circle"></i></button>
-                        <button class="close-btn" onclick="toggleSettings()"><i class="fas fa-times"></i></button>
-                    </div>
-                </div>
-
-                <!-- Shortcuts tooltip (hidden by default) -->
-                <div id="shortcuts-help" class="shortcuts-tooltip hidden">
-                    <div class="shortcuts-list">
-                        <kbd>0</kbd> Rotate &nbsp; <kbd>1</kbd> Grp Mon &nbsp; <kbd>2</kbd> Grp Day &nbsp; <kbd>3</kbd> Ind Mon &nbsp; <kbd>4</kbd> Ind Day<br>
-                        <kbd>5</kbd> Toggle Income &nbsp; <kbd>6</kbd> Theme &nbsp; <kbd>7</kbd> Settings &nbsp; <kbd>8</kbd> Refresh
-                    </div>
-                </div>
-
-                <!-- Row 0: Presets -->
-                <div class="settings-row">
-                    <div class="settings-section" style="width:100%">
-                        <div class="settings-title">Quick Presets</div>
-                        <div class="preset-group">
-                            <button class="preset-btn" onclick="applyPreset('group')" title="Group: Rotate 90°, Dark, GM+GD, Score ON, Avatar OFF, Podium 3, Cols 1, 97A HCM">
-                                <i class="fas fa-users"></i> Group Board
-                            </button>
-                            <button class="preset-btn" onclick="applyPreset('individual')" title="Individual: Rotate 90°, Light, IM+ID, Score ON, Avatar OFF, Podium 5, Cols 2, 97A HCM">
-                                <i class="fas fa-user"></i> Individual Board
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Row 1: Theme + Tabs -->
-                <div class="settings-row">
-                    <div class="settings-section settings-half">
-                        <div class="settings-title">Theme</div>
-                        <div class="checkbox-group">
-                            <label class="checkbox-label" onclick="setTheme('classic')">
-                                <div class="custom-checkbox" id="check-theme-classic"><span class="checkbox-check">✓</span></div>
-                                Classic
-                            </label>
-                            <label class="checkbox-label" onclick="setTheme('modern')">
-                                <div class="custom-checkbox" id="check-theme-modern"><span class="checkbox-check">✓</span></div>
-                                Modern
-                            </label>
-                        </div>
-                    </div>
-                    <div class="settings-section settings-half">
-                        <div class="settings-title">Enabled Tabs</div>
-                        <div class="checkbox-group">
-                            <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'group-monthly')">
-                                <div class="custom-checkbox" id="check-tab-group-monthly"><span class="checkbox-check">✓</span></div>
-                                GM
-                            </label>
-                            <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'group-daily')">
-                                <div class="custom-checkbox" id="check-tab-group-daily"><span class="checkbox-check">✓</span></div>
-                                GD
-                            </label>
-                            <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'individual-monthly')">
-                                <div class="custom-checkbox" id="check-tab-individual-monthly"><span class="checkbox-check">✓</span></div>
-                                IM
-                            </label>
-                            <label class="checkbox-label" onclick="toggleConfig('visibleTabs', 'individual-daily')">
-                                <div class="custom-checkbox" id="check-tab-individual-daily"><span class="checkbox-check">✓</span></div>
-                                ID
-                            </label>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Row 2: Income + Avatars -->
-                <div class="settings-row">
-                    <div class="settings-section settings-half">
-                        <div class="settings-title">Show Income</div>
-                        <div class="checkbox-group">
-                            <label class="checkbox-label" onclick="toggleConfig('showIncome', 'group-monthly')">
-                                <div class="custom-checkbox" id="check-income-group-monthly"><span class="checkbox-check">✓</span></div>
-                                GM
-                            </label>
-                            <label class="checkbox-label" onclick="toggleConfig('showIncome', 'group-daily')">
-                                <div class="custom-checkbox" id="check-income-group-daily"><span class="checkbox-check">✓</span></div>
-                                GD
-                            </label>
-                            <label class="checkbox-label" onclick="toggleConfig('showIncome', 'individual-monthly')">
-                                <div class="custom-checkbox" id="check-income-individual-monthly"><span class="checkbox-check">✓</span></div>
-                                IM
-                            </label>
-                            <label class="checkbox-label" onclick="toggleConfig('showIncome', 'individual-daily')">
-                                <div class="custom-checkbox" id="check-income-individual-daily"><span class="checkbox-check">✓</span></div>
-                                ID
-                            </label>
-                        </div>
-                    </div>
-                    <div class="settings-section settings-half">
-                        <div class="settings-title">List Avatars</div>
-                        <div class="checkbox-group">
-                            <label class="checkbox-label" onclick="toggleConfig('showAvatars', 'group-monthly')">
-                                <div class="custom-checkbox" id="check-avatar-group-monthly"><span class="checkbox-check">✓</span></div>
-                                GM
-                            </label>
-                            <label class="checkbox-label" onclick="toggleConfig('showAvatars', 'group-daily')">
-                                <div class="custom-checkbox" id="check-avatar-group-daily"><span class="checkbox-check">✓</span></div>
-                                GD
-                            </label>
-                            <label class="checkbox-label" onclick="toggleConfig('showAvatars', 'individual-monthly')">
-                                <div class="custom-checkbox" id="check-avatar-individual-monthly"><span class="checkbox-check">✓</span></div>
-                                IM
-                            </label>
-                            <label class="checkbox-label" onclick="toggleConfig('showAvatars', 'individual-daily')">
-                                <div class="custom-checkbox" id="check-avatar-individual-daily"><span class="checkbox-check">✓</span></div>
-                                ID
-                            </label>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Row 3: Yesterday Points + Layout -->
-                <div class="settings-row">
-                    <div class="settings-section settings-half">
-                        <div class="settings-title">Yesterday Points</div>
-                        <div class="checkbox-group">
-                            <label class="checkbox-label" onclick="toggleConfig('showYesterday', 'group-daily')">
-                                <div class="custom-checkbox" id="check-yd-group-daily"><span class="checkbox-check">✓</span></div>
-                                Grp
-                            </label>
-                            <label class="checkbox-label" onclick="toggleConfig('showYesterday', 'individual-daily')">
-                                <div class="custom-checkbox" id="check-yd-individual-daily"><span class="checkbox-check">✓</span></div>
-                                Ind
-                            </label>
-                        </div>
-                    </div>
-                    <div class="settings-section settings-half">
-                        <div class="settings-title">Locations</div>
-                        <div class="checkbox-group" id="location-checkboxes">
-                            <!-- Populated dynamically by renderLocationSettings() -->
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Row 3a: Groups (per location) -->
-                <div class="settings-row">
-                    <div class="settings-section" style="width:100%">
-                        <div class="settings-title">Groups (uncheck to hide a group &amp; its members)</div>
-                        <div id="group-checkboxes" class="group-checkboxes">
-                            <!-- Populated dynamically by renderGroupSettings() -->
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Row 3b: Podium / Columns -->
-                <div class="settings-row">
-                    <div class="settings-section settings-half">
-                        <div class="settings-title">Podium / Columns</div>
-                        <div class="input-group compact">
-                            <i class="fas fa-trophy" style="color:var(--text-secondary); font-size:11px"></i>
-                            <input type="number" class="settings-input mini" id="podium-slots" min="1" max="5" value="5"
-                                onchange="updateConfigValue('podiumSlots', this.value); renderLeaderboard()">
-                            <i class="fas fa-columns" style="color:var(--text-secondary); font-size:11px; margin-left:8px"></i>
-                            <input type="number" class="settings-input mini" id="list-columns" min="1" max="5" value="3"
-                                onchange="updateConfigValue('listColumns', this.value); renderLeaderboard()">
-                        </div>
-                        <label class="checkbox-label" style="margin-top:6px; font-size:0.75rem;" onclick="toggleConfig('forceHorizontal', 'enabled')">
-                            <div class="custom-checkbox" id="check-force-horizontal"><span class="checkbox-check">✓</span></div>
-                            Force Horizontal
-                        </label>
-                    </div>
-                </div>
-
-                <!-- Row 4: Rotation + Cycle + Reset + Freeze -->
-                <div class="settings-row">
-                    <div class="settings-section settings-quarter">
-                        <div class="settings-title">Rotate</div>
-                        <div class="input-group compact">
-                            <input type="number" class="settings-input mini" id="rotation-deg" min="0" max="270" step="90" value="0"
-                                onchange="setRotation(parseInt(this.value))">
-                            <span style="color:var(--text-secondary); font-size:0.75rem">°</span>
-                        </div>
-                    </div>
-                    <div class="settings-section settings-quarter">
-                        <div class="settings-title">Cycle</div>
-                        <div class="input-group compact">
-                            <input type="number" class="settings-input mini" id="cycle-duration" min="1" value="10"
-                                onchange="updateConfigValue('cycleDuration', this.value)">
-                            <span style="color:var(--text-secondary); font-size:0.75rem">s</span>
-                        </div>
-                    </div>
-                    <div class="settings-section settings-quarter">
-                        <div class="settings-title">Reset</div>
-                        <div class="input-group compact">
-                            <input type="number" class="settings-input mini" id="reset-hour" min="0" max="23" value="0"
-                                onchange="updateConfigValue('resetHour', this.value)">
-                            <span style="color:var(--text-secondary); font-size:0.75rem">h</span>
-                        </div>
-                    </div>
-                    <div class="settings-section settings-quarter">
-                        <div class="settings-title">Freeze</div>
-                        <div class="input-group compact">
-                            <div class="freeze-box">
-                                <input type="number" class="freeze-hh" id="freeze-hh" min="0" max="23" placeholder="HH"
-                                    oninput="updateFreezeTime()">
-                                <span class="freeze-colon">:</span>
-                                <input type="number" class="freeze-mm" id="freeze-mm" min="0" max="59" placeholder="MM"
-                                    oninput="updateFreezeTime()">
-                            </div>
-                            <button class="clear-btn mini" onclick="clearFreezeTime()" title="Clear">
-                                <i class="fas fa-times" style="font-size:9px"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Save Button -->
-                <div class="settings-section" style="border-top: 1px solid var(--border-color); padding-top: 12px; margin-bottom: 0;">
-                    <button class="save-default-btn" onclick="saveAsDefault()">
-                        <i class="fas fa-save"></i> Save as Default
-                    </button>
-                    <div id="save-feedback" style="font-size: 0.75rem; color: #4ade80; margin-top: 4px; display:none;">✓ Saved!</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Main Container -->
-        <div class="container">
-            <header>
-                <div class="header-left">
-                    <img src="/default.jpg" alt="Helios" class="header-logo">
-                    <h1>Helios Talent <span id="header-loader" class="header-loader hidden"></span>
-                </h1>
-                </div>
-                <div class="controls">
-                    <button class="icon-btn" id="btn-yesterday-view" onclick="toggleYesterdayView()" title="View Yesterday">
-                        <i class="fas fa-clock"></i>
-                    </button>
-                    <button class="icon-btn" id="btn-lastmonth-view" onclick="toggleLastMonthView()" title="View Last Month">
-                        <i class="fas fa-calendar-alt"></i>
-                    </button>
-                    <button class="icon-btn theme-toggle" onclick="cycleTheme()" title="Toggle Theme (6)">
-                        <i class="fas fa-palette"></i>
-                    </button>
-                    <button class="icon-btn" onclick="rotateScreen()" title="Rotate (0)">
-                        <i class="fas fa-sync-alt"></i>
-                    </button>
-                    <button class="icon-btn" onclick="toggleSettings()" title="Settings (7)">
-                        <i class="fas fa-cog"></i>
-                    </button>
-                </div>
-            </header>
-
-            <!-- Tabs -->
-            <div class="tabs-container">
-                <div class="tabs" id="tabs-group">
-                    <button class="tab-btn active" id="btn-group-monthly" onclick="switchTab('group-monthly')">Group Monthly</button>
-                    <button class="tab-btn" id="btn-group-daily" onclick="switchTab('group-daily')">Group Daily</button>
-                    <button class="tab-btn" id="btn-individual-monthly" onclick="switchTab('individual-monthly')">Ind. Monthly</button>
-                    <button class="tab-btn" id="btn-individual-daily" onclick="switchTab('individual-daily')">Ind. Daily</button>
-                </div>
-            </div>
-
-            <!-- Content -->
-            <div id="content" style="flex:1; display:flex; flex-direction:column; min-height:0;">
-                <!-- Podium (Top N) -->
-                <div id="podium" class="top-section">
-                    <!-- Injected via JS -->
-                </div>
-
-                <!-- List (Rank N+1) -->
-                <div id="list" class="list-container">
-                    <!-- Injected via JS -->
-                </div>
-            </div>
-        </div>
-
-        <!-- Footer -->
-        <div class="footer-bar" id="footer-bar">
-            <div class="footer-item">
-                <span id="footer-connection" style="font-weight:600; font-size:11px;">🟡 POLL</span>
-            </div>
-            <div class="footer-divider"></div>
-            <div class="footer-item">
-                <i class="fas fa-sync-alt" style="font-size:10px"></i>
-                <span id="footer-cycle" class="footer-highlight">10s</span>
-            </div>
-            <div class="footer-divider"></div>
-            <div class="footer-item">
-                <i class="fas fa-hourglass-half" style="font-size:10px"></i>
-                <span>Next: <span id="footer-countdown" class="footer-highlight">10s</span></span>
-            </div>
-            <div class="footer-divider"></div>
-            <div class="footer-item">
-                <i class="fas fa-clock" style="font-size:10px"></i>
-                <span id="footer-clock" class="footer-highlight"></span>
-            </div>
-        </div>
-    </div>
-
-    <script src="/app.js"></script>
-</body>
-
-</html>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#171614"><title>Helios Talent · Leaderboard</title><link rel="stylesheet" href="/style.css"><script defer src="/leaderboard-core.js"></script><script defer src="/keep-awake.js"></script><script defer src="/app.js"></script></head><body><div class="tv">
+  <header class="head"><div class="brand"><div class="logo"><img src="/helios-asset-23.png" alt="Helios Talent interlocking squares logo"></div><div><div class="brand-name">Helios Talent</div><div class="brand-sub">LIVE PERFORMANCE COMMAND CENTER</div></div></div><div class="kpi"><span>Today's Total Points</span><b>—</b></div></header>
+  <div class="ticker-zone"><div class="ticker"><div class="ticker-line">HELIOS TALENT · LIVE PERFORMANCE</div></div></div>
+  <main class="boards-zone" aria-label="Leaderboard columns"><section class="board" data-column="0"><div class="board-head"><b>Daily Top Groups</b></div><div class="list"><div class="empty-state">Waiting for data…</div></div></section><section class="board" data-column="1"><div class="board-head"><b>Daily Top Idols</b></div><div class="list"><div class="empty-state">Waiting for data…</div></div></section><section class="board" data-column="2"><div class="board-head"><b>Monthly Top Groups</b></div><div class="list"><div class="empty-state">Waiting for data…</div></div></section><section class="board" data-column="3"><div class="board-head"><b>Monthly Top Idols</b></div><div class="list"><div class="empty-state">Waiting for data…</div></div></section><section class="board" data-column="4"><div class="board-head"><b>Monthly Ranking</b></div><div class="list"><div class="empty-state">Waiting for data…</div></div></section><section class="board" data-column="5" hidden><div class="board-head"><b>Last Month Ranking</b></div><div class="list"><div class="empty-state">Waiting for data…</div></div></section></main>
+  <footer class="footer"><span><b id="connection">CONNECTING</b><span id="data-status"> · Waiting for data</span></span><strong class="camera-notice">NO CAMERAS ALLOWED</strong><span>Updated: —</span></footer>
+</div>
+<div class="quick-toolbar" role="toolbar" aria-label="Leaderboard controls">
+<button id="quick-lastmonth" class="quick-button" aria-label="Toggle Last Month Ranking" title="Last Month Ranking (6)" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 2v6M17 2v6M3 10h18M14 13l-4 3 4 3"/></svg></button>
+<button id="quick-refresh" class="quick-button" aria-label="Refresh all columns" title="Refresh All (8)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M19 11a7 7 0 0 0-12-5L4 9M5 13a7 7 0 0 0 12 5l3-3"/></svg></button>
+<button class="settings-open quick-button" id="settings-open" aria-label="Open settings" title="Settings (7 / S / hold anywhere)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><polygon points="21.952,11.020 21.952,12.980 19.464,14.264 18.879,15.677 19.730,18.344 18.344,19.730 15.677,18.879 14.264,19.464 12.980,21.952 11.020,21.952 9.736,19.464 8.323,18.879 5.656,19.730 4.270,18.344 5.121,15.677 4.536,14.264 2.048,12.980 2.048,11.020 4.536,9.736 5.121,8.323 4.270,5.656 5.656,4.270 8.323,5.121 9.736,4.536 11.020,2.048 12.980,2.048 14.264,4.536 15.677,5.121 18.344,4.270 19.730,5.656 18.879,8.323 19.464,9.736"/><circle cx="12" cy="12" r="3.2"/></svg></button></div>
+<div class="settings-dialog" id="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" hidden>
+<section class="settings-box"><header class="settings-titlebar"><h2 id="settings-title">Settings</h2><button id="close-settings" aria-label="Close settings">✕</button></header>
+<div class="settings-content"><nav class="settings-nav" aria-label="Settings sections">
+<button data-page="0" class="active">Display</button><button data-page="1" class="">Timing</button><button data-page="2" class="">Locations & Groups</button><button data-page="3" class="">History & Refresh</button><button data-page="4" class="">Defaults</button><button data-page="5" class="">Shortcuts</button></nav>
+<div class="settings-pages">
+<section class="settings-page active" data-pane="0"><h3>Display</h3>
+<label>Daily Top Groups — points <input type="checkbox" data-score="0"></label><label>Daily Top Idols — points <input type="checkbox" data-score="1"></label><label>Monthly Top Groups — points <input type="checkbox" data-score="2"></label><label>Monthly Top Idols — points <input type="checkbox" data-score="3"></label><label>Monthly Ranking — points <input type="checkbox" data-score="4"></label>
+<label>Today's Total Points (9)<input type="checkbox" data-config="total"></label>
+</section>
+<section class="settings-page" data-pane="1"><h3>Timing & Daily History</h3>
+<label>Daily reset hour<input type="number" min="0" max="23" data-config="resetHour"></label>
+<label>Freeze daily scores until<input type="time" data-config="freezeUntil"></label>
+<label>Show yesterday — groups<input type="checkbox" data-config="yesterdayGroups"></label>
+<label>Show yesterday — idols<input type="checkbox" data-config="yesterdayIdols"></label>
+<label>Ranking speed (px/s)<input type="number" min="10" max="150" data-config="speed"></label>
+<label>Pause at each end (seconds)<input type="number" min="0" max="10" step=".5" data-config="pause"></label>
+<label>Ticker speed (px/s)<input type="number" min="30" max="300" data-config="tickerSpeed"></label>
+<p>Monthly close: 07:00 on day 1 (Vietnam time). Daily reset is separate. Clear freeze time for live daily scores.</p></section>
+<section class="settings-page" data-pane="2"><h3>Locations & Groups</h3><label>Location<select id="location-choice"></select></label><div id="location-toggles"></div><div class="filter-items" id="group-items"></div><div class="pager"><button id="groups-prev">Previous</button><span id="groups-page"></span><button id="groups-next">Next</button></div><p>Hiding a group also hides its members. Long lists use pages, without scrolling.</p></section>
+<section class="settings-page" data-pane="3"><h3>History & Refresh</h3>
+<label>Show Last Month Ranking (6)<input type="checkbox" data-config="lastMonth"></label>
+<button id="refresh-all">↻ Refresh All (8)</button><button id="refresh-last">↻ Refresh Last Month</button>
+<button id="daily-history">View Yesterday / Today</button><button id="unfreeze">Show Live Daily for 2 Minutes</button>
+<p id="history-note">Last Month: saved monthly snapshot; fetched from the server when missing.</p>
+<p>Click a column header to reveal its refresh button. Only that column updates.</p></section>
+<section class="settings-page" data-pane="4"><h3>Saved Defaults</h3><p>Changes apply immediately and are remembered on this device. Save as Default creates a separate baseline you can restore.</p><button id="save-default-page">Save as Default</button><button id="restore-default">Restore Saved Default</button><button id="factory">Reset to Initial Settings</button><p>Previous score, location, group and timing preferences are migrated automatically. Initial settings use five columns.</p></section>
+<section class="settings-page" data-pane="5"><h3>Keyboard & TV Controls</h3><p>1–5 · Toggle points for columns 1–5<br>6 · Show / hide Last Month Ranking<br>7 or S · Open / close Settings<br>8 · Refresh all columns<br>9 · Toggle today's total<br>Escape / Back · Close Settings<br>Hold mouse, touch or remote OK for 1.2s · Open Settings</p><p>Up / Down: choose a section or option. Right / OK: enter a section. OK: toggle a checkbox or edit an input. OK again: finish editing. Left / Back: return one level. Dragging cancels the hold gesture.</p></section>
+</div></div><footer class="settings-actions"><span id="save-status" role="status">Settings saved on this device</span><button id="save-default">Save as Default</button><button id="done-settings">Done</button></footer></section></div><div class="toast" role="status"></div></body></html>

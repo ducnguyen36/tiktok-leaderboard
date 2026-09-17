@@ -1,1456 +1,305 @@
-// ==========================================
-// UNIFIED LEADERBOARD — CLIENT APP
-// ==========================================
+'use strict';
+const C=window.HeliosCore;
+const stage=document.querySelector('.tv'),grid=document.querySelector('.boards-zone');
+const boards=[...document.querySelectorAll('.board')],sixth=boards[5];
+const dialog=document.getElementById('settings-dialog'),gear=document.getElementById('settings-open');
+const message=document.querySelector('.toast');let toastTimer;
+function notify(text){message.textContent=text;clearTimeout(toastTimer);toastTimer=setTimeout(()=>message.textContent='',5000)}
+const storageKey='helios_leaderboard_v2';
+let saved=null,config=C.normalize({});
+function readStored(key){try{return JSON.parse(localStorage.getItem(key)||'null')}catch(e){notify('Saved settings could not be read. Using initial settings.');return null}}
+saved=readStored(storageKey+'_default');
+const stored=readStored(storageKey+'_current');
+config=stored?C.normalize(stored):saved?C.normalize(saved):C.migrate(readStored('leaderboard_config'));
+const defaults=C.clone(C.defaults);
+function persist(){try{localStorage.setItem(storageKey+'_current',JSON.stringify(config))}catch(e){notify('Storage unavailable. Changes apply for this session only.')}}
+let rawData=null,historyPayload=null,allLocations=[],allGroups=[],dailyHistory=false,unfreezeUntil=0;
+const columnData=Array(6).fill(null),columnVersion=Array(6).fill(0),rowSignatures=Array(6).fill('');
+let scrollAnimations=[],tickerAnimation,tickerMessage='',lastContext='',historyMonth='',historyRequest=0,requestCounter=0,liveInFlight=new Map(),lastUpdated=null,lastMotion='',lastTickerSpeed=0;
+const configInputs=[...dialog.querySelectorAll('[data-config]')],scoreInputs=[...dialog.querySelectorAll('[data-score]')];
+const camera=document.querySelector('.camera-notice');
+camera.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h4l2-3h6l2 3h4v13H3z"/><circle cx="12" cy="13" r="4"/><path d="M2 2l20 20"/></svg>';
+camera.append(document.createTextNode('NO PHOTOS OR VIDEOS ALLOWED'));
+function syncInputs(){document.getElementById('quick-lastmonth').setAttribute('aria-pressed',String(config.lastMonth));configInputs.forEach(e=>{const value=config[e.dataset.config];if(e.type==='checkbox')e.checked=Boolean(value);else if(e!==document.activeElement)e.value=value});scoreInputs.forEach(e=>e.checked=config.scores[+e.dataset.score])}
+function safeAvatar(value){if(typeof value!=='string')return '';if(value.startsWith('/userdata/avatars/')||value.startsWith('/avatars/'))return value;try{const u=new URL(value);return ['https:','http:'].includes(u.protocol)?u.href:''}catch{return ''}}
+function makeRow(entry,index,column){
+ const row=document.createElement('div');row.className='row'+(index<3?' top'+(index+1):'');
+ const rank=document.createElement('i');rank.className='rank';rank.textContent=index+1;
+ const avatar=document.createElement('i');avatar.className='avatar';avatar.textContent=entry.name.charAt(0).toUpperCase();
+ const src=safeAvatar(entry.avatar);if(src){const img=document.createElement('img');img.alt='';img.src=src;img.decoding='async';img.onerror=()=>{avatar.textContent=entry.name.charAt(0).toUpperCase()};avatar.replaceChildren(img)}
+ const identity=document.createElement('div');identity.className='identity';
+ const name=document.createElement('div');name.className='name';name.textContent=entry.name;name.title=entry.name;
+ const points=document.createElement('div');points.className='points';points.textContent=C.formatPoints(entry.value);
+ identity.append(name,points);
+ const showComparison=(column===0&&config.yesterdayGroups)||(column===1&&config.yesterdayIdols);
+ if(!dailyHistory&&showComparison&&entry.yesterday&&Number.isFinite(Number(entry.yesterday.value))){
+  const hint=document.createElement('div');hint.className='yesterday';hint.textContent='Yesterday: '+C.formatPoints(entry.yesterday.value);identity.append(hint);
+ }
+ row.append(rank,avatar,identity);return row;
+}
+function renderRows(index){
+ const source=columnData[index],rows=C.selectRows(source,config,index,historyPayload?.data,dailyHistory);
+ const ready=index===5?Boolean(historyPayload):Boolean(source);
+ const signature=JSON.stringify([rows,ready,dailyHistory,config.yesterdayGroups,config.yesterdayIdols]);if(signature===rowSignatures[index])return false;
+ rowSignatures[index]=signature;const list=boards[index].querySelector('.list');const wrapper=index>=4?document.createElement('div'):list;
+ list.replaceChildren();if(index>=4){wrapper.className='all-track';list.append(wrapper)}
+ if(!rows.length){const empty=document.createElement('div');empty.className='empty-state';empty.textContent=ready?'No entries for this selection':'Waiting for data…';list.replaceChildren(empty)}
+ else rows.forEach((entry,i)=>wrapper.append(makeRow(entry,i,index)));
+ return true;
+}
+function setupScroll(){
+ const previous=new Map(scrollAnimations.map(a=>[a.column,{progress:(Number(a.currentTime)||0)/a.effect.getTiming().duration}]));
+ scrollAnimations.forEach(a=>a.cancel());scrollAnimations=[];
+ stage.style.setProperty('--row-height',boards[0].querySelector('.list').clientHeight/10+'px');
+ for(const index of [4,5]){if(boards[index].hidden)continue;const viewport=boards[index].querySelector('.list'),track=viewport.querySelector('.all-track');if(!track||typeof track.animate!=='function')continue;
+  const motion=C.scrollFrames(track.scrollHeight-viewport.clientHeight,config.speed*innerHeight/1080,config.pause);if(!motion)continue;
+  const animation=track.animate(motion.frames,{duration:motion.duration,iterations:Infinity,easing:'linear'});animation.column=index;
+  if(previous.has(index))animation.currentTime=(previous.get(index).progress%1)*motion.duration;
+  if(!dialog.hidden)animation.pause();scrollAnimations.push(animation);
+ }
+}
+const ticker=document.querySelector('.ticker-line');
+function buildTicker(){
+ const leaders=C.filtered(rawData?.group?.daily,config,allLocations).filter(e=>e.value>=100000).slice(0,5);
+ return leaders.length?leaders.map(e=>'CONGRATULATIONS TO '+e.name+' ON REACHING '+C.formatPoints(Math.floor(e.value/100000)*100000)+' POINTS').join('   ·   '):'HELIOS TALENT · KEEP SHINING · LIVE PERFORMANCE';
+}
+function setupTicker(){
+ if(tickerAnimation)tickerAnimation.cancel();ticker.textContent=tickerMessage;
+ if(ticker.scrollWidth<=ticker.parentElement.clientWidth||!ticker.animate)return;
+ const span=document.createElement('span');span.textContent=tickerMessage+'   ·   ';span.style.display='inline-block';span.style.paddingRight='40px';ticker.replaceChildren(span);
+ const duplicate=span.cloneNode(true);duplicate.setAttribute('aria-hidden','true');ticker.append(duplicate);
+ const distance=span.getBoundingClientRect().width;tickerAnimation=ticker.animate([{transform:'translateX(0)'},{transform:'translateX(-'+distance+'px)'}],{duration:distance/(config.tickerSpeed*innerWidth/1920)*1000,iterations:Infinity,easing:'linear'});
+ if(!dialog.hidden)tickerAnimation.pause();
+}
+function renderSummary(){
+ document.querySelector('.kpi b').textContent=rawData?C.formatPoints(C.total(rawData,config,dailyHistory)):'—';
+ const totalYesterday=dailyHistory||rawData?.frozen;
+ document.querySelector('.kpi span').textContent=totalYesterday?"Yesterday's Total Points":"Today's Total Points";
+ document.querySelector('.kpi').title='Sum of group points for selected locations/groups; idols are not added again.';
+ const groupsYesterday=dailyHistory||columnData[0]?.frozen,idolsYesterday=dailyHistory||columnData[1]?.frozen;
+ boards[0].querySelector('.board-head b').textContent=groupsYesterday?'Yesterday Top Groups':'Daily Top Groups';boards[1].querySelector('.board-head b').textContent=idolsYesterday?'Yesterday Top Idols':'Daily Top Idols';
+ const p=historyPayload?.period,historyHead=boards[5].querySelector('.board-head');historyHead.querySelector('b').title=p?'Last Month · '+p.month+(p.complete?'':' · Provisional until 07:00'):'Last Month Ranking';
+ let period=historyHead.querySelector('.history-period');if(!period){period=document.createElement('span');period.className='history-period';historyHead.append(period)}
+ period.textContent=p?p.month+' · '+(p.complete?'CLOSED':'PROVISIONAL'):'';
+ document.getElementById('history-note').textContent=p?'Last month: '+p.month+' · '+(p.complete?'Closed snapshot':'Provisional until 07:00 on day 1')+' · '+historyPayload.source:'Last month: not loaded yet.';
+ const dailySnapshots=[columnData[0],columnData[1]].filter(Boolean),frozenDaily=dailySnapshots.filter(data=>data.frozen).length;
+ const scoreStatus=dailyHistory?'YESTERDAY':frozenDaily&&frozenDaily===dailySnapshots.length&&rawData?.frozen?'FROZEN · YESTERDAY':frozenDaily||rawData?.frozen?'MIXED · RETAINED FROZEN DAILY':'LIVE SCORES';
+ document.getElementById('data-status').textContent=rawData?' · '+scoreStatus+(rawData.monthlyGrace?' · MONTHLY GRACE':''):' · Waiting for data';
+ const next=buildTicker();if(next!==tickerMessage){tickerMessage=next;setupTicker()}
+}
+function apply(){
+ config=C.normalize(config);boards.forEach((b,i)=>b.classList.toggle('hide-points',i<5&&!config.scores[i]));
+ const changedLayout=sixth.hidden===config.lastMonth;sixth.hidden=!config.lastMonth;stage.classList.toggle('six',config.lastMonth);grid.style.setProperty('--columns',config.lastMonth?6:5);
+ document.querySelector('.kpi').classList.toggle('hide-total',!config.total);
+ let changed=false;boards.forEach((b,i)=>{changed=renderRows(i)||changed});const motion=config.speed+'|'+config.pause;if(changed||changedLayout||motion!==lastMotion)setupScroll();lastMotion=motion;renderSummary();if(lastTickerSpeed!==config.tickerSpeed)setupTicker();lastTickerSpeed=config.tickerSpeed;syncInputs();persist();
+ const context=requestContext();if(context!==lastContext){lastContext=context;loadCurrent([0,1,2,3,4])}
+ if(config.lastMonth)loadHistory(false);
+}
+function requestContext(){return new URLSearchParams({resetHour:String(config.resetHour),freezeUntil:Date.now()<unfreezeUntil?'':config.freezeUntil}).toString()}
+async function fetchJSON(url){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),45000);try{const response=await fetch(url,{signal:controller.signal,cache:'no-store'});const payload=await response.json();if(!response.ok||payload.status!=='ok'||!payload.data)throw Error(payload.message||'Data unavailable');return payload}finally{clearTimeout(timer)}}
+function connection(text){document.getElementById('connection').textContent=text}
+async function loadCurrent(indices=[0,1,2,3,4],manual=false){
+ const context=requestContext(),request=++requestCounter;indices.forEach(i=>{columnVersion[i]=request;boards[i].classList.add('loading');boards[i].querySelector('.column-refresh')?.setAttribute('disabled','')});
+ if(!liveInFlight.has(context)){const promise=fetchJSON('/api/leaderboard/fresh?'+context).finally(()=>liveInFlight.delete(context));liveInFlight.set(context,promise)}
+ try{const result=await liveInFlight.get(context);if(context!==requestContext())return;
+  const accepted=indices.filter(i=>columnVersion[i]===request);if(!accepted.length)return;
+  rawData=result.data;allLocations=(rawData.locations||[]).map(l=>({...l,id:String(l.id)}));allGroups=(rawData.groups||[]).map(g=>({...g,id:String(g.id),locationId:String(g.locationId||'')}));
+  accepted.forEach(i=>columnData[i]=rawData);let changed=false;accepted.forEach(i=>{changed=renderRows(i)||changed});if(changed)setupScroll();renderSummary();renderLocations();syncInputs();
+  lastUpdated=new Date();document.querySelector('.footer>span:last-child').textContent='Updated: '+lastUpdated.toLocaleString('en-GB',{timeZone:'Asia/Ho_Chi_Minh'});connection(streamConnected?'● LIVE':'● CONNECTED');if(manual)notify('Points refreshed');
+ }catch(e){if(context===requestContext()){connection('OFFLINE · RETAINED');if(manual||!rawData)notify('Unable to refresh. Previous data is kept.')}}
+ finally{indices.forEach(i=>{if(columnVersion[i]===request){boards[i].classList.remove('loading');boards[i].querySelector('.column-refresh')?.removeAttribute('disabled')}})}
+}
+let historyInFlight=null;
+async function loadHistory(force=false){
+ const month=C.historyMonth();if(historyMonth!==month){historyMonth=month;historyPayload=null;historyRequest++;rowSignatures[5]='';renderRows(5);setupScroll()}
+ if(historyPayload&&C.historyValid(historyPayload,month)&&!force)return;
+ if(historyInFlight?.month===month)return historyInFlight.promise;
+ if(!force){const cached=readStored(storageKey+'_history_'+month);if(C.historyValid(cached,month)){historyPayload={...cached,source:'device cache'};renderRows(5);setupScroll();renderSummary();return}}
+ const version=++historyRequest;boards[5].classList.add('loading');
+ const promise=(async()=>{try{const payload=await fetchJSON('/api/leaderboard/history?month='+month);if(version!==historyRequest||month!==C.historyMonth())return;
+   if(payload.period?.month!==month||!Array.isArray(payload.data?.individual)||!Array.isArray(payload.data?.group))throw Error('Invalid history');
+   historyPayload=payload;columnData[5]=rawData;if(C.historyValid(payload,month)){try{localStorage.setItem(storageKey+'_history_'+month,JSON.stringify(payload))}catch{notify('Month loaded; device cache could not be saved.')}}
+   renderRows(5);setupScroll();renderSummary();if(force)notify('Last month snapshot refreshed');
+  }catch(e){if(version===historyRequest)notify('Unable to load last month. Existing snapshot is kept.')}
+  finally{if(version===historyRequest)boards[5].classList.remove('loading');if(historyInFlight?.version===version)historyInFlight=null}
+ })();historyInFlight={month,version,promise};return promise;
+}
+function refreshColumn(index){return index===5?loadHistory(true):loadCurrent([index],true)}
+function refreshAll(){return Promise.all([loadCurrent([0,1,2,3,4],true),...(config.lastMonth?[loadHistory(true)]:[])])}
+let page=0,selectedLocation='';
+function renderLocations(){
+ const select=document.getElementById('location-choice');const locations=allLocations.length?allLocations:[{id:'',name:'All / unassigned'}];
+ if(!locations.some(l=>l.id===selectedLocation))selectedLocation=locations.find(l=>config.locations[l.id])?.id||locations[0].id;
+ const signature=JSON.stringify(locations);if(select.dataset.signature!==signature){select.replaceChildren();locations.forEach(l=>{const option=document.createElement('option');option.value=l.id;option.textContent=l.name;select.append(option)});select.dataset.signature=signature}
+ select.value=selectedLocation;renderGroups();
+}
+function renderGroups(){
+ const groupList=allGroups.filter(g=>g.locationId===selectedLocation),size=innerWidth<700?4:6,total=Math.max(1,Math.ceil(groupList.length/size));page=Math.max(0,Math.min(page,total-1));
+ const holder=document.getElementById('location-toggles');let locInput=holder.querySelector('input');if(!locInput){const label=document.createElement('label');label.textContent='Show this location';locInput=document.createElement('input');locInput.type='checkbox';locInput.id='location-visible';label.append(locInput);holder.append(label);locInput.onchange=()=>{if(selectedLocation){config.locations[selectedLocation]=locInput.checked;apply()}}}
+ locInput.checked=selectedLocation?config.locations[selectedLocation]===true:true;locInput.disabled=!selectedLocation;
+ const container=document.getElementById('group-items');const signature=JSON.stringify([selectedLocation,page,size,groupList.map(g=>[g.id,g.name,config.groups[g.id]!==false])]);
+ if(container.dataset.signature!==signature){container.replaceChildren();groupList.slice(page*size,page*size+size).forEach(g=>{const label=document.createElement('label'),span=document.createElement('span'),input=document.createElement('input');span.textContent=g.name;span.title=g.name;input.type='checkbox';input.checked=config.groups[g.id]!==false;input.setAttribute('aria-label',g.name);label.append(span,input);container.append(label);input.onchange=()=>{config.groups[g.id]=input.checked;apply()}});container.dataset.signature=signature}
+ document.getElementById('groups-page').textContent=(page+1)+' / '+total;document.getElementById('groups-prev').disabled=page===0;document.getElementById('groups-next').disabled=page>=total-1;
+}
 
-// ==========================================
-// STATE & CONFIG
-// ==========================================
-let rawData = {
-    individual: { monthly: [], daily: [], yesterday: [] },
-    group: { monthly: [], daily: [], yesterday: [] },
-    frozen: false,
-    locations: []
-};
-let lastMonthData = null; // fetched on-demand, cached client-side
-let allLocations = []; // { id, name } from server
-let allGroups = []; // { id, name, locationId } from server
-let viewingYesterday = false; // toggle for showing yesterday as full ranking
-let viewingLastMonth = false; // toggle for showing last month's scores on monthly tabs
-let currentTab = 'group-monthly';
-let currentTheme = 'classic'; // 'classic' or 'modern'
-let rotation = 0;
-let isInteracting = false;
-let interactionTimer = null;
-let cycleTimer = null;
-let timeLeft = 10;
-let footerHideTimer = null;
-let tempUnfreezeUntil = 0; // timestamp when temp unfreeze expires
 
-const TAB_ORDER = ['group-monthly', 'group-daily', 'individual-monthly', 'individual-daily'];
+function showSettings(){cancelHold();clearTimeout(remoteTimer);dialog.hidden=false;gear.classList.remove('idle');document.querySelector('.quick-toolbar').classList.remove('idle');scrollAnimations.forEach(a=>a.pause());tickerAnimation?.pause();dialog.querySelector('.settings-nav button.active').focus()}
+function closeSettings(){finishEdit(false);dialog.hidden=true;scrollAnimations.forEach(a=>a.play());tickerAnimation?.play();stage.tabIndex=-1;stage.focus();revealGear()}
+document.getElementById('quick-lastmonth').onclick=()=>{config.lastMonth=!config.lastMonth;apply();revealGear()};
+document.getElementById('quick-refresh').onclick=()=>{refreshAll();revealGear()};
+gear.onclick=showSettings;['close-settings','done-settings'].forEach(id=>document.getElementById(id).onclick=closeSettings);
+function saveDefault(){try{localStorage.setItem(storageKey+'_default',JSON.stringify(config));saved=JSON.parse(JSON.stringify(config));document.getElementById('save-status').textContent='Default saved on this device';notify('Default saved')}catch(e){notify('Storage unavailable. Settings could not be saved.')}}
+['save-default','save-default-page'].forEach(id=>document.getElementById(id).onclick=saveDefault);
+document.getElementById('restore-default').onclick=()=>{config=C.normalize(saved||defaults);apply();renderLocations();notify('Saved default restored')};
+document.getElementById('factory').onclick=()=>{config=C.normalize(defaults);apply();renderLocations();notify('Initial settings applied. Save as Default to keep them.')};
+configInputs.forEach(e=>e.onchange=()=>{if(editing===e)return;let value=e.type==='checkbox'?e.checked:e.type==='number'?Number(e.value):e.value;
+ if(e.type==='number'){value=Math.max(Number(e.min),Math.min(Number(e.max),value));if(!Number.isFinite(value))return}
+ config[e.dataset.config]=value;apply();if(['speed','pause'].includes(e.dataset.config))setupScroll();if(e.dataset.config==='tickerSpeed')setupTicker();document.getElementById('save-status').textContent='Changes saved on this device'});
+scoreInputs.forEach(e=>e.onchange=()=>{config.scores[+e.dataset.score]=e.checked;apply();document.getElementById('save-status').textContent='Changes saved on this device'});
+function openPage(index){document.querySelectorAll('[data-page]').forEach(e=>e.classList.toggle('active',+e.dataset.page===index));document.querySelectorAll('[data-pane]').forEach(e=>e.classList.toggle('active',+e.dataset.pane===index))}
+document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>openPage(+b.dataset.page));
 
-let config = {
-    visibleTabs: {
-        'group-monthly': true,
-        'group-daily': true,
-        'individual-monthly': true,
-        'individual-daily': true
-    },
-    showIncome: {
-        'group-monthly': true,
-        'group-daily': true,
-        'individual-monthly': true,
-        'individual-daily': true
-    },
-    showAvatars: {
-        'group-monthly': false,
-        'group-daily': false,
-        'individual-monthly': false,
-        'individual-daily': false
-    },
-    showYesterday: {
-        'group-daily': false,
-        'individual-daily': false
-    },
-    cycleDuration: 10,
-    resetHour: 0,
-    freezeUntil: '09:00',
-    rotation: 0,
-    podiumSlots: 5,
-    listColumns: 3,
-    forceHorizontal: {
-        'enabled': false
-    },
-    visibleLocations: {
-        'loc_hcm': true  // Default: only HCM
-    },
-    // Group filtering is an exclusion model: a group is shown unless its id is
-    // explicitly set to false here. New/unseen groups default to visible.
-    visibleGroups: {}
-};
-
-// ==========================================
-// INITIALIZATION
-// ==========================================
-document.addEventListener('DOMContentLoaded', async () => {
-    loadSavedSettings();
-    detectTV();
-    startClock();
-    startCycleTimer();
-    setupInteractionListeners();
-    setupFooterAutoHide();
-    updateUIFromConfig();
-    requestWakeLock();
-
-    // Fetch data first (sets lastFreezeUntil on server before SSE connects)
-    await fetchData();
-
-    // Then connect SSE for real-time updates (falls back to polling)
-    connectSSE();
+boards.forEach((b,i)=>{
+ const header=b.querySelector('.board-head');header.tabIndex=0;header.setAttribute('role','button');header.setAttribute('aria-label','Show refresh for '+header.textContent);
+ const btn=document.createElement('button');btn.className='column-refresh';btn.textContent='↻';btn.setAttribute('aria-label','Refresh '+header.querySelector('b').textContent);
+ btn.tabIndex=-1;btn.setAttribute('aria-hidden','true');
+ header.append(btn);
+ let idleTimer;
+ function hideRefresh(){
+  clearTimeout(idleTimer);
+  if(document.activeElement===btn)header.focus();
+  header.classList.remove('reveal');btn.tabIndex=-1;btn.setAttribute('aria-hidden','true');
+ }
+ function resetRefreshIdle(){clearTimeout(idleTimer);idleTimer=setTimeout(hideRefresh,3000)}
+ function showRefresh(){header.classList.add('reveal');btn.tabIndex=0;btn.setAttribute('aria-hidden','false');resetRefreshIdle()}
+ header.onclick=e=>{if(e.target.closest('.column-refresh'))return;showRefresh()};
+ header.onkeydown=e=>{if(e.target===header&&(e.key==='Enter'||e.key===' ')){e.preventDefault();showRefresh()}};
+ ['pointermove','pointerdown','keydown','focusin'].forEach(type=>header.addEventListener(type,()=>{if(header.classList.contains('reveal'))resetRefreshIdle()}));
+ btn.onclick=e=>{e.stopPropagation();refreshColumn(i);resetRefreshIdle()};
 });
 
-// ==========================================
-// REAL-TIME: SSE (primary) + POLLING (fallback)
-// ==========================================
-let eventSource = null;
-let pollingInterval = null;
-let isSSEConnected = false;
+let holdTimer,holdStart,remoteTimer;
+function cancelHold(){clearTimeout(holdTimer)}
+document.addEventListener('pointerdown',e=>{if(!dialog.hidden||e.button!==0||e.target.closest('button,input,select,[role=button]'))return;holdStart={x:e.clientX,y:e.clientY};holdTimer=setTimeout(showSettings,1200)});
+document.addEventListener('pointermove',e=>{if(holdStart&&Math.hypot(e.clientX-holdStart.x,e.clientY-holdStart.y)>12)cancelHold()});
+['pointerup','pointercancel'].forEach(type=>document.addEventListener(type,cancelHold));
+document.addEventListener('contextmenu',e=>e.preventDefault());
 
-function connectSSE() {
-    if (!window.EventSource) {
-        console.log('[SSE] Not supported, using polling');
-        startPolling();
-        return;
-    }
-
-    console.log('[SSE] Connecting to /api/leaderboard/stream...');
-    eventSource = new EventSource('/api/leaderboard/stream');
-
-    eventSource.onmessage = (event) => {
-        try {
-            const json = JSON.parse(event.data);
-            if (json.status === 'ok') {
-                if (!json.data) return; // build still warming up — keep current view
-                rawData = json.data;
-                if (json.data.frozen !== undefined) {
-                    rawData.frozen = json.data.frozen;
-                }
-                if (json.data.locations) {
-                    allLocations = json.data.locations;
-                    initLocationDefaults();
-                }
-                if (json.data.groups) {
-                    allGroups = json.data.groups;
-                }
-                renderLeaderboard();
-                updateUIFromConfig(); // refresh frozen badge + locations
-                updateConnectionStatus('live');
-
-                // Hide loader
-                const loader = document.getElementById('header-loader');
-                if (loader) loader.classList.add('hidden');
-            }
-        } catch (err) {
-            console.error('[SSE] Parse error:', err);
-        }
-    };
-
-    eventSource.onopen = () => {
-        console.log('[SSE] Connected — receiving real-time updates');
-        isSSEConnected = true;
-        updateConnectionStatus('live');
-
-        // Stop polling if it was running as fallback
-        if (pollingInterval) {
-            clearInterval(pollingInterval);
-            pollingInterval = null;
-        }
-    };
-
-    eventSource.onerror = () => {
-        console.warn('[SSE] Connection lost, falling back to polling');
-        isSSEConnected = false;
-        updateConnectionStatus('polling');
-
-        // SSE will auto-reconnect, but start polling as backup
-        if (!pollingInterval) {
-            startPolling();
-        }
-    };
+let editing=null,editOriginal=null;
+function beginEdit(el){
+ editing=el;editOriginal=el.value;el.classList.add('remote-editing');el.focus();
+ document.getElementById('save-status').textContent='Editing · OK to apply · Back to cancel';
 }
-
-function startPolling() {
-    // Initial fetch
-    fetchData();
-    // Poll at configured interval
-    pollingInterval = setInterval(fetchData, (config.refreshInterval || 10) * 1000);
-    updateConnectionStatus('polling');
+function finishEdit(commit){
+ if(!editing)return;
+ const el=editing;editing=null;
+ if(!commit)el.value=editOriginal;
+ el.classList.remove('remote-editing');
+ if(commit)el.dispatchEvent(new Event('change',{bubbles:true}));
+ document.getElementById('save-status').textContent=commit?'Changes applied':'Edit cancelled';
+ el.focus();
 }
-
-function updateConnectionStatus(mode) {
-    const el = document.getElementById('footer-connection');
-    if (!el) return;
-    if (mode === 'live') {
-        el.textContent = '🟢 LIVE';
-        el.style.color = '#4ade80';
-    } else {
-        el.textContent = '🟡 POLL';
-        el.style.color = '#facc15';
-    }
+function navButtons(){return [...dialog.querySelectorAll('.settings-nav button')]}
+function pageControls(){return [...dialog.querySelectorAll('.settings-page.active button,.settings-page.active input,.settings-page.active select,.settings-actions button')].filter(el=>el.getClientRects().length&&!el.disabled)}
+function modalControls(){return [document.getElementById('close-settings'),...navButtons(),...pageControls()].filter(el=>el.getClientRects().length&&!el.disabled)}
+function goSidebar(){const button=dialog.querySelector('.settings-nav button.active');button.focus()}
+function goBack(){
+ if(editing){finishEdit(false);return}
+ if(document.activeElement.closest('.settings-nav'))closeSettings();else goSidebar();
 }
-
-async function fetchData() {
-    const loader = document.getElementById('header-loader');
-    try {
-        if (loader) loader.classList.remove('hidden');
-        // If temp unfreeze is active, don't send freezeUntil
-        const isTempUnfrozen = tempUnfreezeUntil > Date.now();
-        const freezeParam = (config.freezeUntil && !isTempUnfrozen) ? `&freezeUntil=${config.freezeUntil}` : '';
-        const response = await fetch(`/api/leaderboard?resetHour=${config.resetHour}${freezeParam}`);
-        const json = await response.json();
-
-        if (json.status === 'error') {
-            console.error('API Error:', json.message);
-            if (loader) loader.classList.add('hidden');
-            return;
-        }
-
-        if (!json.data) { // build still warming up — keep current view, no crash
-            if (loader) loader.classList.add('hidden');
-            return;
-        }
-
-        rawData = json.data;
-        // Track frozen state
-        if (json.data.frozen !== undefined) {
-            rawData.frozen = json.data.frozen;
-        }
-        if (json.data.locations) {
-            allLocations = json.data.locations;
-            initLocationDefaults();
-        }
-        if (json.data.groups) {
-            allGroups = json.data.groups;
-        }
-        renderLeaderboard();
-        updateUIFromConfig(); // refresh frozen badge + locations
-        if (loader) loader.classList.add('hidden');
-    } catch (error) {
-        console.error('Fetch error:', error);
-        if (loader) loader.classList.add('hidden');
-    }
-}
-
-// ==========================================
-// TAB DATA MAPPING
-// ==========================================
-function getDataForTab(tab) {
-    // Map tab name to the correct data path
-    const category = getTabCategory(tab); // 'group' or 'individual'
-    const isDaily = tab.includes('daily');
-    const isMonthly = tab.includes('monthly');
-    
-    // If viewing last month on a monthly tab, return last month data
-    let data;
-    if (isMonthly && viewingLastMonth && lastMonthData) {
-        data = lastMonthData[category] || [];
-    } else if (isDaily && viewingYesterday && rawData[category] && rawData[category].yesterday) {
-        // If viewing yesterday on a daily tab, return yesterday data
-        data = rawData[category].yesterday;
-    } else {
-        const period = isDaily ? 'daily' : 'monthly';
-        data = (rawData[category] && rawData[category][period]) ? rawData[category][period] : [];
-    }
-    
-    // Filter by visible locations, then by excluded groups
-    return filterByGroup(filterByLocation(data));
-}
-
-// Exclusion model: hide an entry only when its group is explicitly turned off.
-// Works for both group entries (groupId = their own id) and individual entries
-// (groupId = the member's group). Entries with no groupId are unaffected.
-function filterByGroup(data) {
-    if (!data || data.length === 0) return data;
-    return data.filter(entry => {
-        if (!entry.groupId) return true;
-        return config.visibleGroups[entry.groupId] !== false;
-    });
-}
-
-function filterByLocation(data) {
-    if (!data || data.length === 0) return data;
-    // If no locations configured or none checked, show all
-    const checkedIds = Object.keys(config.visibleLocations).filter(k => config.visibleLocations[k]);
-    if (checkedIds.length === 0 && allLocations.length === 0) return data;
-    
-    // If there are locations but none are checked, show nothing (user unchecked all)
-    if (allLocations.length > 0 && checkedIds.length === 0) return [];
-    
-    return data.filter(entry => {
-        if (!entry.locationId) return false; // Hide unassigned entries when filtering by location
-        return config.visibleLocations[entry.locationId] === true;
-    });
-}
-
-function initLocationDefaults() {
-    // Only initialize keys for locations we haven't seen before
-    // Don't override existing user preferences
-    for (const loc of allLocations) {
-        if (config.visibleLocations[loc.id] === undefined) {
-            // New location: default OFF (only loc_hcm is defaulted ON)
-            config.visibleLocations[loc.id] = false;
-        }
-    }
-}
-
-function toggleLocation(locationId) {
-    config.visibleLocations[locationId] = !config.visibleLocations[locationId];
-    updateUIFromConfig();
-    renderLeaderboard();
-    saveSettings();
-}
-
-function toggleGroup(groupId) {
-    // Default (undefined) is visible; first click hides it.
-    const currentlyVisible = config.visibleGroups[groupId] !== false;
-    config.visibleGroups[groupId] = !currentlyVisible;
-    updateUIFromConfig();
-    renderLeaderboard();
-    saveSettings();
-}
-
-function toggleAllGroupsInLocation(locationId, visible) {
-    allGroups
-        .filter(g => (g.locationId || '__none__') === locationId)
-        .forEach(g => { config.visibleGroups[g.id] = visible; });
-    updateUIFromConfig();
-    renderLeaderboard();
-    saveSettings();
-}
-
-function getTabCategory(tab) {
-    // Returns 'group' or 'individual'
-    return tab.startsWith('group') ? 'group' : 'individual';
-}
-
-function getTabKey(tab) {
-    // Returns the full tab key for per-tab settings
-    return tab;
-}
-
-// ==========================================
-// TAB SWITCHING
-// ==========================================
-function switchTab(tab) {
-    if (!config.visibleTabs[tab]) return;
-
-    currentTab = tab;
-    timeLeft = config.cycleDuration;
-
-    // Update active state on buttons
-    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    const btn = document.getElementById('btn-' + tab);
-    if (btn) btn.classList.add('active');
-
-    renderLeaderboard();
-    updateUIFromConfig(); // update yesterday button visibility
-    handleInteraction();
-}
-
-function toggleYesterdayView() {
-    const isFrozen = rawData.frozen && tempUnfreezeUntil <= Date.now();
-    
-    if (isFrozen) {
-        // Frozen mode: click = temp unfreeze for 2 minutes
-        tempUnfreezeUntil = Date.now() + 2 * 60 * 1000;
-        fetchData(); // re-fetch without freeze
-        updateHistoryIcon();
-        
-        // Countdown to re-freeze
-        let remaining = 120;
-        if (window._unfreezeInterval) clearInterval(window._unfreezeInterval);
-        window._unfreezeInterval = setInterval(() => {
-            remaining--;
-            if (remaining <= 0 || tempUnfreezeUntil <= Date.now()) {
-                clearInterval(window._unfreezeInterval);
-                window._unfreezeInterval = null;
-                tempUnfreezeUntil = 0;
-                fetchData(); // re-fetch with freeze restored
-                updateHistoryIcon();
-                return;
-            }
-            updateHistoryIcon(remaining);
-        }, 1000);
-    } else {
-        // Normal mode: toggle yesterday view
-        viewingYesterday = !viewingYesterday;
-        if (viewingYesterday) viewingLastMonth = false; // mutually exclusive
-        renderLeaderboard();
-        updateHistoryIcon();
-        updateLastMonthIcon();
-    }
-}
-
-function updateHistoryIcon(unfreezeRemaining) {
-    const btn = document.getElementById('btn-yesterday-view');
-    if (!btn) return;
-    
-    const icon = btn.querySelector('i');
-    const isTempUnfrozen = tempUnfreezeUntil > Date.now();
-    const isFrozen = rawData.frozen && !isTempUnfrozen;
-    
-    // Remove all state classes
-    btn.classList.remove('yesterday-active', 'frozen-active', 'unfreeze-active');
-    
-    if (isTempUnfrozen) {
-        // Temporarily unfrozen — show unlock icon with countdown
-        icon.className = 'fas fa-lock-open';
-        btn.classList.add('unfreeze-active');
-        if (unfreezeRemaining != null) {
-            const mins = Math.floor(unfreezeRemaining / 60);
-            const secs = unfreezeRemaining % 60;
-            btn.title = `Live for ${mins}:${secs.toString().padStart(2, '0')} — click to view yesterday`;
-        } else {
-            btn.title = 'Temporarily showing live data';
-        }
-    } else if (isFrozen) {
-        // Frozen — show snowflake
-        icon.className = 'fas fa-snowflake';
-        btn.classList.add('frozen-active');
-        btn.title = 'Frozen (showing yesterday) — click to briefly show live data';
-    } else if (viewingYesterday) {
-        // Viewing yesterday (not frozen)
-        icon.className = 'fas fa-clock';
-        btn.classList.add('yesterday-active');
-        btn.title = 'Viewing yesterday — click to go back to today';
-    } else {
-        // Normal
-        icon.className = 'fas fa-clock';
-        btn.title = 'View yesterday\'s daily ranking';
-    }
-}
-
-async function toggleLastMonthView() {
-    if (!viewingLastMonth && !lastMonthData) {
-        // Fetch on first click
-        try {
-            const btn = document.getElementById('btn-lastmonth-view');
-            if (btn) btn.style.opacity = '0.5';
-            const res = await fetch(`/api/leaderboard/lastmonth?resetHour=${config.resetHour}`);
-            const json = await res.json();
-            if (json.status === 'ok') {
-                lastMonthData = json.data;
-            }
-            if (btn) btn.style.opacity = '';
-        } catch (err) {
-            console.error('[LastMonth] Fetch error:', err);
-            return;
-        }
-    }
-    viewingLastMonth = !viewingLastMonth;
-    if (viewingLastMonth) viewingYesterday = false; // mutually exclusive
-    renderLeaderboard();
-    updateLastMonthIcon();
-    updateHistoryIcon();
-}
-
-function updateLastMonthIcon() {
-    const btn = document.getElementById('btn-lastmonth-view');
-    if (!btn) return;
-    
-    btn.classList.remove('lastmonth-active');
-    
-    if (viewingLastMonth) {
-        btn.classList.add('lastmonth-active');
-        btn.title = 'Viewing last month — click to go back to this month';
-    } else {
-        btn.title = 'View last month\'s scores';
-    }
-}
-
-// ==========================================
-// RENDERING
-// ==========================================
-function renderLeaderboard() {
-    const data = getDataForTab(currentTab);
-    const tabKey = getTabKey(currentTab);
-    const podiumContainer = document.getElementById('podium');
-    const listContainer = document.getElementById('list');
-
-    podiumContainer.innerHTML = '';
-    listContainer.innerHTML = '';
-
-    if (!data || data.length === 0) {
-        podiumContainer.innerHTML = '';
-        listContainer.innerHTML = `
-            <div class="empty-state" style="grid-column: 1 / -1;">
-                <div class="empty-state-icon">📊</div>
-                <div class="empty-state-text">No data available for this period</div>
-            </div>
-        `;
-        return;
-    }
-
-    const showIncome = config.showIncome[tabKey];
-    const showAvatars = config.showAvatars[tabKey];
-    const isDaily = currentTab.includes('daily');
-    const showYD = isDaily && !viewingYesterday && config.showYesterday && config.showYesterday[tabKey];
-    const podiumCount = Math.min(config.podiumSlots || 5, data.length);
-    const cols = config.listColumns || 3;
-
-    // Set podium count for CSS scaling
-    podiumContainer.setAttribute('data-podium-count', podiumCount);
-
-    // Apply list column layout — minmax(0,1fr) prevents overflow
-    listContainer.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
-    // For 4+ columns, use vertical flow + vertical item layout (unless force horizontal)
-    if (cols >= 4) {
-        const rest = data.slice(podiumCount);
-        const rows = Math.ceil(rest.length / cols);
-        listContainer.style.gridTemplateRows = `repeat(${rows}, auto)`;
-        listContainer.style.gridAutoFlow = 'column';
-        if (config.forceHorizontal && config.forceHorizontal['enabled']) {
-            listContainer.classList.remove('vertical-items');
-        } else {
-            listContainer.classList.add('vertical-items');
-        }
-    } else {
-        listContainer.style.gridTemplateRows = '';
-        listContainer.style.gridAutoFlow = '';
-        listContainer.classList.remove('vertical-items');
-    }
-
-    // --- Render Podium (Top N) ---
-    const topN = data.slice(0, podiumCount);
-
-    topN.forEach((idol, index) => {
-        const rank = index + 1;
-        const card = document.createElement('div');
-        card.className = `podium-card rank-${rank}`;
-
-        const avatarSrc = getAvatarUrl(idol.avatar, idol.name);
-
-        let trophyHtml = '';
-        if (rank === 1) {
-            trophyHtml = '<div class="trophy-icon">🏆</div>';
-        }
-
-        card.innerHTML = `
-            ${trophyHtml}
-            <div class="avatar-wrapper">
-                <img src="${avatarSrc}" class="avatar" alt="${idol.name}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>${idol.name.charAt(0)}</text></svg>'">
-                <div class="rank-badge">${rank}</div>
-            </div>
-            <div class="idol-name">${idol.name}</div>
-            ${showIncome ? `<div class="idol-value">${formatNumber(idol.value)}</div>` : ''}
-            ${showYD && idol.yesterday ? `<div class="yesterday-score">YD: ${formatNumber(idol.yesterday.value)}</div>` : ''}
-        `;
-        podiumContainer.appendChild(card);
-    });
-
-    // --- Render Rank N+1 and below (List) ---
-    const rest = data.slice(podiumCount);
-
-    rest.forEach((idol, index) => {
-        const rank = index + podiumCount + 1;
-        const item = document.createElement('div');
-        item.className = 'list-item';
-
-        const avatarSrc = getAvatarUrl(idol.avatar, idol.name);
-        const avatarHtml = showAvatars
-            ? `<div class="list-avatar">
-                 <img src="${avatarSrc}" alt="${idol.name}" onerror="this.parentElement.innerHTML='<i class=\\'fas fa-user\\'></i>'">
-               </div>`
-            : '';
-
-        item.innerHTML = `
-            <div class="list-rank">${rank}</div>
-            <div class="list-info">
-                ${avatarHtml}
-                <div class="list-name">${idol.name}</div>
-            </div>
-            <div class="list-value">
-                ${showIncome ? formatNumber(idol.value) : ''}
-                ${showYD && idol.yesterday && showIncome ? `<span class="yesterday-badge">YD: ${formatNumber(idol.yesterday.value)}</span>` : ''}
-            </div>
-        `;
-        listContainer.appendChild(item);
-    });
-}
-
-// ==========================================
-// THEME
-// ==========================================
-function setTheme(theme) {
-    currentTheme = theme;
-    document.body.classList.remove('theme-classic', 'theme-modern');
-    if (theme === 'modern') {
-        document.body.classList.add('theme-modern');
-    }
-    // Update theme checkboxes
-    updateCheckbox('check-theme-classic', theme === 'classic');
-    updateCheckbox('check-theme-modern', theme === 'modern');
-    saveSettings();
-}
-
-function cycleTheme() {
-    setTheme(currentTheme === 'classic' ? 'modern' : 'classic');
-}
-
-// ==========================================
-// SCREEN ROTATION
-// ==========================================
-function rotateScreen(setDeg) {
-    if (setDeg !== undefined) {
-        rotation = setDeg;
-    } else {
-        rotation = (rotation + 90) % 360;
-    }
-
-    applyRotation();
-    // Update the rotation input in settings
-    const rotInput = document.getElementById('rotation-deg');
-    if (rotInput) rotInput.value = rotation;
-}
-
-function setRotation(deg) {
-    rotation = ((deg % 360) + 360) % 360; // normalize
-    applyRotation();
-}
-
-function applyRotation() {
-    const wrapper = document.getElementById('app-wrapper');
-    const isPortrait = rotation % 180 !== 0;
-
-    wrapper.style.transform = `rotate(${rotation}deg)`;
-
-    if (isPortrait) {
-        wrapper.style.width = '100vh';
-        wrapper.style.height = '100vw';
-        wrapper.classList.add('portrait-mode');
-    } else {
-        wrapper.style.width = '100vw';
-        wrapper.style.height = '100vh';
-        wrapper.classList.remove('portrait-mode');
-    }
-}
-
-// ==========================================
-// SETTINGS
-// ==========================================
-function toggleSettings() {
-    const modal = document.getElementById('settings-modal');
-    modal.classList.toggle('hidden');
-}
-
-// Close settings when clicking outside the panel
-document.addEventListener('DOMContentLoaded', () => {
-    const modal = document.getElementById('settings-modal');
-    modal.addEventListener('click', (e) => {
-        // Only close if clicking the backdrop itself, not the content
-        if (e.target === modal) {
-            modal.classList.add('hidden');
-        }
-    });
+dialog.addEventListener('pointerdown',e=>{
+ if(editing&&e.target!==editing)finishEdit(true);
+ if(e.target.matches('input:not([type=checkbox]),select'))beginEdit(e.target);
 });
-
-function toggleConfig(category, key) {
-    config[category][key] = !config[category][key];
-    updateUIFromConfig();
-    saveSettings();
-
-    // If current tab became hidden, switch to next visible tab
-    if (category === 'visibleTabs' && !config.visibleTabs[currentTab]) {
-        const nextTab = TAB_ORDER.find(t => config.visibleTabs[t]);
-        if (nextTab) switchTab(nextTab);
+document.addEventListener('keydown',e=>{
+ const ok=e.key==='Enter'||e.key==='Accept'||e.key==='Select'||e.keyCode===23;
+ const back=e.key==='Escape'||e.key==='BrowserBack'||e.key==='GoBack'||e.keyCode===10009||e.keyCode===461;
+ if(!dialog.hidden){
+  if(back){e.preventDefault();goBack();return}
+  if(editing){
+    if(ok){e.preventDefault();if(!e.repeat)finishEdit(true)}
+    else if(e.key==='Tab'){
+     e.preventDefault();const current=editing;finishEdit(true);const items=modalControls(),i=items.indexOf(current);
+     items[(i+(e.shiftKey?-1:1)+items.length)%items.length].focus();
     }
-
-    // Re-render if we toggled income, avatars, or yesterday for current tab
-    if (category === 'showIncome' || category === 'showAvatars' || category === 'showYesterday' || category === 'forceHorizontal') {
-        renderLeaderboard();
-    }
-}
-
-function updateConfigValue(key, value) {
-    const parsed = parseInt(value);
-    config[key] = isNaN(parsed) ? config[key] : parsed;
-    if (key === 'cycleDuration') {
-        timeLeft = config.cycleDuration;
-        document.getElementById('footer-cycle').textContent = config.cycleDuration + 's';
-    }
-    if (key === 'resetHour') {
-        fetchData(); // Re-fetch with new reset hour
-    }
-    if (key === 'freezeUntil') {
-        fetchData(); // Re-fetch with new freeze setting
-    }
-    saveSettings();
-}
-
-function updateConfigString(key, value) {
-    config[key] = value || '';
-    if (key === 'freezeUntil') {
-        fetchData(); // Re-fetch with new freeze setting
-    }
-    saveSettings();
-}
-
-function updateFreezeTime() {
-    const hh = document.getElementById('freeze-hh').value;
-    const mm = document.getElementById('freeze-mm').value;
-    if (hh === '' && mm === '') {
-        updateConfigString('freezeUntil', '');
-    } else {
-        const h = String(hh || 0).padStart(2, '0');
-        const m = String(mm || 0).padStart(2, '0');
-        updateConfigString('freezeUntil', `${h}:${m}`);
-    }
-}
-
-function clearFreezeTime() {
-    document.getElementById('freeze-hh').value = '';
-    document.getElementById('freeze-mm').value = '';
-    updateConfigString('freezeUntil', '');
-}
-
-function updateUIFromConfig() {
-    // Tab checkboxes
-    TAB_ORDER.forEach(tab => {
-        updateCheckbox('check-tab-' + tab, config.visibleTabs[tab]);
-        const btn = document.getElementById('btn-' + tab);
-        if (btn) btn.style.display = config.visibleTabs[tab] ? '' : 'none';
-    });
-
-    // Per-tab Income checkboxes
-    TAB_ORDER.forEach(tab => {
-        updateCheckbox('check-income-' + tab, config.showIncome[tab]);
-    });
-
-    // Per-tab Avatar checkboxes
-    TAB_ORDER.forEach(tab => {
-        updateCheckbox('check-avatar-' + tab, config.showAvatars[tab]);
-    });
-
-    // Yesterday score checkboxes (only daily tabs)
-    ['group-daily', 'individual-daily'].forEach(tab => {
-        updateCheckbox('check-yd-' + tab, config.showYesterday && config.showYesterday[tab]);
-    });
-
-    // Update the unified history/freeze icon button
-    updateHistoryIcon();
-    updateLastMonthIcon();
-
-    // Theme checkboxes
-    updateCheckbox('check-theme-classic', currentTheme === 'classic');
-    updateCheckbox('check-theme-modern', currentTheme === 'modern');
-
-    // Input values
-    document.getElementById('cycle-duration').value = config.cycleDuration;
-    document.getElementById('reset-hour').value = config.resetHour;
-    const rotInput = document.getElementById('rotation-deg');
-    if (rotInput) rotInput.value = rotation;
-
-    // Layout settings
-    const podiumInput = document.getElementById('podium-slots');
-    if (podiumInput) podiumInput.value = config.podiumSlots || 5;
-    const colInput = document.getElementById('list-columns');
-    if (colInput) colInput.value = config.listColumns || 3;
-    // Freeze time (split into HH and MM inputs)
-    const freezeVal = config.freezeUntil || '';
-    const hhInput = document.getElementById('freeze-hh');
-    const mmInput = document.getElementById('freeze-mm');
-    if (hhInput && mmInput) {
-        if (freezeVal && freezeVal.includes(':')) {
-            const [hh, mm] = freezeVal.split(':');
-            hhInput.value = parseInt(hh) || '';
-            mmInput.value = parseInt(mm) || 0;
-        } else {
-            hhInput.value = '';
-            mmInput.value = '';
-        }
-    }
-
-    // Force horizontal checkbox
-    updateCheckbox('check-force-horizontal', config.forceHorizontal && config.forceHorizontal['enabled']);
-
-    // Location filter checkboxes
-    renderLocationSettings();
-
-    // Group filter checkboxes (nested under their location)
-    renderGroupSettings();
-
-    // Footer
-    document.getElementById('footer-cycle').textContent = config.cycleDuration + 's';
-}
-
-function renderLocationSettings() {
-    const container = document.getElementById('location-checkboxes');
-    if (!container) return;
-    
-    if (allLocations.length === 0) {
-        container.innerHTML = '<span style="color:var(--text-secondary); font-size:0.75rem;">No locations found</span>';
-        return;
-    }
-    
-    container.innerHTML = allLocations.map(loc => {
-        const checked = config.visibleLocations[loc.id] ? 'checked' : '';
-        return `<label class="checkbox-label" onclick="toggleLocation('${loc.id}')">
-            <div class="custom-checkbox ${checked}" id="check-loc-${loc.id}"><span class="checkbox-check">✓</span></div>
-            ${loc.name}
-        </label>`;
-    }).join('');
-}
-
-function renderGroupSettings() {
-    const container = document.getElementById('group-checkboxes');
-    if (!container) return;
-
-    if (!allGroups || allGroups.length === 0) {
-        container.innerHTML = '<span style="color:var(--text-secondary); font-size:0.75rem;">No groups found</span>';
-        return;
-    }
-
-    // Bucket groups by location
-    const byLoc = {};
-    for (const g of allGroups) {
-        const lid = g.locationId || '__none__';
-        (byLoc[lid] = byLoc[lid] || []).push(g);
-    }
-
-    // Location id -> display name
-    const locName = { '__none__': 'No location' };
-    allLocations.forEach(l => { locName[l.id] = l.name; });
-
-    // Show locations in the same order as the location list, then any leftovers
-    const orderedLocIds = allLocations.map(l => l.id).filter(id => byLoc[id]);
-    Object.keys(byLoc).forEach(id => { if (!orderedLocIds.includes(id)) orderedLocIds.push(id); });
-
-    container.innerHTML = orderedLocIds.map(lid => {
-        const groups = byLoc[lid].slice().sort((a, b) => a.name.localeCompare(b.name));
-        const rows = groups.map(g => {
-            const checked = config.visibleGroups[g.id] !== false ? 'checked' : '';
-            return `<label class="checkbox-label" onclick="toggleGroup('${g.id}')">
-                <div class="custom-checkbox ${checked}" id="check-grp-${g.id}"><span class="checkbox-check">✓</span></div>
-                ${g.name}
-            </label>`;
-        }).join('');
-        return `<div class="group-loc-block">
-            <div class="group-loc-head">
-                <span class="group-loc-title">${locName[lid] || lid}</span>
-                <span class="group-loc-actions">
-                    <button class="group-bulk-btn" onclick="toggleAllGroupsInLocation('${lid}', true)">All</button>
-                    <button class="group-bulk-btn" onclick="toggleAllGroupsInLocation('${lid}', false)">None</button>
-                </span>
-            </div>
-            <div class="checkbox-group">${rows}</div>
-        </div>`;
-    }).join('');
-}
-
-function updateCheckbox(id, isChecked) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    if (isChecked) el.classList.add('checked');
-    else el.classList.remove('checked');
-}
-
-// ==========================================
-// PRESETS
-// ==========================================
-function applyPreset(presetName) {
-    if (presetName === 'group') {
-        // Group leaderboard preset:
-        // Rotate 90°, theme light (classic), only GM + GD tabs,
-        // show score for both, avatar OFF for both, podium 3, columns 1,
-        // location: 97A HCM only
-        rotation = 90;
-        currentTheme = 'modern';
-
-        config.visibleTabs = {
-            'group-monthly': true,
-            'group-daily': true,
-            'individual-monthly': false,
-            'individual-daily': false
-        };
-        config.showIncome = {
-            'group-monthly': true,
-            'group-daily': true,
-            'individual-monthly': true,
-            'individual-daily': true
-        };
-        config.showAvatars = {
-            'group-monthly': false,
-            'group-daily': false,
-            'individual-monthly': false,
-            'individual-daily': false
-        };
-        config.podiumSlots = 3;
-        config.listColumns = 1;
-
-        // Switch to first visible tab
-        currentTab = 'group-monthly';
-
-    } else if (presetName === 'individual') {
-        // Individual leaderboard preset:
-        // Rotate 90°, theme dark (modern), only IM + ID tabs,
-        // show score for both, avatar OFF for both, podium 5, columns 2,
-        // location: 97A HCM only
-        rotation = 90;
-        currentTheme = 'classic';
-
-        config.visibleTabs = {
-            'group-monthly': false,
-            'group-daily': false,
-            'individual-monthly': true,
-            'individual-daily': true
-        };
-        config.showIncome = {
-            'group-monthly': true,
-            'group-daily': true,
-            'individual-monthly': true,
-            'individual-daily': true
-        };
-        config.showAvatars = {
-            'group-monthly': false,
-            'group-daily': false,
-            'individual-monthly': false,
-            'individual-daily': false
-        };
-        config.podiumSlots = 5;
-        config.listColumns = 2;
-
-        // Switch to first visible tab
-        currentTab = 'individual-monthly';
-    }
-
-    // Common for both presets: set location to 97A HCM only
-    // Find the location with "97A" in its name and enable only that one
-    const loc97A = allLocations.find(loc =>
-        loc.name.includes('97A') || loc.id.includes('97a') || loc.id.includes('97A')
-    );
-    if (loc97A) {
-        // Disable all locations first
-        for (const loc of allLocations) {
-            config.visibleLocations[loc.id] = false;
-        }
-        // Enable only 97A
-        config.visibleLocations[loc97A.id] = true;
-    }
-
-    // Apply rotation
-    config.rotation = rotation;
-    applyRotation();
-    const rotInput = document.getElementById('rotation-deg');
-    if (rotInput) rotInput.value = rotation;
-
-    // Apply theme
-    setTheme(currentTheme);
-
-    // Update active tab button
-    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    const btn = document.getElementById('btn-' + currentTab);
-    if (btn) btn.classList.add('active');
-
-    // Save, update UI, re-render
-    saveSettings();
-    updateUIFromConfig();
-    renderLeaderboard();
-
-    // Visual feedback
-    const fb = document.getElementById('save-feedback');
-    if (fb) {
-        fb.textContent = `✓ ${presetName === 'group' ? 'Group' : 'Individual'} preset applied!`;
-        fb.style.display = 'block';
-        setTimeout(() => { fb.style.display = 'none'; fb.textContent = '✓ Saved!'; }, 2000);
-    }
-}
-
-// ==========================================
-// PERSISTENCE
-// ==========================================
-function saveSettings() {
-    // Auto-save current state on every change
-    try {
-        config.rotation = rotation;
-        localStorage.setItem('leaderboard_config', JSON.stringify(config));
-        localStorage.setItem('leaderboard_theme', currentTheme);
-    } catch (e) { /* ignore */ }
-}
-
-function saveAsDefault() {
-    // Explicitly save everything — rotation, theme, all toggles
-    config.rotation = rotation;
-    try {
-        localStorage.setItem('leaderboard_config', JSON.stringify(config));
-        localStorage.setItem('leaderboard_theme', currentTheme);
-    } catch (e) { /* ignore */ }
-
-    // Visual feedback
-    const fb = document.getElementById('save-feedback');
-    if (fb) {
-        fb.style.display = 'block';
-        setTimeout(() => { fb.style.display = 'none'; }, 2000);
-    }
-}
-
-function loadSavedSettings() {
-    try {
-        const saved = localStorage.getItem('leaderboard_config');
-        if (saved) {
-            const parsed = JSON.parse(saved);
-            // Merge with defaults (in case new keys were added)
-            config = { ...config, ...parsed };
-            // Ensure nested objects are merged too
-            if (parsed.visibleTabs) config.visibleTabs = { ...config.visibleTabs, ...parsed.visibleTabs };
-            if (parsed.showIncome) config.showIncome = { ...config.showIncome, ...parsed.showIncome };
-            if (parsed.showAvatars) config.showAvatars = { ...config.showAvatars, ...parsed.showAvatars };
-            if (parsed.showYesterday) config.showYesterday = { ...config.showYesterday, ...parsed.showYesterday };
-            if (parsed.visibleLocations) config.visibleLocations = { ...config.visibleLocations, ...parsed.visibleLocations };
-            if (parsed.visibleGroups) config.visibleGroups = { ...config.visibleGroups, ...parsed.visibleGroups };
-
-            // Restore rotation
-            if (parsed.rotation != null) {
-                rotation = parsed.rotation;
-                applyRotation();
-            }
-        }
-
-        const savedTheme = localStorage.getItem('leaderboard_theme');
-        if (savedTheme) {
-            currentTheme = savedTheme;
-            setTheme(currentTheme);
-        }
-    } catch (e) { /* ignore */ }
-}
-
-// ==========================================
-// AUTO-CYCLE
-// ==========================================
-function startCycleTimer() {
-    if (cycleTimer) clearInterval(cycleTimer);
-
-    cycleTimer = setInterval(() => {
-        if (isInteracting) return;
-
-        // Get list of visible tabs
-        const visibleTabs = TAB_ORDER.filter(t => config.visibleTabs[t]);
-        if (visibleTabs.length <= 1) return;
-
-        timeLeft--;
-        document.getElementById('footer-countdown').textContent = timeLeft + 's';
-
-        if (timeLeft <= 0) {
-            // Move to next visible tab
-            const currentIndex = visibleTabs.indexOf(currentTab);
-            const nextIndex = (currentIndex + 1) % visibleTabs.length;
-            switchTab(visibleTabs[nextIndex]);
-            timeLeft = config.cycleDuration;
-        }
-    }, 1000);
-}
-
-// ==========================================
-// CLOCK
-// ==========================================
-function startClock() {
-    function updateClock() {
-        const el = document.getElementById('footer-clock');
-        if (el) el.textContent = new Date().toLocaleTimeString();
-    }
-    updateClock();
-    setInterval(updateClock, 1000);
-}
-
-// ==========================================
-// INTERACTION DETECTION
-// ==========================================
-function setupInteractionListeners() {
-    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
-    events.forEach(event => window.addEventListener(event, handleInteraction));
-}
-
-function handleInteraction() {
-    isInteracting = true;
-    if (interactionTimer) clearTimeout(interactionTimer);
-    interactionTimer = setTimeout(() => {
-        isInteracting = false;
-    }, 5000);
-}
-
-// ==========================================
-// FOOTER AUTO-HIDE ON IDLE
-// ==========================================
-function setupFooterAutoHide() {
-    const footer = document.getElementById('footer-bar');
-    if (!footer) return;
-
-    function showFooter() {
-        footer.classList.remove('footer-hidden');
-        footer.classList.add('footer-visible');
-        if (footerHideTimer) clearTimeout(footerHideTimer);
-        footerHideTimer = setTimeout(() => {
-            footer.classList.remove('footer-visible');
-            footer.classList.add('footer-hidden');
-        }, 3000);
-    }
-
-    // Show on any mouse/touch/key activity
-    ['mousemove', 'mousedown', 'touchstart', 'keydown', 'scroll'].forEach(evt => {
-        window.addEventListener(evt, showFooter);
-    });
-
-    // Start hidden after initial delay
-    footerHideTimer = setTimeout(() => {
-        footer.classList.add('footer-hidden');
-    }, 3000);
-}
-
-
-
-// ==========================================
-// KEYBOARD SHORTCUTS
-// ==========================================
-window.addEventListener('keydown', (e) => {
-    handleInteraction();
-
-    // Don't trigger shortcuts when settings modal is open (allow typing in inputs)
-    const settingsModal = document.getElementById('settings-modal');
-    if (settingsModal && !settingsModal.classList.contains('hidden')) return;
-
-    const key = e.key;
-
-    switch (key) {
-        case '0': rotateScreen(); break;
-        case '1': switchTab('group-monthly'); break;
-        case '2': switchTab('group-daily'); break;
-        case '3': switchTab('individual-monthly'); break;
-        case '4': switchTab('individual-daily'); break;
-        case '5':
-            // Toggle income for current tab
-            toggleConfig('showIncome', currentTab);
-            break;
-        case '6': cycleTheme(); break;
-        case '7': toggleSettings(); break;
-        case '8': fetchData(); break;
-    }
+    return;
+  }
+  if(!e.repeat&&(e.key==='7'||e.key.toLowerCase()==='s')){e.preventDefault();closeSettings();return}
+  if(e.key==='Backspace'){e.preventDefault();goBack();return}
+  if(e.key==='Tab'){
+    e.preventDefault();const items=modalControls(),i=items.indexOf(document.activeElement);
+   items[(i+(e.shiftKey?-1:1)+items.length)%items.length].focus();return;
+  }
+  const sidebar=document.activeElement.closest('.settings-nav');
+  if(sidebar){
+   const items=navButtons(),i=items.indexOf(document.activeElement);
+   if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault();const next=(i+(e.key==='ArrowDown'?1:-1)+items.length)%items.length;
+    openPage(next);items[next].focus();return;
+   }
+   if(e.key==='ArrowRight'||ok){e.preventDefault();pageControls()[0]?.focus();return}
+   if(e.key==='ArrowLeft'){e.preventDefault();closeSettings();return}
+  }else{
+   if(e.key==='ArrowLeft'){e.preventDefault();goSidebar();return}
+   if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault();const items=pageControls(),i=items.indexOf(document.activeElement);
+    items[(i+(e.key==='ArrowDown'?1:-1)+items.length)%items.length]?.focus();return;
+   }
+   if(ok){
+    e.preventDefault();if(e.repeat)return;
+    const el=document.activeElement;
+    if(el.matches('input[type=checkbox]')){el.checked=!el.checked;el.dispatchEvent(new Event('change',{bubbles:true}))}
+    else if(el.matches('input,select'))beginEdit(el);
+    else if(el.matches('button'))el.click();
+    return;
+   }
+   if(e.key==='ArrowRight'){e.preventDefault();return}
+  }
+  return;
+ }
+ if(ok&&!e.repeat&&!e.target.closest('button,input,select,[role=button]'))remoteTimer=setTimeout(showSettings,1200);
+ if(e.repeat)return;
+ if(e.key==='7'||e.key.toLowerCase()==='s'){showSettings();return}
+ if(/^[1-5]$/.test(e.key)){const i=Number(e.key)-1;config.scores[i]=!config.scores[i];apply()}
+ if(e.key==='6'&&!e.shiftKey){config.lastMonth=!config.lastMonth;apply()}
+ if(e.key==='8')refreshAll();
+ if(e.key==='9'){config.total=!config.total;apply()}
 });
-
-// ==========================================
-// TV DETECTION
-// ==========================================
-function detectTV() {
-    const ua = navigator.userAgent.toLowerCase();
-    const tvKeywords = ['webos', 'tizen', 'smarttv', 'nexus player', 'viera', 'bravia', 'fios', 'hbbtv', 'opera tv', 'samsung', 'lg tv'];
-    const isTv = tvKeywords.some(kw => ua.includes(kw));
-
-    if (isTv && !localStorage.getItem('leaderboard_config')) {
-        // First visit on TV: default to 90° rotation
-        console.log('TV Detected — Setting default 90° rotation');
-        rotation = 90;
-        config.rotation = 90;
-        applyRotation();
-    }
+let gearTimer;
+const quickToolbar=document.querySelector('.quick-toolbar');
+function revealGear(){
+ gear.classList.remove('idle');quickToolbar.classList.remove('idle');clearTimeout(gearTimer);
+ gearTimer=setTimeout(()=>{if(dialog.hidden&&!quickToolbar.contains(document.activeElement))quickToolbar.classList.add('idle')},3000);
 }
+document.addEventListener('mousemove',revealGear);
+document.addEventListener('pointerdown',revealGear);
+quickToolbar.addEventListener('focusin',()=>{quickToolbar.classList.remove('idle');clearTimeout(gearTimer)});
+quickToolbar.addEventListener('focusout',revealGear);
+quickToolbar.addEventListener('click',e=>{if(dialog.hidden&&e.detail>0){stage.tabIndex=-1;stage.focus()}revealGear()});
+revealGear();
+document.addEventListener('keyup',e=>{if(['Enter','Accept','Select'].includes(e.key)||e.keyCode===23)clearTimeout(remoteTimer)});
+window.addEventListener('blur',()=>{cancelHold();clearTimeout(remoteTimer)});
+window.addEventListener('resize',()=>{setupScroll();setupTicker();renderGroups()});
 
-function toggleShortcutsHelp() {
-    const el = document.getElementById('shortcuts-help');
-    if (el) el.classList.toggle('hidden');
+
+document.getElementById('refresh-all').onclick=refreshAll;
+document.getElementById('refresh-last').onclick=()=>loadHistory(true);
+document.getElementById('daily-history').onclick=()=>{dailyHistory=!dailyHistory;apply();notify(dailyHistory?'Showing yesterday':'Showing current daily scores')};
+document.getElementById('unfreeze').onclick=()=>{dailyHistory=false;unfreezeUntil=Date.now()+120000;lastContext='';apply();notify('Live daily scores for 2 minutes')};
+document.getElementById('location-choice').onchange=e=>{if(editing===e.target)return;selectedLocation=e.target.value;page=0;renderGroups()};
+document.getElementById('groups-prev').onclick=()=>{page--;renderGroups()};
+document.getElementById('groups-next').onclick=()=>{page++;renderGroups()};
+let streamConnected=false,stream=null,lastStreamFetch=0,streamTimer=null;
+function streamInvalidation(){if(Date.now()-lastStreamFetch<10000){if(!streamTimer)streamTimer=setTimeout(()=>{streamTimer=null;streamInvalidation()},10000);return}lastStreamFetch=Date.now();loadCurrent()}
+function connectStream(){
+ if(!window.EventSource)return;
+ stream=new EventSource('/api/leaderboard/stream');
+ stream.onopen=()=>{streamConnected=true;if(rawData)connection('● LIVE')};
+ stream.onmessage=()=>streamInvalidation();
+ stream.onerror=()=>{streamConnected=false;connection(rawData?'RECONNECTING · RETAINED':'CONNECTING')};
 }
-
-// ==========================================
-// WAKE LOCK — AGGRESSIVE TV ANTI-SLEEP
-// Targets: Samsung Tizen, TCL, and other Smart TVs
-// ==========================================
-let _wakeLockSentinel = null;
-let _wakeLockVideo = null;
-let _wakeLockCanvas = null;
-let _wakeLockAudioCtx = null;
-
-async function requestWakeLock() {
-    console.log('[WakeLock] Initializing anti-sleep system...');
-
-    // Strategy 1: Samsung Tizen Power API
-    tryTizenPowerLock();
-
-    // Strategy 2: Native Wake Lock API
-    tryNativeWakeLock();
-
-    // Strategy 3: Video playback (larger, visible-enough for TV OS detection)
-    startVideoKeepAwake();
-
-    // Strategy 4: Web Audio silent tone (keeps audio pipeline active)
-    startSilentAudio();
-
-    // Strategy 5: Canvas animation (keeps GPU/rendering active)
-    startCanvasAnimation();
-
-    // Strategy 6: Periodic page refresh to reset TV idle timer
-    startPeriodicRefresh();
-
-    // Strategy 7: Simulate activity via DOM mutations
-    startDOMMutationKeepAlive();
-
-    console.log('[WakeLock] All anti-sleep strategies activated');
-}
-
-// --- Strategy 1: Samsung Tizen Native API ---
-function tryTizenPowerLock() {
-    try {
-        // Samsung Tizen Smart TV API
-        if (typeof tizen !== 'undefined' && tizen.power) {
-            tizen.power.request('SCREEN', 'SCREEN_NORMAL');
-            tizen.power.setScreenStateChangeListener((prev, current) => {
-                if (current === 'SCREEN_OFF') {
-                    tizen.power.turnScreenOn();
-                    tizen.power.request('SCREEN', 'SCREEN_NORMAL');
-                }
-            });
-            console.log('[WakeLock] ✓ Tizen Power API active');
-            return;
-        }
-        // Tizen Web Device API alternative
-        if (typeof webapis !== 'undefined' && webapis.avplay) {
-            console.log('[WakeLock] Tizen webapis detected');
-        }
-    } catch (e) {
-        console.log('[WakeLock] Tizen API not available:', e.message);
-    }
-
-    try {
-        // TCL / Android TV: try cordova plugin if available
-        if (window.plugins && window.plugins.insomnia) {
-            window.plugins.insomnia.keepAwake();
-            console.log('[WakeLock] ✓ Insomnia plugin active');
-        }
-    } catch (e) {
-        console.log('[WakeLock] Insomnia plugin not available');
-    }
-}
-
-// --- Strategy 2: Native Wake Lock API ---
-async function tryNativeWakeLock() {
-    try {
-        if ('wakeLock' in navigator) {
-            _wakeLockSentinel = await navigator.wakeLock.request('screen');
-            console.log('[WakeLock] ✓ Native Wake Lock active');
-            _wakeLockSentinel.addEventListener('release', () => {
-                console.log('[WakeLock] Native lock released, re-acquiring...');
-                _wakeLockSentinel = null;
-                setTimeout(() => tryNativeWakeLock(), 1000);
-            });
-
-            document.addEventListener('visibilitychange', async () => {
-                if (document.visibilityState === 'visible' && !_wakeLockSentinel) {
-                    try {
-                        _wakeLockSentinel = await navigator.wakeLock.request('screen');
-                        console.log('[WakeLock] Re-acquired after visibility change');
-                    } catch (e) { /* ignore */ }
-                }
-            });
-        }
-    } catch (e) {
-        console.log('[WakeLock] Native API not supported:', e.message);
-    }
-}
-
-// --- Strategy 3: Video playback keep-awake ---
-function startVideoKeepAwake() {
-    try {
-        // Create a canvas-generated video stream instead of a static file
-        // This is more reliable on smart TVs as it's an active media stream
-        const canvas = document.createElement('canvas');
-        canvas.width = 2;
-        canvas.height = 2;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, 2, 2);
-
-        const video = document.createElement('video');
-        video.setAttribute('playsinline', '');
-        video.setAttribute('muted', '');
-        video.setAttribute('loop', '');
-        video.muted = true;
-        video.volume = 0;
-        // Make it small but NOT invisible — some TVs ignore 0-size or fully hidden elements
-        video.style.cssText = 'position:fixed;bottom:0;right:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:9999;';
-        document.body.appendChild(video);
-        _wakeLockVideo = video;
-
-        // Try canvas captureStream (works on Chromium-based TV browsers)
-        if (canvas.captureStream) {
-            const stream = canvas.captureStream(1); // 1 fps
-            video.srcObject = stream;
-
-            // Animate the canvas to keep the stream active
-            const animateCanvas = () => {
-                ctx.fillStyle = `rgb(0,0,${Math.random() > 0.5 ? 1 : 0})`;
-                ctx.fillRect(0, 0, 2, 2);
-                requestAnimationFrame(animateCanvas);
-            };
-            animateCanvas();
-        } else {
-            // Fallback: use base64 webm
-            video.src = 'data:video/webm;base64,GkXfo0AgQoaBAUL3gQFC8oEEQvOBCEKCQAR3ZWJtQoeBAkKFgQIYU4BnQI0VSalmQCgq17FAAw9CQE2AQAZ3aGFtbXlXQUAGd2hhbW15RIlACECPQAAAAAAAFlSua0AxrkAu14EBY8WBAZyBACK1nEADdW5khkAFVl9WUDglhohAA1ZQOIOBAeBABrCBCLqBCB9DtnVAIueBAKNAHIEAAIAwAQCdASoIAAgAAUAmJaQAA3AA/vz0AAA=';
-        }
-
-        const playVideo = () => {
-            video.play().then(() => {
-                console.log('[WakeLock] ✓ Video playing');
-            }).catch(() => {
-                // Wait for user interaction
-                const startOnInteract = () => {
-                    video.play().catch(() => {});
-                    document.removeEventListener('click', startOnInteract);
-                    document.removeEventListener('keydown', startOnInteract);
-                    document.removeEventListener('touchstart', startOnInteract);
-                };
-                document.addEventListener('click', startOnInteract);
-                document.addEventListener('keydown', startOnInteract);
-                document.addEventListener('touchstart', startOnInteract);
-            });
-        };
-
-        playVideo();
-
-        // Auto-restart if paused
-        video.addEventListener('pause', () => {
-            setTimeout(() => video.play().catch(() => {}), 200);
-        });
-        video.addEventListener('ended', () => {
-            video.currentTime = 0;
-            video.play().catch(() => {});
-        });
-
-        // Periodically ensure video is still playing
-        setInterval(() => {
-            if (video.paused) {
-                video.play().catch(() => {});
-            }
-        }, 10000);
-
-    } catch (e) {
-        console.log('[WakeLock] Video strategy failed:', e.message);
-    }
-}
-
-// --- Strategy 4: Web Audio silent tone ---
-function startSilentAudio() {
-    try {
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        if (!AudioContext) return;
-
-        const startAudio = () => {
-            if (_wakeLockAudioCtx) return;
-            _wakeLockAudioCtx = new AudioContext();
-
-            // Create a silent oscillator (frequency too low to hear)
-            const oscillator = _wakeLockAudioCtx.createOscillator();
-            const gainNode = _wakeLockAudioCtx.createGain();
-            gainNode.gain.value = 0.001; // Nearly silent
-            oscillator.frequency.value = 1; // 1 Hz — inaudible
-            oscillator.connect(gainNode);
-            gainNode.connect(_wakeLockAudioCtx.destination);
-            oscillator.start();
-
-            console.log('[WakeLock] ✓ Silent audio active');
-        };
-
-        // Try immediately
-        startAudio();
-
-        // Also try on user interaction (required by most TV browsers)
-        const interactHandler = () => {
-            startAudio();
-            if (_wakeLockAudioCtx && _wakeLockAudioCtx.state === 'suspended') {
-                _wakeLockAudioCtx.resume();
-            }
-            document.removeEventListener('click', interactHandler);
-            document.removeEventListener('keydown', interactHandler);
-            document.removeEventListener('touchstart', interactHandler);
-        };
-        document.addEventListener('click', interactHandler);
-        document.addEventListener('keydown', interactHandler);
-        document.addEventListener('touchstart', interactHandler);
-
-        // Keep audio context alive
-        setInterval(() => {
-            if (_wakeLockAudioCtx && _wakeLockAudioCtx.state === 'suspended') {
-                _wakeLockAudioCtx.resume().catch(() => {});
-            }
-        }, 15000);
-
-    } catch (e) {
-        console.log('[WakeLock] Audio strategy failed:', e.message);
-    }
-}
-
-// --- Strategy 5: Canvas animation (keeps GPU active) ---
-function startCanvasAnimation() {
-    try {
-        const canvas = document.createElement('canvas');
-        canvas.width = 1;
-        canvas.height = 1;
-        canvas.style.cssText = 'position:fixed;bottom:0;left:0;width:1px;height:1px;opacity:0.01;pointer-events:none;z-index:-1;';
-        document.body.appendChild(canvas);
-        _wakeLockCanvas = canvas;
-
-        const ctx = canvas.getContext('2d');
-        let frame = 0;
-
-        const animate = () => {
-            frame++;
-            // Tiny pixel change to force GPU render
-            ctx.fillStyle = frame % 2 === 0 ? '#000' : '#001';
-            ctx.fillRect(0, 0, 1, 1);
-            requestAnimationFrame(animate);
-        };
-        animate();
-        console.log('[WakeLock] ✓ Canvas animation active');
-    } catch (e) {
-        console.log('[WakeLock] Canvas strategy failed:', e.message);
-    }
-}
-
-// --- Strategy 6: Periodic page refresh (nuclear option for stubborn TVs) ---
-function startPeriodicRefresh() {
-    // Reload the page every 4 minutes to reset the TV's idle timer
-    // This is a last resort but very reliable on all TV platforms
-    const REFRESH_INTERVAL = 4 * 60 * 1000; // 4 minutes
-
-    setInterval(() => {
-        // Only auto-refresh if no user interaction in the last 30 seconds
-        if (!isInteracting) {
-            console.log('[WakeLock] Performing keep-alive refresh...');
-            // Use soft refresh — preserves state via localStorage
-            window.location.reload();
-        }
-    }, REFRESH_INTERVAL);
-
-    console.log('[WakeLock] ✓ Periodic refresh armed (every 4 min)');
-}
-
-// --- Strategy 7: DOM mutation keep-alive ---
-function startDOMMutationKeepAlive() {
-    // Periodically mutate the DOM to simulate page activity
-    // Some TVs track DOM changes as a sign of active content
-    const el = document.createElement('div');
-    el.id = 'wakelock-heartbeat';
-    el.style.cssText = 'position:fixed;bottom:0;right:0;width:1px;height:1px;opacity:0;pointer-events:none;';
-    el.setAttribute('aria-hidden', 'true');
-    document.body.appendChild(el);
-
-    setInterval(() => {
-        // Toggle content to force a DOM mutation
-        el.textContent = el.textContent === '.' ? '' : '.';
-        // Also trigger a layout recalculation
-        void el.offsetHeight;
-    }, 5000); // every 5 seconds
-
-    // Also change document title periodically
-    setInterval(() => {
-        document.title = document.title.endsWith(' ')
-            ? document.title.trimEnd()
-            : document.title + ' ';
-    }, 15000);
-
-    console.log('[WakeLock] ✓ DOM mutation keep-alive active');
-}
-
-// ==========================================
-// UTILITY
-// ==========================================
-function formatNumber(num) {
-    if (num == null) return '0';
-    return Math.ceil(num).toLocaleString('en-US');
-}
-
-function getAvatarUrl(avatar, name) {
-    if (!avatar) {
-        // Generate SVG placeholder with first letter
-        const letter = (name || '?').charAt(0).toUpperCase();
-        return `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22 rx=%2250%22/><text x=%2250%22 y=%2260%22 text-anchor=%22middle%22 fill=%22%23888%22 font-size=%2240%22 font-family=%22Inter,sans-serif%22>${letter}</text></svg>`;
-    }
-    // If avatar starts with 'userdata/', it's a helioscontrol local path
-    // We need to proxy or use the helioscontrol server URL
-    // For now, just return as-is (works if helioscontrol is serving these files)
-    return avatar;
-}
+setInterval(()=>{if(!streamConnected)loadCurrent();if(unfreezeUntil&&Date.now()>=unfreezeUntil){unfreezeUntil=0;lastContext='';apply()}},10000);
+setInterval(()=>{loadCurrent();if(config.lastMonth)loadHistory(false)},60000);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){loadCurrent();if(config.lastMonth)loadHistory(false)}});
+apply();renderLocations();connectStream();
+if(window.HeliosWake)window.HeliosWake.start();
