@@ -9,11 +9,46 @@ test('slow authoritative aggregation remains pending beyond 45 seconds instead o
  const browser=await chromium.launch({channel:process.env.PLAYWRIGHT_CHANNEL||'chrome',headless:true});
  t.after(async()=>{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r))});
  const page=await browser.newPage();await page.clock.install();
- const failed=[];page.on('requestfailed',r=>{if(r.url().includes('/fresh?'))failed.push(r.failure()?.errorText)});
+ const failed=[];page.on('requestfailed',r=>{if(/\/(?:fresh|current)\?/.test(r.url()))failed.push(r.failure()?.errorText)});
  await page.goto('http://127.0.0.1:'+server.address().port);
  await page.clock.fastForward(46000);
  await page.waitForTimeout(100);
  assert.deepEqual(failed,[],'a slow real aggregation must not be aborted after 45 seconds');
+ await page.waitForSelector('.row');
+});
+
+test('cache-first reads show actual age; forced refresh wins over pending automatic data',{timeout:20000},async t=>{
+ const {app,state}=createFixtureServer();state.stale=true;state.computedAt=Date.UTC(2026,8,17,3,0,0);
+ const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
+ const browser=await chromium.launch({channel:process.env.PLAYWRIGHT_CHANNEL||'chrome',headless:true});
+ t.after(async()=>{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r))});
+ const page=await browser.newPage();await page.goto('http://127.0.0.1:'+server.address().port);await page.waitForSelector('.row');
+ assert.equal(state.requests.filter(r=>r.forced).length,0,'first paint must not force a raw rebuild');
+ assert.match(await page.locator('#connection').textContent(),/CACHED.*UPDATING/);
+ assert.match(await page.locator('.footer>span:last-child').textContent(),/17\/09\/2026, 10:00:00/,'show computation time, not fetch time');
+ state.currentDelay=1200;state.offset=111;state.invalidate();
+ await page.waitForRequest(r=>r.url().includes('/current?'));
+ state.freshDelay=150;state.offset=222;state.computedAt+=1000;await page.keyboard.press('8');
+ await page.waitForFunction(()=>document.querySelector('.board .points').textContent==='1,000,222');
+ await page.waitForTimeout(1400);
+ assert.equal(await page.locator('.board .points').first().textContent(),'1,000,222','older automatic response must not overwrite manual result');
+ assert.equal(state.requests.filter(r=>r.forced).length,1);
+ state.freshDelay=600;state.offset=333;await page.keyboard.press('8');
+ const before=state.requests.filter(r=>!r.forced).length;
+ await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
+ await page.waitForFunction(()=>document.querySelector('.board .points').textContent==='1,000,333');
+ assert.equal(state.requests.filter(r=>!r.forced).length,before,'automatic refresh must not cancel or join a pending forced refresh');
+});
+
+test('TV keep-alive does not reload the document while data is pending',{timeout:20000},async t=>{
+ const {app,state}=createFixtureServer();state.delay=5000;
+ const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
+ const browser=await chromium.launch({channel:process.env.PLAYWRIGHT_CHANNEL||'chrome',headless:true});
+ t.after(async()=>{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r))});
+ const page=await browser.newPage();await page.clock.install();let navigations=0;page.on('framenavigated',frame=>{if(frame===page.mainFrame())navigations++});
+ await page.goto('http://127.0.0.1:'+server.address().port);await page.waitForSelector('#wakelock-heartbeat',{state:'attached'});
+ await page.clock.fastForward(241000);await page.waitForTimeout(250);
+ assert.equal(navigations,1,'periodic wake refresh must not restart a pending fetch');
  await page.waitForSelector('.row');
 });
 test('command center: real renderer, responsive settings, defaults and remote controls',{timeout:120000},async t=>{

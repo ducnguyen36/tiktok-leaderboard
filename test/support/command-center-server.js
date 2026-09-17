@@ -3,7 +3,8 @@ const express=require('express');
 const path=require('node:path');
 const fs=require('node:fs');
 function createFixtureServer(){
- const app=express(),state={fail:false,offset:0,delay:0,empty:false,requests:[],historyRequests:0,historyComplete:true,frozen:false};
+ const app=express(),state={fail:false,offset:0,delay:0,currentDelay:null,freshDelay:null,stale:false,computedAt:Date.now(),empty:false,requests:[],historyRequests:0,historyComplete:true,frozen:false};
+ const streams=new Set();state.invalidate=()=>streams.forEach(res=>res.write('data: {"status":"invalidate"}\n\n'));
  const groups=Array.from({length:17},(_,i)=>({id:'g'+i,name:'TEST GROUP '+(i+1),locationId:'loc_hcm'}));
  function data(reset){
   const rows=Array.from({length:32},(_,i)=>({name:i===0?'TEST ALPHA':'TEST IDOL '+(i+1),value:5270072-i*12000+state.offset+reset,avatar:'/userdata/avatars/test.png',groupId:'g'+i%17,locationId:'loc_hcm',yesterday:{value:1000000-i}}));
@@ -16,9 +17,9 @@ function createFixtureServer(){
    locations:[{id:'loc_hcm',name:'TEST HCM'},{id:'loc_hn',name:'TEST HANOI'}],groups,frozen:state.frozen,monthlyGrace:false
   };
  }
- app.get('/api/leaderboard/fresh',(req,res)=>{state.requests.push({...req.query});const fail=state.fail,payload=data(Number(req.query.resetHour)||0);setTimeout(()=>fail?res.status(503).json({status:'error',message:'Fixture unavailable'}):res.json({status:'ok',data:payload}),state.delay)});
+ app.get(['/api/leaderboard/fresh','/api/leaderboard/current'],(req,res)=>{const forced=req.path.endsWith('/fresh');state.requests.push({...req.query,forced});const fail=state.fail,payload=data(Number(req.query.resetHour)||0),meta={source:forced?'computed':'cache',stale:forced?false:state.stale,computedAt:state.computedAt,contextKey:'fixture|'+req.query.resetHour+'|'+req.query.freezeUntil};setTimeout(()=>fail?res.status(503).json({status:'error',message:'Fixture unavailable'}):res.json({status:'ok',data:payload,meta}),((forced?state.freshDelay:state.currentDelay)??state.delay))});
  app.get('/api/leaderboard/history',(req,res)=>{state.historyRequests++;const month=req.query.month,[y,m]=month.split('-').map(Number);res.json({status:'ok',aggregationVersion:1,source:'snapshot',generatedAt:new Date().toISOString(),period:{month,start:new Date(Date.UTC(y,m-1,1)).toISOString(),end:new Date(Date.UTC(y,m,1)).toISOString(),complete:state.historyComplete},data:{individual:data(0).individual.monthly.map(e=>({...e,name:'PRIOR '+e.name,value:1234567})),group:[]}})});
- app.get('/api/leaderboard/stream',(req,res)=>{res.writeHead(200,{'Content-Type':'text/event-stream'});res.write(': connected\n\n');req.on('close',()=>res.end())});
+ app.get('/api/leaderboard/stream',(req,res)=>{res.writeHead(200,{'Content-Type':'text/event-stream'});res.write(': connected\n\n');streams.add(res);req.on('close',()=>{streams.delete(res);res.end()})});
  app.get('/userdata/avatars/test.png',(req,res)=>res.sendFile(path.join(__dirname,'../../public/helios-asset-23.png')));
  app.get('/',(req,res)=>res.type('html').send(fs.readFileSync(path.join(__dirname,'../../public/index.html'),'utf8').replace('<title>Helios Talent · Leaderboard</title>','<title>LOCAL TEST · Helios Leaderboard · Fixture data</title>').replace('<b id="connection">','<span>TEST DATA · </span><b id="connection">')));
  app.use(express.static(path.join(__dirname,'../../public')));

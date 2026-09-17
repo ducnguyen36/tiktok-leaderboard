@@ -259,8 +259,8 @@ function startPeriodicRefresh() {
     const REFRESH_INTERVAL = 4 * 60 * 1000; // 4 minutes
 
     setInterval(() => {
-        // Only auto-refresh if no user interaction in the last 30 seconds
-        if (document.getElementById('settings-dialog').hidden && Date.now() - lastInteraction > 30000) {
+        // Never interrupt a pending initial load, background revalidation or manual refresh.
+        if (document.getElementById('settings-dialog').hidden && !document.querySelector('.board.loading') && Date.now() - lastInteraction > 30000) {
             console.log('[WakeLock] Performing keep-alive refresh...');
             // Use soft refresh — preserves state via localStorage
             window.location.reload();

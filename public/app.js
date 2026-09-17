@@ -14,6 +14,7 @@ config=stored?C.normalize(stored):saved?C.normalize(saved):C.migrate(readStored(
 const defaults=C.clone(C.defaults);
 function persist(){try{localStorage.setItem(storageKey+'_current',JSON.stringify(config))}catch(e){notify('Storage unavailable. Changes apply for this session only.')}}
 let rawData=null,historyPayload=null,allLocations=[],allGroups=[],dailyHistory=false,unfreezeUntil=0;
+let dataMeta=null,dataError=false;const manualPending=new Map(),manualEpoch=new Map();
 const columnData=Array(6).fill(null),columnVersion=Array(6).fill(0),rowSignatures=Array(6).fill('');
 let scrollAnimations=[],tickerAnimation,tickerMessage='',lastContext='',historyMonth='',historyRequest=0,requestCounter=0,liveInFlight=new Map(),lastUpdated=null,lastMotion='',lastTickerSpeed=0;
 const configInputs=[...dialog.querySelectorAll('[data-config]')],scoreInputs=[...dialog.querySelectorAll('[data-score]')];
@@ -100,16 +101,24 @@ function requestContext(){return new URLSearchParams({resetHour:String(config.re
 // Keep the shared in-flight request alive instead of repeatedly aborting/retrying it.
 async function fetchJSON(url){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),600000);try{const response=await fetch(url,{signal:controller.signal,cache:'no-store'});const payload=await response.json();if(!response.ok||payload.status!=='ok'||!payload.data)throw Error(payload.message||'Data unavailable');return payload}finally{clearTimeout(timer)}}
 function connection(text){document.getElementById('connection').textContent=text}
+function renderConnection(){
+ if(dataError){connection(rawData?'OFFLINE · RETAINED':'OFFLINE · NO DATA');return}
+ if(!rawData){connection('CONNECTING');return}
+ const cached=dataMeta?.source&&dataMeta.source!=='computed'&&dataMeta.source!=='fresh';
+ connection(dataMeta?.stale?'CACHED · UPDATING':cached?'● CACHED':streamConnected?'● LIVE':'● CONNECTED');
+}
 async function loadCurrent(indices=[0,1,2,3,4],manual=false){
- const context=requestContext(),request=++requestCounter;indices.forEach(i=>{columnVersion[i]=request;boards[i].classList.add('loading');boards[i].querySelector('.column-refresh')?.setAttribute('disabled','')});
- if(!liveInFlight.has(context)){const promise=fetchJSON('/api/leaderboard/fresh?'+context).finally(()=>liveInFlight.delete(context));liveInFlight.set(context,promise)}
- try{const result=await liveInFlight.get(context);if(context!==requestContext())return;
+ const context=requestContext();if(!manual&&manualPending.get(context))return;
+ if(manual){manualPending.set(context,(manualPending.get(context)||0)+1);manualEpoch.set(context,(manualEpoch.get(context)||0)+1)}
+ const epoch=manualEpoch.get(context)||0,key=context+'|'+(manual?'fresh':'current'),request=++requestCounter;indices.forEach(i=>{columnVersion[i]=request;boards[i].classList.add('loading');boards[i].querySelector('.column-refresh')?.setAttribute('disabled','')});
+ if(!liveInFlight.has(key)){const promise=fetchJSON('/api/leaderboard/'+(manual?'fresh':'current')+'?'+context).finally(()=>liveInFlight.delete(key));liveInFlight.set(key,promise)}
+ try{const result=await liveInFlight.get(key);if(context!==requestContext()||(!manual&&epoch!==(manualEpoch.get(context)||0)))return;
   const accepted=indices.filter(i=>columnVersion[i]===request);if(!accepted.length)return;
-  rawData=result.data;allLocations=(rawData.locations||[]).map(l=>({...l,id:String(l.id)}));allGroups=(rawData.groups||[]).map(g=>({...g,id:String(g.id),locationId:String(g.locationId||'')}));
+  rawData=result.data;dataMeta=result.meta||null;dataError=false;allLocations=(rawData.locations||[]).map(l=>({...l,id:String(l.id)}));allGroups=(rawData.groups||[]).map(g=>({...g,id:String(g.id),locationId:String(g.locationId||'')}));
   accepted.forEach(i=>columnData[i]=rawData);let changed=false;accepted.forEach(i=>{changed=renderRows(i)||changed});if(changed)setupScroll();renderSummary();renderLocations();syncInputs();
-  lastUpdated=new Date();document.querySelector('.footer>span:last-child').textContent='Updated: '+lastUpdated.toLocaleString('en-GB',{timeZone:'Asia/Ho_Chi_Minh'});connection(streamConnected?'● LIVE':'● CONNECTED');if(manual)notify('Points refreshed');
- }catch(e){if(context===requestContext()){connection('OFFLINE · RETAINED');if(manual||!rawData)notify('Unable to refresh. Previous data is kept.')}}
- finally{indices.forEach(i=>{if(columnVersion[i]===request){boards[i].classList.remove('loading');boards[i].querySelector('.column-refresh')?.removeAttribute('disabled')}})}
+  lastUpdated=result.meta?.computedAt?new Date(result.meta.computedAt):null;document.querySelector('.footer>span:last-child').textContent=lastUpdated&&!isNaN(+lastUpdated)?'Updated: '+lastUpdated.toLocaleString('en-GB',{timeZone:'Asia/Ho_Chi_Minh'}):'Updated: unknown';renderConnection();if(manual)notify('Points refreshed');
+ }catch(e){if(context===requestContext()&&(manual||epoch===(manualEpoch.get(context)||0))){dataError=true;renderConnection();if(manual||!rawData)notify('Unable to refresh. Previous data is kept.')}}
+ finally{if(manual){const remaining=(manualPending.get(context)||1)-1;if(remaining)manualPending.set(context,remaining);else manualPending.delete(context)}indices.forEach(i=>{if(columnVersion[i]===request){boards[i].classList.remove('loading');boards[i].querySelector('.column-refresh')?.removeAttribute('disabled')}})}
 }
 let historyInFlight=null;
 async function loadHistory(force=false){
@@ -296,11 +305,11 @@ function streamInvalidation(){if(Date.now()-lastStreamFetch<10000){if(!streamTim
 function connectStream(){
  if(!window.EventSource)return;
  stream=new EventSource('/api/leaderboard/stream');
- stream.onopen=()=>{streamConnected=true;if(rawData)connection('● LIVE')};
+ stream.onopen=()=>{streamConnected=true;renderConnection()};
  stream.onmessage=()=>streamInvalidation();
  stream.onerror=()=>{streamConnected=false;connection(rawData?'RECONNECTING · RETAINED':'CONNECTING')};
 }
-setInterval(()=>{if(!streamConnected)loadCurrent();if(unfreezeUntil&&Date.now()>=unfreezeUntil){unfreezeUntil=0;lastContext='';apply()}},10000);
+setInterval(()=>{if(!streamConnected||dataMeta?.stale)loadCurrent();if(unfreezeUntil&&Date.now()>=unfreezeUntil){unfreezeUntil=0;lastContext='';apply()}},10000);
 setInterval(()=>{loadCurrent();if(config.lastMonth)loadHistory(false)},60000);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){loadCurrent();if(config.lastMonth)loadHistory(false)}});
 apply();renderLocations();connectStream();
