@@ -188,10 +188,10 @@ button:focus-visible,input:focus-visible,select:focus-visible,.board-head:focus-
 .head .brand{justify-content:center;padding-left:0}
 /* Larger identity lockup, without changing header or leaderboard geometry. */
 @media(min-width:701px){
- .head .brand{gap:1.8vw}
- .head .logo{width:clamp(74px,8.64vw,180px)}
- .head .brand-name{font-size:clamp(29px,3.6vw,82px)}
- .head .brand-sub{font-size:clamp(9px,.78vw,17px)}
+ .head .brand{gap:1.98vw}
+ .head .logo{width:clamp(81px,9.5vw,198px)}
+ .head .brand-name{font-size:clamp(32px,3.96vw,90px)}
+ .head .brand-sub{font-size:clamp(10px,.858vw,19px)}
 }
 
 /* V19: font-independent, geometrically centered toolbar icons. */

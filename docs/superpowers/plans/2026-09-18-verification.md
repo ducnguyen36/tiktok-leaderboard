@@ -34,7 +34,7 @@ Unavailable-database HTTP smoke used only a deliberately unreachable localhost M
 ## Limits
 
 - No physical TV/remote hardware test; browser keyboard and viewport behavior were tested.
-- No live Mongo aggregation/archive write verification or production deployment was performed.
+- Initial verification did not access MongoDB. The later user-authorized live local run is recorded below; no remote production deployment was performed.
 - Docker is unavailable on this host, so no container build was run. Dockerfile includes the new history module and excludes fixture/test artifacts.
 - The dependency audit reports three existing transitive production vulnerabilities (one low, one moderate, one high). Dependencies were not force-upgraded as part of this UI change.
 
@@ -44,3 +44,13 @@ Unavailable-database HTTP smoke used only a deliberately unreachable localhost M
 - All five JavaScript syntax checks passed; `git diff --check` passed (only Git's Windows line-ending conversion notices).
 - Independent scoped rereview confirmed the backend and four frontend findings resolved; no remaining confirmed findings in that scope.
 - The final 1920×1080 screenshot was visually inspected: five equal columns, full rows, transparent Asset 23, visible full point values and no page overflow.
+
+## User-authorized live local run
+
+- On 2026-09-18, started the actual server at `http://localhost:57022/`, separate from fixture origin/cache at 57021, using the configured MongoDB. TLS certificate verification is enabled for this process.
+- Health returned 200/ok; Mongo gift change-stream events were received.
+- Actual browser verification returned five visible columns, 72 rows, total 723,615, LIVE connection, no TEST DATA marker and no viewport overflow. At verification time, the configured 09:00 freeze correctly labeled daily values as yesterday.
+- History API returned HTTP 200, source `snapshot`, complete August 2026 period, with 50 idols. Normal application cache/snapshot writes occurred during this authorized run.
+- Real remote aggregation took approximately four minutes per build. The client's former 45-second abort prevented initial rendering; changed its bounded wait to ten minutes with a red/green regression. This accommodates slow aggregation, not a claim that aggregation performance is optimized.
+- Production avatar strings use relative `userdata/avatars/...` paths. Added normalization with a red/green renderer regression; a real avatar request returned 200/image/jpeg.
+- Final suite after these live integration fixes: 40 passed, 0 failed. Physical TV hardware remains untested.

@@ -7,7 +7,7 @@ function createFixtureServer(){
  const groups=Array.from({length:17},(_,i)=>({id:'g'+i,name:'TEST GROUP '+(i+1),locationId:'loc_hcm'}));
  function data(reset){
   const rows=Array.from({length:32},(_,i)=>({name:i===0?'TEST ALPHA':'TEST IDOL '+(i+1),value:5270072-i*12000+state.offset+reset,avatar:'/userdata/avatars/test.png',groupId:'g'+i%17,locationId:'loc_hcm',yesterday:{value:1000000-i}}));
-  const gr=groups.map((g,i)=>({...g,name:g.name,groupId:g.id,value:1000000-i*1000+state.offset,avatar:'/userdata/avatars/test.png',yesterday:{value:9999}}));
+  const gr=groups.map((g,i)=>({...g,name:g.name,groupId:g.id,value:1000000-i*1000+state.offset,avatar:'userdata/avatars/test.png',yesterday:{value:9999}}));
   const yesterdayGroups=gr.map(({yesterday,...e})=>({...e,value:100}));
   const yesterdayIdols=rows.map(({yesterday,...e})=>({...e,value:200}));
   return {

@@ -21,7 +21,7 @@ const camera=document.querySelector('.camera-notice');
 camera.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h4l2-3h6l2 3h4v13H3z"/><circle cx="12" cy="13" r="4"/><path d="M2 2l20 20"/></svg>';
 camera.append(document.createTextNode('NO PHOTOS OR VIDEOS ALLOWED'));
 function syncInputs(){document.getElementById('quick-lastmonth').setAttribute('aria-pressed',String(config.lastMonth));configInputs.forEach(e=>{const value=config[e.dataset.config];if(e.type==='checkbox')e.checked=Boolean(value);else if(e!==document.activeElement)e.value=value});scoreInputs.forEach(e=>e.checked=config.scores[+e.dataset.score])}
-function safeAvatar(value){if(typeof value!=='string')return '';if(value.startsWith('/userdata/avatars/')||value.startsWith('/avatars/'))return value;try{const u=new URL(value);return ['https:','http:'].includes(u.protocol)?u.href:''}catch{return ''}}
+function safeAvatar(value){if(typeof value!=='string')return '';if(value.startsWith('userdata/avatars/')||value.startsWith('avatars/'))value='/'+value;if(value.startsWith('/userdata/avatars/')||value.startsWith('/avatars/'))return value;try{const u=new URL(value);return ['https:','http:'].includes(u.protocol)?u.href:''}catch{return ''}}
 function makeRow(entry,index,column){
  const row=document.createElement('div');row.className='row'+(index<3?' top'+(index+1):'');
  const rank=document.createElement('i');rank.className='rank';rank.textContent=index+1;
@@ -96,7 +96,9 @@ function apply(){
  if(config.lastMonth)loadHistory(false);
 }
 function requestContext(){return new URLSearchParams({resetHour:String(config.resetHour),freezeUntil:Date.now()<unfreezeUntil?'':config.freezeUntil}).toString()}
-async function fetchJSON(url){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),45000);try{const response=await fetch(url,{signal:controller.signal,cache:'no-store'});const payload=await response.json();if(!response.ok||payload.status!=='ok'||!payload.data)throw Error(payload.message||'Data unavailable');return payload}finally{clearTimeout(timer)}}
+// Real monthly aggregation can take several minutes over the remote database link.
+// Keep the shared in-flight request alive instead of repeatedly aborting/retrying it.
+async function fetchJSON(url){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),600000);try{const response=await fetch(url,{signal:controller.signal,cache:'no-store'});const payload=await response.json();if(!response.ok||payload.status!=='ok'||!payload.data)throw Error(payload.message||'Data unavailable');return payload}finally{clearTimeout(timer)}}
 function connection(text){document.getElementById('connection').textContent=text}
 async function loadCurrent(indices=[0,1,2,3,4],manual=false){
  const context=requestContext(),request=++requestCounter;indices.forEach(i=>{columnVersion[i]=request;boards[i].classList.add('loading');boards[i].querySelector('.column-refresh')?.setAttribute('disabled','')});

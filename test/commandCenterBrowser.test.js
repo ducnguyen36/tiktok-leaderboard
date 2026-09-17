@@ -3,6 +3,19 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const {chromium}=require('playwright');
 const {createFixtureServer}=require('./support/command-center-server');
+test('slow authoritative aggregation remains pending beyond 45 seconds instead of aborting',{timeout:20000},async t=>{
+ const {app,state}=createFixtureServer();state.delay=1500;
+ const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
+ const browser=await chromium.launch({channel:process.env.PLAYWRIGHT_CHANNEL||'chrome',headless:true});
+ t.after(async()=>{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r))});
+ const page=await browser.newPage();await page.clock.install();
+ const failed=[];page.on('requestfailed',r=>{if(r.url().includes('/fresh?'))failed.push(r.failure()?.errorText)});
+ await page.goto('http://127.0.0.1:'+server.address().port);
+ await page.clock.fastForward(46000);
+ await page.waitForTimeout(100);
+ assert.deepEqual(failed,[],'a slow real aggregation must not be aborted after 45 seconds');
+ await page.waitForSelector('.row');
+});
 test('command center: real renderer, responsive settings, defaults and remote controls',{timeout:120000},async t=>{
  const {app,state}=createFixtureServer();const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
  const browser=await chromium.launch({channel:process.env.PLAYWRIGHT_CHANNEL||'chrome',headless:true});
@@ -15,7 +28,8 @@ test('command center: real renderer, responsive settings, defaults and remote co
  assert.equal(await page.locator('.board').nth(1).locator('.points').first().textContent(),'5,270,072');
  assert.equal(await page.locator('.logo img').evaluate(e=>e.naturalWidth),196);
  const brandSize=await page.evaluate(()=>({mark:document.querySelector('.logo').getBoundingClientRect().width,name:parseFloat(getComputedStyle(document.querySelector('.brand-name')).fontSize)}));
- assert.ok(brandSize.mark>=160&&brandSize.name>=68,'header identity should have the enlarged TV-readable size');
+ assert.ok(brandSize.mark>=180&&brandSize.name>=75,'header identity should have the enlarged TV-readable size');
+ assert.equal(await page.locator('.board').first().locator('.row .avatar img').count(),10,'production relative avatar paths must render as images');
  await page.waitForFunction(()=>document.querySelector('.row .avatar img')?.naturalWidth>0);
  fs.mkdirSync('.superpowers',{recursive:true});
  await page.screenshot({path:'.superpowers/command-center-1920.png'});
