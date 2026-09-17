@@ -182,4 +182,15 @@ function createSessionBucketStore({ read, clock = Date.now, maxAge = 900000, max
     } };
 }
 
-module.exports = { CACHE_VERSION, createWindowContext, compactGifts, buildGiftBucketPipeline, decodeGiftBuckets, createLeaderboardCache, createSessionBucketStore };
+function observeStreamCompletion(stream, isActive, onGap) {
+    let handled = false;
+    function completed() {
+        if (handled || !isActive()) return;
+        handled = true;
+        onGap();
+    }
+    stream.on('close', completed);
+    stream.on('end', completed);
+}
+
+module.exports = { CACHE_VERSION, createWindowContext, compactGifts, buildGiftBucketPipeline, decodeGiftBuckets, createLeaderboardCache, createSessionBucketStore, observeStreamCompletion };

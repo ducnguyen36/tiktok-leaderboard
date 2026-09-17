@@ -224,3 +224,17 @@ test('a later context sharing a raced bucket read cannot call that snapshot fres
     assert.equal((await first).meta.stale, true);
     assert.equal((await second).meta.stale, true);
 });
+test('unexpected stream close invalidates once while intentional replaced-stream close is ignored', () => {
+    assert.equal(typeof perf.observeStreamCompletion, 'function');
+    const { EventEmitter } = require('node:events');
+    const stream = new EventEmitter(), replaced = new EventEmitter();
+    let active = stream, gaps = 0;
+    perf.observeStreamCompletion(stream, () => active === stream, () => { active = null; gaps++; });
+    stream.emit('end'); stream.emit('close');
+    assert.equal(gaps, 1);
+    active = replaced;
+    perf.observeStreamCompletion(replaced, () => active === replaced, () => { gaps++; });
+    active = new EventEmitter();
+    replaced.emit('close');
+    assert.equal(gaps, 1);
+});

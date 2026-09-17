@@ -15,7 +15,7 @@ const {
     previousCalendarMonth,
     validateRequestedHistoryMonth,
 } = require('./leaderboardHistory');
-const { createWindowContext, buildGiftBucketPipeline, decodeGiftBuckets, createLeaderboardCache, createSessionBucketStore } = require('./leaderboardPerformance');
+const { createWindowContext, buildGiftBucketPipeline, decodeGiftBuckets, createLeaderboardCache, createSessionBucketStore, observeStreamCompletion } = require('./leaderboardPerformance');
 
 // --- Global crash guards: prevent container from dying on unhandled errors ---
 process.on('uncaughtException', (err) => {
@@ -992,6 +992,10 @@ function startChangeStreams() {
     try {
         // Watch gifts collection
         activeGiftsStream = db.collection('gifts').watch([], { fullDocument: 'updateLookup' });
+        const giftsStream = activeGiftsStream;
+        observeStreamCompletion(giftsStream, () => activeGiftsStream === giftsStream, () => {
+            activeGiftsStream = null; invalidateLeaderboard(); debouncedBroadcast();
+        });
         activeGiftsStream.on('change', (change) => {
             console.log(`[ChangeStream] Gift ${change.operationType}`);
             giftBucketStore.change(change);
@@ -1008,6 +1012,10 @@ function startChangeStreams() {
 
         // Watch profiles collection
         activeProfilesStream = db.collection('profiles').watch([], { fullDocument: 'updateLookup' });
+        const profilesStream = activeProfilesStream;
+        observeStreamCompletion(profilesStream, () => activeProfilesStream === profilesStream, () => {
+            activeProfilesStream = null; invalidateLeaderboard(); debouncedBroadcast();
+        });
         activeProfilesStream.on('change', (change) => {
             console.log(`[ChangeStream] Profile ${change.operationType}`);
             invalidateLeaderboard();
@@ -1022,6 +1030,11 @@ function startChangeStreams() {
 
         function watchDependency(collection) {
             const stream = db.collection(collection).watch([], { fullDocument: 'updateLookup' });
+            observeStreamCompletion(stream, () => (collection === 'sessions' ? activeSessionsStream : activeLocationsStream) === stream, () => {
+                if (collection === 'sessions') activeSessionsStream = null;
+                else activeLocationsStream = null;
+                invalidateLeaderboard(); debouncedBroadcast();
+            });
             stream.on('change', () => { invalidateLeaderboard(); debouncedBroadcast(); });
             stream.on('error', error => {
                 console.error(`[ChangeStream] ${collection} stream error:`, error.message);
