@@ -14,6 +14,8 @@ test('command center: real renderer, responsive settings, defaults and remote co
  assert.equal(await page.locator('.board').nth(3).locator('.row').count(),10);assert.equal(await page.locator('.board').nth(4).locator('.row').count(),32);
  assert.equal(await page.locator('.board').nth(1).locator('.points').first().textContent(),'5,270,072');
  assert.equal(await page.locator('.logo img').evaluate(e=>e.naturalWidth),196);
+ const brandSize=await page.evaluate(()=>({mark:document.querySelector('.logo').getBoundingClientRect().width,name:parseFloat(getComputedStyle(document.querySelector('.brand-name')).fontSize)}));
+ assert.ok(brandSize.mark>=160&&brandSize.name>=68,'header identity should have the enlarged TV-readable size');
  await page.waitForFunction(()=>document.querySelector('.row .avatar img')?.naturalWidth>0);
  fs.mkdirSync('.superpowers',{recursive:true});
  await page.screenshot({path:'.superpowers/command-center-1920.png'});
@@ -21,6 +23,8 @@ test('command center: real renderer, responsive settings, defaults and remote co
   await page.setViewportSize({width,height});
   const geometry=await page.evaluate(()=>({page:[document.documentElement.scrollWidth,document.documentElement.scrollHeight],widths:[...document.querySelectorAll('.board')].filter(e=>!e.hidden).map(e=>e.getBoundingClientRect().width)}));
   assert.deepEqual(geometry.page,[width,height]);assert.ok(Math.max(...geometry.widths)-Math.min(...geometry.widths)<1);
+  const brandFits=await page.evaluate(()=>{const region=document.querySelector('.brand').getBoundingClientRect();return [...document.querySelectorAll('.brand .logo,.brand-name,.brand-sub')].every(e=>{const r=e.getBoundingClientRect();return r.left>=region.left-1&&r.right<=region.right+1&&r.top>=region.top-1&&r.bottom<=region.bottom+1})});
+  assert.ok(brandFits,'enlarged identity must stay inside the left header at '+width+'x'+height);
   await page.keyboard.press('7');
   for(let i=0;i<6;i++){
    await page.locator('[data-page="'+i+'"]').click();
