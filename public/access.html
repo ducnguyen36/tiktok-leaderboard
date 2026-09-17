@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+ <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+ <meta name="theme-color" content="#171614"><title>Helios Talent · Private Access</title>
+ <link rel="stylesheet" href="/auth/access.css"><script defer src="/auth/access.js"></script>
+</head>
+<body>
+ <main class="access-shell">
+  <header class="access-header"><div><span class="eyebrow">HELIOS TALENT</span><h1 data-text="title">Private leaderboard</h1></div><label class="language-label"><span data-text="language">Language</span><select id="access-language"><option value="en">English</option><option value="vi">Tiếng Việt</option></select></label></header>
+  <p class="intro" data-text="intro">Only approved browsers can view company rankings.</p>
+  <p id="access-message" role="status" aria-live="polite"></p>
+  <section id="setup-notice" class="notice" hidden><h2 data-text="setupTitle">Google sign-in is not configured yet</h2><p data-text="setupBody">An administrator needs to configure Google OAuth on the server. Rankings remain locked until setup is complete.</p></section>
+  <section id="viewer-panel" class="card" hidden><h2 data-text="approvedTitle">This browser has access</h2><p data-text="approvedBody">You can open the leaderboard on this browser.</p><a class="button primary" href="/" data-text="open">Open leaderboard</a></section>
+  <div class="access-grid">
+   <section id="pair-panel" class="card"><span class="step" data-text="tvLabel">TV / VIEWER</span><h2 data-text="pairTitle">Request access for this browser</h2><p data-text="pairBody">Generate a code and ask an administrator to approve it from their phone or computer.</p><button id="request-pair" class="primary" disabled data-text="generate">Generate pairing code</button><div id="pair-details" hidden><output id="pair-code" aria-live="polite"></output><p id="pair-expiry"></p><p data-text="pairWait">Keep this page open. The leaderboard opens automatically after approval.</p></div></section>
+   <section class="card" id="login-panel"><span class="step" data-text="adminLabel">ADMINISTRATOR</span><h2 data-text="loginTitle">Approve and manage devices</h2><p data-text="loginBody">Sign in with an authorized Google account. Google sign-in is not needed on the TV.</p><a id="google-login" class="button" href="/auth/google" aria-disabled="true" data-text="google">Sign in with Google</a><p class="fine" data-text="accountHint">Only accounts authorized by Helios Talent can manage access.</p></section>
+  </div>
+  <section id="admin-panel" hidden>
+   <div class="admin-heading"><div><span class="step" data-text="adminLabel">ADMINISTRATOR</span><h2 data-text="manageTitle">Device access</h2><p id="admin-email"></p></div><a class="button" href="/" data-text="open">Open leaderboard</a></div>
+   <section class="card"><h3 data-text="approveTitle">Approve a new browser</h3><p data-text="approveHint">Check the code on the TV or device you intend to authorize before approving.</p><form id="approval-form"><label><span data-text="codeLabel">Pairing code</span><input id="approval-code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="12" required placeholder="ABCD-EFGH"></label><label><span data-text="nameLabel">Device name</span><input id="device-name" autocomplete="off" maxlength="80" required placeholder="TV HCM"></label><button id="approve-device" class="primary" type="submit" data-text="approve">Approve browser</button></form></section>
+   <section class="card"><div class="devices-heading"><h3 data-text="devicesTitle">Approved browsers</h3><button id="reload-devices" type="button" data-text="refresh">Refresh list</button></div><div id="device-list"></div></section>
+  </section>
+  <footer><p data-text="privacy">Approval applies to this browser, not the entire physical device. Do not share an approved browser with unauthorized people.</p><button id="access-logout" hidden data-text="logout">Sign out / remove this browser's access</button></footer>
+ </main>
+</body>
+</html>
