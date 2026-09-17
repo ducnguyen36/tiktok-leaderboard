@@ -19,28 +19,30 @@
 
 Files: server.js, new performance modules, backend tests, Dockerfile as needed. Agent owns these; root owns browser files/docs.
 
-Contract: `GET /api/leaderboard/current?resetHour=0&freezeUntil=09:00` returns `{status:'ok',data,meta:{source,stale,computedAt,contextKey}}`, warm cache immediately; cold awaits authoritative result. `GET /fresh` remains forced authoritative and adds same meta if possible. Context key serialization is opaque to the client. Do not persist per-column filter choices. Existing SSE can carry invalidation; browser revalidates through `/current`, never creates `/fresh` loops.
+Contract: `GET /api/leaderboard/current?resetHour=0&freezeUntil=09:00` returns `{status:'ok',data,meta:{source,stale,computedAt,contextKey}}`, warm cache immediately; cold awaits authoritative result. `source` is exactly `computed`, `cache` or `snapshot`; `computedAt` is computation-start ISO time. `GET /fresh` remains forced authoritative with the same metadata. A successful read raced by newer source events may truthfully have `stale:true`; do not require a quiet database to publish. Context key serialization is opaque to the client. Do not persist per-column filter choices. Existing SSE can carry invalidation; browser revalidates through `/current`, never creates `/fresh` loops.
 
-- [ ] Write failing parity tests exercising the real old and new aggregators: multi-recipient unequal cost, duplicate recipients, group pool floor after accumulation, manual values, group/session fallback, renamed UID, multi-profile, zero rows, daily/month boundary.
-- [ ] Implement server-side compact preaggregation using only necessary fields; preserve exact floor timing. Mongo can emit weighted recipient/cost/session/time-window buckets and JS resolve profile attribution, if this avoids full gift transfer and parity holds. Export/reference old calculation for differential tests rather than copy inconsistent rules.
-- [ ] Test/implement context-correct warm cache, dedup, explicit forced errors, stale metadata and window rollover; durable cache must include identity/version/computation time.
-- [ ] Test/implement incremental refresh for safe changed subsets; inserts/updates with known sessions should not scan the full month. Unsafe deletes/session reassignment/stream gaps must invalidate and recover correctly, not accumulate drift. Bound memory/cache eviction and in-flight races.
-- [ ] Integrate live + history reads and minimal projection, preserve compatibility, Docker packaging. Run focused tests/syntax and commit owned files.
-- [ ] Report exported benchmark/parity interfaces for root to run read-only actual Mongo comparisons, and exact incremental fallback conditions.
+History compatibility amendment: removing inherited top-50 truncation requires aggregationVersion2 archives. Preserve immutable version1 documents, create version2 identities, and reject version1 device cache before refetching; point attribution math remains unchanged.
+
+- [x] Write failing parity tests exercising the real old and new aggregators: multi-recipient unequal cost, duplicate recipients, group pool floor after accumulation, manual values, group/session fallback, renamed UID, multi-profile, zero rows, daily/month boundary.
+- [x] Implement server-side compact preaggregation using only necessary fields; preserve exact floor timing. Mongo can emit weighted recipient/cost/session/time-window buckets and JS resolve profile attribution, if this avoids full gift transfer and parity holds. Export/reference old calculation for differential tests rather than copy inconsistent rules.
+- [x] Test/implement context-correct warm cache, dedup, explicit forced errors, stale metadata and window rollover; durable cache must include identity/version/computation time.
+- [x] Test/implement incremental refresh for safe changed subsets; inserts/updates with known sessions should not scan the full month. Unsafe deletes/session reassignment/stream gaps must invalidate and recover correctly, not accumulate drift. Bound memory/cache eviction and in-flight races.
+- [x] Integrate live + history reads and minimal projection, preserve compatibility, Docker packaging. Run focused tests/syntax and commit owned files.
+- [x] Report exported benchmark/parity interfaces for root to run read-only actual Mongo comparisons, and exact incremental fallback conditions.
 
 ## Task 2: Cache-first frontend
 
 Files: public/app.js, public/keep-awake.js if necessary, test/commandCenterBrowser.test.js, test/support/command-center-server.js.
 
-- [ ] Write failing tests proving initial/automatic/SSE loads use `/current`, manual column/global refresh `/fresh`, pending automatic calls cannot cancel/override manual results, stale/computation timestamp presented honestly, old data retained on failure.
-- [ ] Split in-flight identity by context and forced flag; ignore automatic refresh while manual is pending; maintain existing per-column response guards.
-- [ ] Use server computedAt for data timestamp rather than fetch time; mark cached/stale explicitly. Preserve rows while background revalidation runs.
-- [ ] Keep TV periodic refresh from interrupting a pending data fetch; use tested behavior, not global private test hooks.
-- [ ] Run full browser/core suite, retain responsive checks and commit owned files.
+- [x] Write failing tests proving initial/automatic/SSE loads use `/current`, manual column/global refresh `/fresh`, pending automatic calls cannot cancel/override manual results, stale/computation timestamp presented honestly, old data retained on failure.
+- [x] Split in-flight identity by context and forced flag; ignore automatic refresh while manual is pending; maintain existing per-column response guards.
+- [x] Use server computedAt for data timestamp rather than fetch time; mark cached/stale explicitly. Preserve rows while background revalidation runs.
+- [x] Keep TV periodic refresh from interrupting a pending data fetch; use tested behavior, not global private test hooks.
+- [x] Run full browser/core suite, retain responsive checks and commit owned files.
 
 ## Task 3: Integrated verification and review
 
-- [ ] Compare real optimized output against legacy calculations on read-only fixtures or actual bounded database dataset; record transfer sizes, cold/warm durations and exact point equality.
-- [ ] Run all tests, syntax checks and independent review; address confirmed findings with scoped regression tests.
-- [ ] Restart only the local live server at 57022 with TLS validation enabled, verify real first paint/history/manual refresh and warm reload, leave production deployment unchanged.
-- [ ] Record measured results and remaining caveats; no unsupported performance promises.
+- [x] Compare real optimized output against legacy calculations on read-only fixtures or actual bounded database dataset; record transfer sizes, cold/warm durations and exact point equality.
+- [x] Run all tests, syntax checks and independent review; address confirmed findings with scoped regression tests.
+- [x] Restart only the local live server at 57022 with TLS validation enabled, verify real first paint/history/manual refresh and warm reload, leave production deployment unchanged.
+- [x] Record measured results and remaining caveats; no unsupported performance promises.

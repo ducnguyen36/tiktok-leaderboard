@@ -14,7 +14,7 @@
     "start": "node server.js",
     "dev": "node server.js",
     "test": "node --test test/*.test.js",
-    "test:unit": "node --test test/monthlyWindows.test.js test/leaderboardCore.test.js test/leaderboardHistory.test.js",
+    "test:unit": "node --test test/monthlyWindows.test.js test/leaderboardCore.test.js test/leaderboardHistory.test.js test/leaderboardPerformance.test.js",
     "test:browser": "node --test test/commandCenterBrowser.test.js",
     "preview:test": "node test/support/command-center-server.js"
   },
