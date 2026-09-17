@@ -1,5 +1,5 @@
 'use strict';
-const C=window.HeliosCore;
+const C=window.HeliosCore,I=window.HeliosI18n;
 const stage=document.querySelector('.tv'),grid=document.querySelector('.boards-zone');
 const boards=[...document.querySelectorAll('.board')],sixth=boards[5];
 const dialog=document.getElementById('settings-dialog'),gear=document.getElementById('settings-open');
@@ -7,12 +7,13 @@ const message=document.querySelector('.toast');let toastTimer;
 function notify(text){message.textContent=text;clearTimeout(toastTimer);toastTimer=setTimeout(()=>message.textContent='',5000)}
 const storageKey='helios_leaderboard_v2';
 let saved=null,config=C.normalize({});
-function readStored(key){try{return JSON.parse(localStorage.getItem(key)||'null')}catch(e){notify('Saved settings could not be read. Using initial settings.');return null}}
+const t=(key,vars)=>I.t(config.language,key,vars);
+function readStored(key){try{return JSON.parse(localStorage.getItem(key)||'null')}catch(e){notify(t('toast.readSettings'));return null}}
 saved=readStored(storageKey+'_default');
 const stored=readStored(storageKey+'_current');
 config=stored?C.normalize(stored):saved?C.normalize(saved):C.migrate(readStored('leaderboard_config'));
 const defaults=C.clone(C.defaults);
-function persist(){try{localStorage.setItem(storageKey+'_current',JSON.stringify(config))}catch(e){notify('Storage unavailable. Changes apply for this session only.')}}
+function persist(){try{localStorage.setItem(storageKey+'_current',JSON.stringify(config))}catch(e){notify(t('toast.storageSession'))}}
 let rawData=null,historyPayload=null,allLocations=[],allGroups=[],dailyHistory=false,unfreezeUntil=0;
 let dataError=false;const manualPending=new Map(),manualEpoch=new Map();
 const columnData=Array(6).fill(null),columnVersion=Array(6).fill(0),rowSignatures=Array(6).fill('');
@@ -21,7 +22,11 @@ let scrollAnimations=[],tickerAnimation,tickerMessage='',lastContext='',historyM
 const configInputs=[...dialog.querySelectorAll('[data-config]')],scoreInputs=[...dialog.querySelectorAll('[data-score]')];
 const camera=document.querySelector('.camera-notice');
 camera.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h4l2-3h6l2 3h4v13H3z"/><circle cx="12" cy="13" r="4"/><path d="M2 2l20 20"/></svg>';
-camera.append(document.createTextNode('NO PHOTOS OR VIDEOS ALLOWED'));
+const cameraText=document.createTextNode('');camera.append(cameraText);
+function translateUI(){
+ cameraText.nodeValue=t('camera');
+ boards.forEach(board=>{const header=board.querySelector('.board-head'),button=header.querySelector('.column-refresh'),name=header.querySelector('b').textContent;header.setAttribute('aria-label',t('actions.showRefresh',{name}));if(button)button.setAttribute('aria-label',t('actions.refresh',{name}))});
+}
 function syncInputs(){document.getElementById('quick-lastmonth').setAttribute('aria-pressed',String(config.lastMonth));configInputs.forEach(e=>{const value=config[e.dataset.config];if(e.type==='checkbox')e.checked=Boolean(value);else if(e!==document.activeElement)e.value=value});scoreInputs.forEach(e=>e.checked=config.scores[+e.dataset.score])}
 function safeAvatar(value){if(typeof value!=='string')return '';if(value.startsWith('userdata/avatars/')||value.startsWith('avatars/'))value='/'+value;if(value.startsWith('/userdata/avatars/')||value.startsWith('/avatars/'))return value;try{const u=new URL(value);return ['https:','http:'].includes(u.protocol)?u.href:''}catch{return ''}}
 function makeRow(entry,index,column){
@@ -35,17 +40,17 @@ function makeRow(entry,index,column){
  identity.append(name,points);
  const showComparison=(column===0&&config.yesterdayGroups)||(column===1&&config.yesterdayIdols);
  if(!dailyHistory&&showComparison&&entry.yesterday&&Number.isFinite(Number(entry.yesterday.value))){
-  const hint=document.createElement('div');hint.className='yesterday';hint.textContent='Yesterday: '+C.formatPoints(entry.yesterday.value);identity.append(hint);
+  const hint=document.createElement('div');hint.className='yesterday';hint.textContent=t('row.yesterday',{points:C.formatPoints(entry.yesterday.value)});identity.append(hint);
  }
  row.append(rank,avatar,identity);return row;
 }
 function renderRows(index){
  const source=columnData[index],rows=C.selectRows(source,config,index,historyPayload?.data,dailyHistory);
  const ready=index===5?Boolean(historyPayload):Boolean(source);
- const signature=JSON.stringify([rows,ready,dailyHistory,config.yesterdayGroups,config.yesterdayIdols]);if(signature===rowSignatures[index])return false;
+ const signature=JSON.stringify([rows,ready,dailyHistory,config.yesterdayGroups,config.yesterdayIdols,config.language]);if(signature===rowSignatures[index])return false;
  rowSignatures[index]=signature;const list=boards[index].querySelector('.list');const wrapper=index>=4?document.createElement('div'):list;
  list.replaceChildren();if(index>=4){wrapper.className='all-track';list.append(wrapper)}
- if(!rows.length){const empty=document.createElement('div');empty.className='empty-state';empty.textContent=ready?'No entries for this selection':'Waiting for data…';list.replaceChildren(empty)}
+ if(!rows.length){const empty=document.createElement('div');empty.className='empty-state';empty.textContent=t(ready?'row.empty':'row.waiting');list.replaceChildren(empty)}
  else rows.forEach((entry,i)=>wrapper.append(makeRow(entry,i,index)));
  return true;
 }
@@ -63,7 +68,7 @@ function setupScroll(){
 const ticker=document.querySelector('.ticker-line');
 function buildTicker(){
  const leaders=C.filtered(rawData?.group?.daily,config,allLocations).filter(e=>e.value>=100000).slice(0,5);
- return leaders.length?leaders.map(e=>'CONGRATULATIONS TO '+e.name+' ON REACHING '+C.formatPoints(Math.floor(e.value/100000)*100000)+' POINTS').join('   ·   '):'HELIOS TALENT · KEEP SHINING · LIVE PERFORMANCE';
+ return leaders.length?leaders.map(e=>t('ticker.congratulations',{name:e.name,points:C.formatPoints(Math.floor(e.value/100000)*100000)})).join('   ·   '):t('ticker.fallback');
 }
 function setupTicker(){
  if(tickerAnimation)tickerAnimation.cancel();ticker.textContent=tickerMessage;
@@ -76,24 +81,26 @@ function setupTicker(){
 function renderSummary(){
  document.querySelector('.kpi b').textContent=rawData?C.formatPoints(C.total(rawData,config,dailyHistory)):'—';
  const totalYesterday=dailyHistory||rawData?.frozen;
- document.querySelector('.kpi span').textContent=totalYesterday?"Yesterday's Total Points":"Today's Total Points";
- document.querySelector('.kpi').title='Sum of group points for selected locations/groups; idols are not added again.';
+ document.querySelector('.kpi span').textContent=t(totalYesterday?'kpi.yesterday':'kpi.today');
+ document.querySelector('.kpi').title=t('kpi.title');
  const groupsYesterday=dailyHistory||columnData[0]?.frozen,idolsYesterday=dailyHistory||columnData[1]?.frozen;
- boards[0].querySelector('.board-head b').textContent=groupsYesterday?'Yesterday Top Groups':'Daily Top Groups';boards[1].querySelector('.board-head b').textContent=idolsYesterday?'Yesterday Top Idols':'Daily Top Idols';
- const p=historyPayload?.period,historyHead=boards[5].querySelector('.board-head');historyHead.querySelector('b').title=p?'Last Month · '+p.month+(p.complete?'':' · Provisional until 07:00'):'Last Month Ranking';
+ boards[0].querySelector('.board-head b').textContent=t(groupsYesterday?'board.yesterdayGroups':'board.dailyGroups');boards[1].querySelector('.board-head b').textContent=t(idolsYesterday?'board.yesterdayIdols':'board.dailyIdols');
+ const p=historyPayload?.period,historyHead=boards[5].querySelector('.board-head');historyHead.querySelector('b').title=p?t('history.lastMonth')+' · '+p.month+(p.complete?'':' · '+t('history.until')):t('board.lastMonth');
  let period=historyHead.querySelector('.history-period');if(!period){period=document.createElement('span');period.className='history-period';historyHead.append(period)}
- period.textContent=p?p.month+' · '+(p.complete?'CLOSED':'PROVISIONAL'):'';
- document.getElementById('history-note').textContent=p?'Last month: '+p.month+' · '+(p.complete?'Closed snapshot':'Provisional until 07:00 on day 1')+' · '+historyPayload.source:'Last month: not loaded yet.';
+ period.textContent=p?p.month+' · '+t(p.complete?'history.closed':'history.provisional'):'';
+ const sourceKey=historyPayload?.source==='device cache'?'deviceCache':historyPayload?.source;
+ document.getElementById('history-note').textContent=p?t('history.loaded',{month:p.month,state:t(p.complete?'history.closedSnapshot':'history.provisionalDayOne'),source:t('source.'+sourceKey)}):t('history.notLoaded');
  const dailySnapshots=[columnData[0],columnData[1]].filter(Boolean),frozenDaily=dailySnapshots.filter(data=>data.frozen).length;
- const scoreStatus=dailyHistory?'YESTERDAY':frozenDaily&&frozenDaily===dailySnapshots.length&&rawData?.frozen?'FROZEN · YESTERDAY':frozenDaily||rawData?.frozen?'MIXED · RETAINED FROZEN DAILY':'LIVE SCORES';
- document.getElementById('data-status').textContent=rawData?' · '+scoreStatus+(rawData.monthlyGrace?' · MONTHLY GRACE':''):' · Waiting for data';
+ const scoreStatus=t(dailyHistory?'status.yesterday':frozenDaily&&frozenDaily===dailySnapshots.length&&rawData?.frozen?'status.frozenYesterday':frozenDaily||rawData?.frozen?'status.mixedFrozen':'status.liveScores');
+ document.getElementById('data-status').textContent=rawData?' · '+scoreStatus+(rawData.monthlyGrace?' · '+t('status.monthlyGrace'):''):' · '+t('status.waiting');
  const next=buildTicker();if(next!==tickerMessage){tickerMessage=next;setupTicker()}
+ translateUI();
 }
 function apply(){
- config=C.normalize(config);boards.forEach((b,i)=>b.classList.toggle('hide-points',i<5&&!config.scores[i]));
+ config=C.normalize(config);I.applyDocument(config.language,document);boards.forEach((b,i)=>b.classList.toggle('hide-points',i<5&&!config.scores[i]));
  const changedLayout=sixth.hidden===config.lastMonth;sixth.hidden=!config.lastMonth;stage.classList.toggle('six',config.lastMonth);grid.style.setProperty('--columns',config.lastMonth?6:5);
  document.querySelector('.kpi').classList.toggle('hide-total',!config.total);
- let changed=false;boards.forEach((b,i)=>{changed=renderRows(i)||changed});const motion=config.speed+'|'+config.pause;if(changed||changedLayout||motion!==lastMotion)setupScroll();lastMotion=motion;renderSummary();if(lastTickerSpeed!==config.tickerSpeed)setupTicker();lastTickerSpeed=config.tickerSpeed;syncInputs();persist();
+ let changed=false;boards.forEach((b,i)=>{changed=renderRows(i)||changed});const motion=config.speed+'|'+config.pause;if(changed||changedLayout||motion!==lastMotion)setupScroll();lastMotion=motion;renderSummary();renderConnection();if(lastTickerSpeed!==config.tickerSpeed)setupTicker();lastTickerSpeed=config.tickerSpeed;syncInputs();persist();
  const context=requestContext();if(context!==lastContext){lastContext=context;loadCurrent([0,1,2,3,4])}
  if(config.lastMonth)loadHistory(false);
 }
@@ -109,16 +116,16 @@ function visibleMetadata(){
  return{entries,mixed:new Set(entries.map(fingerprint)).size>1,cached:entries.some(meta=>meta?.source==='cache'||meta?.source==='snapshot'),stale:entries.some(meta=>meta?.stale===true),allComputed:Boolean(entries.length)&&entries.every(meta=>meta?.source==='computed'),unknown:entries.some(meta=>!knownSources.has(meta?.source)),oldest:times.length?new Date(Math.min(...times)):null};
 }
 function renderUpdated(meta=visibleMetadata()){
- const label=meta.oldest?'Updated: '+meta.oldest.toLocaleString('en-GB',{timeZone:'Asia/Ho_Chi_Minh'}):'Updated: unknown';
- document.querySelector('.footer>span:last-child').textContent=label+(meta.mixed?' · MIXED':'');
+ const locale=config.language==='vi'?'vi-VN':'en-GB',value=meta.oldest?meta.oldest.toLocaleString(locale,{timeZone:'Asia/Ho_Chi_Minh'}):t('updated.unknown');
+ document.querySelector('.footer>span:last-child').textContent=t('updated.label',{value})+(meta.mixed?' · '+t('status.mixed'):'');
 }
 function renderConnection(){
  const meta=visibleMetadata();renderUpdated(meta);
- if(dataError){connection(rawData?'OFFLINE · RETAINED':'OFFLINE · NO DATA');return}
- if(!rawData){connection('CONNECTING');return}
- const parts=[];if(meta.mixed)parts.push('MIXED');if(meta.cached)parts.push('CACHED');if(meta.stale)parts.push('STALE','UPDATING');
- if(!parts.length)parts.push(meta.allComputed&&!meta.unknown&&streamConnected?'● LIVE':'● CONNECTED');
- if(!streamConnected)parts.push('RECONNECTING');connection(parts.join(' · '));
+ if(dataError){connection(t(rawData?'status.offlineRetained':'status.offlineNoData'));return}
+ if(!rawData){connection(t('status.connecting'));return}
+ const parts=[];if(meta.mixed)parts.push(t('status.mixed'));if(meta.cached)parts.push(t('status.cached'));if(meta.stale)parts.push(t('status.stale'),t('status.updating'));
+ if(!parts.length)parts.push('● '+t(meta.allComputed&&!meta.unknown&&streamConnected?'status.live':'status.connected'));
+ if(!streamConnected)parts.push(t('status.reconnecting'));connection(parts.join(' · '));
 }
 async function loadCurrent(indices=[0,1,2,3,4],manual=false){
  const context=requestContext();if(!manual&&manualPending.get(context))return;
@@ -129,8 +136,8 @@ async function loadCurrent(indices=[0,1,2,3,4],manual=false){
   const accepted=indices.filter(i=>columnVersion[i]===request);if(!accepted.length)return;
   rawData=result.data;dataError=false;allLocations=(rawData.locations||[]).map(l=>({...l,id:String(l.id)}));allGroups=(rawData.groups||[]).map(g=>({...g,id:String(g.id),locationId:String(g.locationId||'')}));
   accepted.forEach(i=>{columnData[i]=rawData;columnMeta[i]=result.meta||null});let changed=false;accepted.forEach(i=>{changed=renderRows(i)||changed});if(changed)setupScroll();renderSummary();renderLocations();syncInputs();
-  renderConnection();if(manual)notify(result.meta?.stale===true?'Snapshot refreshed · newer updates pending':'Points refreshed');
- }catch(e){if(context===requestContext()&&(manual||epoch===(manualEpoch.get(context)||0))){dataError=true;renderConnection();if(manual||!rawData)notify('Unable to refresh. Previous data is kept.')}}
+  renderConnection();if(manual)notify(t(result.meta?.stale===true?'toast.pointsPending':'toast.pointsRefreshed'));
+ }catch(e){if(context===requestContext()&&(manual||epoch===(manualEpoch.get(context)||0))){dataError=true;renderConnection();if(manual||!rawData)notify(t('toast.refreshFailed'))}}
  finally{if(manual){const remaining=(manualPending.get(context)||1)-1;if(remaining)manualPending.set(context,remaining);else manualPending.delete(context)}indices.forEach(i=>{if(columnVersion[i]===request){boards[i].classList.remove('loading');boards[i].querySelector('.column-refresh')?.removeAttribute('disabled')}})}
 }
 let historyInFlight=null;
@@ -142,9 +149,9 @@ async function loadHistory(force=false){
  const version=++historyRequest;boards[5].classList.add('loading');
  const promise=(async()=>{try{const payload=await fetchJSON('/api/leaderboard/history?month='+month);if(version!==historyRequest||month!==C.historyMonth())return;
    if(payload.period?.month!==month||!Array.isArray(payload.data?.individual)||!Array.isArray(payload.data?.group))throw Error('Invalid history');
-   historyPayload=payload;columnData[5]=rawData;if(C.historyValid(payload,month)){try{localStorage.setItem(storageKey+'_history_'+month,JSON.stringify(payload))}catch{notify('Month loaded; device cache could not be saved.')}}
-   renderRows(5);setupScroll();renderSummary();renderTalents();if(force)notify('Last month snapshot refreshed');
-  }catch(e){if(version===historyRequest)notify('Unable to load last month. Existing snapshot is kept.')}
+   historyPayload=payload;columnData[5]=rawData;if(C.historyValid(payload,month)){try{localStorage.setItem(storageKey+'_history_'+month,JSON.stringify(payload))}catch{notify(t('toast.historyCacheFailed'))}}
+   renderRows(5);setupScroll();renderSummary();renderTalents();if(force)notify(t('toast.historyRefreshed'));
+  }catch(e){if(version===historyRequest)notify(t('toast.historyFailed'))}
   finally{if(version===historyRequest)boards[5].classList.remove('loading');if(historyInFlight?.version===version)historyInFlight=null}
  })();historyInFlight={month,version,promise};return promise;
 }
@@ -152,7 +159,7 @@ function refreshColumn(index){return index===5?loadHistory(true):loadCurrent([in
 function refreshAll(){return Promise.all([loadCurrent([0,1,2,3,4],true),...(config.lastMonth?[loadHistory(true)]:[])])}
 let page=0,selectedLocation='';
 function renderLocations(){
- const select=document.getElementById('location-choice');const locations=[{id:'',name:'All locations'},...allLocations];
+ const select=document.getElementById('location-choice');const locations=[{id:'',name:t('location.all')},...allLocations];
  if(!locations.some(l=>l.id===selectedLocation))selectedLocation='';
  const signature=JSON.stringify(locations);if(select.dataset.signature!==signature){select.replaceChildren();locations.forEach(l=>{const option=document.createElement('option');option.value=l.id;option.textContent=l.name;select.append(option)});select.dataset.signature=signature}
  select.value=selectedLocation;renderGroups();renderTalents();
@@ -160,11 +167,11 @@ function renderLocations(){
 function renderGroups(){
  const groupList=allGroups.filter(g=>!selectedLocation||g.locationId===selectedLocation),size=innerWidth<700?4:6,total=Math.max(1,Math.ceil(groupList.length/size));page=Math.max(0,Math.min(page,total-1));
  const holder=document.getElementById('location-toggles');let locInput=holder.querySelector('input');if(!locInput){const label=document.createElement('label'),span=document.createElement('span');locInput=document.createElement('input');locInput.type='checkbox';locInput.id='location-visible';label.append(span,locInput);holder.append(label);locInput.onchange=()=>{for(const l of allLocations.filter(l=>!selectedLocation||l.id===selectedLocation))config.locations[l.id]=locInput.checked;apply();renderGroups()}}
- holder.querySelector('span').textContent=selectedLocation?'Show this location':'Show all locations';
+ holder.querySelector('span').textContent=t(selectedLocation?'visibility.showLocation':'visibility.showAllLocations');
  const selected=allLocations.filter(l=>!selectedLocation||l.id===selectedLocation),enabled=selected.filter(l=>config.locations[l.id]===true).length;
  locInput.checked=selected.length>0&&enabled===selected.length;locInput.indeterminate=enabled>0&&enabled<selected.length;locInput.disabled=!selected.length;
  const branches=document.getElementById('branch-items');branches.hidden=Boolean(selectedLocation);
- const branchSignature=JSON.stringify(allLocations);if(branches.dataset.signature!==branchSignature){branches.replaceChildren();for(const l of allLocations){const label=document.createElement('label'),span=document.createElement('span'),input=document.createElement('input');span.textContent=l.name;input.type='checkbox';input.dataset.location=l.id;input.setAttribute('aria-label','Show '+l.name);label.append(span,input);branches.append(label);input.onchange=()=>{config.locations[l.id]=input.checked;apply();renderGroups()}}branches.dataset.signature=branchSignature}
+ const branchSignature=JSON.stringify([config.language,allLocations]);if(branches.dataset.signature!==branchSignature){branches.replaceChildren();for(const l of allLocations){const label=document.createElement('label'),span=document.createElement('span'),input=document.createElement('input');span.textContent=l.name;input.type='checkbox';input.dataset.location=l.id;input.setAttribute('aria-label',t('visibility.showName',{name:l.name}));label.append(span,input);branches.append(label);input.onchange=()=>{config.locations[l.id]=input.checked;apply();renderGroups()}}branches.dataset.signature=branchSignature}
  branches.querySelectorAll('input').forEach(input=>input.checked=config.locations[input.dataset.location]===true);
  const container=document.getElementById('group-items');const signature=JSON.stringify([selectedLocation,page,size,groupList.map(g=>[g.id,g.name,config.groups[g.id]!==false])]);
  if(container.dataset.signature!==signature){container.replaceChildren();groupList.slice(page*size,page*size+size).forEach(g=>{const label=document.createElement('label'),span=document.createElement('span'),input=document.createElement('input');span.textContent=g.name;span.title=g.name;input.type='checkbox';input.checked=config.groups[g.id]!==false;input.setAttribute('aria-label',g.name);label.append(span,input);container.append(label);input.onchange=()=>{config.groups[g.id]=input.checked;apply()}});container.dataset.signature=signature}
@@ -181,7 +188,7 @@ function renderTalents(){
  const container=document.getElementById('talent-items'),shown=list.slice(talentPage*size,(talentPage+1)*size),signature=JSON.stringify(shown);
  if(container.dataset.signature!==signature){
   container.replaceChildren();for(const name of shown){const label=document.createElement('label'),span=document.createElement('span'),input=document.createElement('input');span.textContent=name;span.title=name;input.type='checkbox';input.dataset.talent=name;input.setAttribute('aria-label',name);label.append(span,input);container.append(label);
-   input.onchange=()=>{config.talents[name]=input.checked;apply();document.getElementById('save-status').textContent='Changes saved on this device'};
+   input.onchange=()=>{config.talents[name]=input.checked;apply();document.getElementById('save-status').textContent=t('settings.changesSaved')};
   }container.dataset.signature=signature;
  }
  for(const input of container.querySelectorAll('input'))input.checked=config.talents[input.dataset.talent]!==false;
@@ -195,20 +202,20 @@ function closeSettings(){finishEdit(false);dialog.hidden=true;scrollAnimations.f
 document.getElementById('quick-lastmonth').onclick=()=>{config.lastMonth=!config.lastMonth;apply();revealGear()};
 document.getElementById('quick-refresh').onclick=()=>{refreshAll();revealGear()};
 gear.onclick=showSettings;['close-settings','done-settings'].forEach(id=>document.getElementById(id).onclick=closeSettings);
-function saveDefault(){try{localStorage.setItem(storageKey+'_default',JSON.stringify(config));saved=JSON.parse(JSON.stringify(config));document.getElementById('save-status').textContent='Default saved on this device';notify('Default saved')}catch(e){notify('Storage unavailable. Settings could not be saved.')}}
+function saveDefault(){try{localStorage.setItem(storageKey+'_default',JSON.stringify(config));saved=JSON.parse(JSON.stringify(config));document.getElementById('save-status').textContent=t('settings.defaultSavedDevice');notify(t('toast.defaultSaved'))}catch(e){notify(t('toast.storageSettings'))}}
 ['save-default','save-default-page'].forEach(id=>document.getElementById(id).onclick=saveDefault);
-document.getElementById('restore-default').onclick=()=>{config=C.normalize(saved||defaults);apply();renderLocations();notify('Saved default restored')};
-document.getElementById('factory').onclick=()=>{config=C.normalize(defaults);apply();renderLocations();notify('Initial settings applied. Save as Default to keep them.')};
+document.getElementById('restore-default').onclick=()=>{config=C.normalize(saved||defaults);apply();renderLocations();notify(t('toast.defaultRestored'))};
+document.getElementById('factory').onclick=()=>{config=C.normalize(defaults);apply();renderLocations();notify(t('toast.factory'))};
 configInputs.forEach(e=>e.onchange=()=>{if(editing===e)return;let value=e.type==='checkbox'?e.checked:e.type==='number'?Number(e.value):e.value;
  if(e.type==='number'){value=Math.max(Number(e.min),Math.min(Number(e.max),value));if(!Number.isFinite(value))return}
- config[e.dataset.config]=value;apply();if(['speed','pause'].includes(e.dataset.config))setupScroll();if(e.dataset.config==='tickerSpeed')setupTicker();document.getElementById('save-status').textContent='Changes saved on this device'});
-scoreInputs.forEach(e=>e.onchange=()=>{config.scores[+e.dataset.score]=e.checked;apply();document.getElementById('save-status').textContent='Changes saved on this device'});
+ config[e.dataset.config]=value;apply();if(['speed','pause'].includes(e.dataset.config))setupScroll();if(e.dataset.config==='tickerSpeed')setupTicker();document.getElementById('save-status').textContent=t('settings.changesSaved')});
+scoreInputs.forEach(e=>e.onchange=()=>{config.scores[+e.dataset.score]=e.checked;apply();document.getElementById('save-status').textContent=t('settings.changesSaved')});
 function openPage(index){document.querySelectorAll('[data-page]').forEach(e=>e.classList.toggle('active',+e.dataset.page===index));document.querySelectorAll('[data-pane]').forEach(e=>e.classList.toggle('active',+e.dataset.pane===index))}
 document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>openPage(+b.dataset.page));
 
 boards.forEach((b,i)=>{
- const header=b.querySelector('.board-head');header.tabIndex=0;header.setAttribute('role','button');header.setAttribute('aria-label','Show refresh for '+header.textContent);
- const btn=document.createElement('button');btn.className='column-refresh';btn.textContent='↻';btn.setAttribute('aria-label','Refresh '+header.querySelector('b').textContent);
+ const header=b.querySelector('.board-head');header.tabIndex=0;header.setAttribute('role','button');header.setAttribute('aria-label',t('actions.showRefresh',{name:header.textContent}));
+ const btn=document.createElement('button');btn.className='column-refresh';btn.textContent='↻';btn.setAttribute('aria-label',t('actions.refresh',{name:header.querySelector('b').textContent}));
  btn.tabIndex=-1;btn.setAttribute('aria-hidden','true');
  header.append(btn);
  let idleTimer;
@@ -235,7 +242,7 @@ document.addEventListener('contextmenu',e=>e.preventDefault());
 let editing=null,editOriginal=null;
 function beginEdit(el){
  editing=el;editOriginal=el.value;el.classList.add('remote-editing');el.focus();
- document.getElementById('save-status').textContent='Editing · OK to apply · Back to cancel';
+ document.getElementById('save-status').textContent=t('settings.editing');
 }
 function finishEdit(commit){
  if(!editing)return;
@@ -243,7 +250,7 @@ function finishEdit(commit){
  if(!commit)el.value=editOriginal;
  el.classList.remove('remote-editing');
  if(commit||el.id==='location-choice'||el.id==='visibility-kind')el.dispatchEvent(new Event('change',{bubbles:true}));
- document.getElementById('save-status').textContent=commit?'Changes applied':'Edit cancelled';
+ document.getElementById('save-status').textContent=t(commit?'settings.applied':'settings.cancelled');
  el.focus();
 }
 function navButtons(){return [...dialog.querySelectorAll('.settings-nav button')]}
@@ -331,8 +338,8 @@ window.addEventListener('resize',()=>{setupScroll();setupTicker();renderGroups()
 
 document.getElementById('refresh-all').onclick=refreshAll;
 document.getElementById('refresh-last').onclick=()=>loadHistory(true);
-document.getElementById('daily-history').onclick=()=>{dailyHistory=!dailyHistory;apply();notify(dailyHistory?'Showing yesterday':'Showing current daily scores')};
-document.getElementById('unfreeze').onclick=()=>{dailyHistory=false;unfreezeUntil=Date.now()+120000;lastContext='';apply();notify('Live daily scores for 2 minutes')};
+document.getElementById('daily-history').onclick=()=>{dailyHistory=!dailyHistory;apply();notify(t(dailyHistory?'toast.showYesterday':'toast.showCurrent'))};
+document.getElementById('unfreeze').onclick=()=>{dailyHistory=false;unfreezeUntil=Date.now()+120000;lastContext='';apply();notify(t('toast.unfreeze'))};
 document.getElementById('location-choice').onchange=e=>{selectedLocation=e.target.value;page=0;talentPage=0;renderGroups();renderTalents()};
 document.getElementById('visibility-kind').onchange=e=>{document.getElementById('visibility-groups').hidden=e.target.value!=='groups';document.getElementById('visibility-talents').hidden=e.target.value!=='talents';renderGroups();renderTalents()};
 document.getElementById('groups-prev').onclick=()=>{page--;renderGroups()};
