@@ -52,3 +52,11 @@ After cutover, repeat direct unauthenticated requests against the public HTTPS d
 Correct `PUBLIC_ORIGIN`, Google client/redirect settings, or the confirmed `ADMIN_EMAILS` configuration and restart the new service during an authorized maintenance window. A removed administrator loses authorization on the next request after the configured server restarts. Expired administrators sign in again; expired/revoked browsers request a fresh code. If MongoDB is unavailable, restore database connectivity and permissions. There is no undocumented unlock URL, default password, or no-config fallback to public data. Rolling back to an old unauthenticated image would reopen data and must not be used as an automatic access-recovery step.
 
 Local verification: `node --test test/leaderboardAuth.test.js test/accessGuard.test.js test/accessUi.test.js`, then `npm test`. The auth suite uses a temporary Express application and injected in-memory store/provider; its actual-server integration additionally starts an isolated locked child process on a temporary port with no real credentials or database.
+
+### Local verification recorded on 2026-09-18
+
+- Combined access/mobile implementation: `npm test` — 96 passed, 0 failed (independent final run: 41.64 seconds).
+- `npm audit --omit=dev` — 0 reported vulnerabilities, with TLS certificate verification enabled.
+- Separate actual-server probe: all 13 private HTML/API/avatar/overlay/SSE paths returned 401 without credentials; `/auth` remained reachable. The probe used an unavailable loopback database, not production MongoDB.
+- Phone portrait 390×844 and landscape 844×390, desktop/TV layouts, optional history tabs, language changes, settings and phone-to-TV resizing are covered by browser tests. Fixture screenshots were inspected at 390×844 and 1920×1080.
+- Real Google login, auth-record persistence in a staging MongoDB, administrator enrollment and public-domain cutover are **not verified or activated**. The existing local process was left running without the new access guard.
