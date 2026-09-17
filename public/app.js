@@ -85,6 +85,7 @@ function syncMobileLayout(){
  });
  boards.forEach((board,index)=>{
   const mobileHidden=mobile&&(index!==selectedMobileColumn||index>=available);board.classList.toggle('mobile-hidden',mobileHidden);
+  if(mobile&&index<available){board.setAttribute('role','tabpanel');board.setAttribute('aria-labelledby',mobileButtons[index].id)}else{board.removeAttribute('role');board.removeAttribute('aria-labelledby')}
   if(mobileHidden)board.setAttribute('aria-hidden','true');else board.removeAttribute('aria-hidden');board.inert=mobileHidden;
   const header=board.querySelector('.board-head');if(header)header.tabIndex=mobileHidden?-1:0;
  });

@@ -18,6 +18,8 @@ test('phone tabs show one complete manually scrollable leaderboard without refet
  assert.equal(await tabs(page).count(),5);
  assert.equal(await page.locator('.board:visible').count(),1);
  assert.equal(await tabs(page).first().getAttribute('aria-selected'),'true');
+ const relationships=await page.evaluate(()=>[...document.querySelectorAll('.mobile-board-tabs [role="tab"]')].map(tab=>{const panel=document.getElementById(tab.getAttribute('aria-controls'));return{tabId:tab.id,panelRole:panel?.getAttribute('role'),panelLabel:panel?.getAttribute('aria-labelledby')}}));
+ assert.equal(relationships.every(item=>item.tabId&&item.panelRole==='tabpanel'&&item.panelLabel===item.tabId),true,'each mobile tab labels its controlled tabpanel');
  const dailyPoint=await page.locator('.board[data-column="0"] .points').first().textContent();
  assert.equal(dailyPoint,'1,000,000','phone retains the full formatted point value');
  await page.waitForTimeout(3300);
@@ -67,7 +69,9 @@ test('history selection, language and landscape settings remain reachable on pho
  }
  const access=page.locator('#manage-access');
  assert.equal(await access.getAttribute('href'),'/auth');
+ assert.equal(await access.getAttribute('role'),null,'access management keeps native link semantics');
  assert.equal(await access.textContent(),'Quản lý quyền truy cập');
+ await access.focus();assert.equal(await page.evaluate(()=>document.activeElement?.id),'manage-access','access management remains in the settings focus order');
  await page.locator('#done-settings').click();
  assert.equal(await tabs(page).first().textContent(),'Top Nhóm Hôm Nay');
  assert.equal(await tabs(page).first().getAttribute('aria-label'),'Top Nhóm Hôm Nay');
@@ -80,7 +84,9 @@ test('resizing from phone restores equal-width fixed TV columns and auto scroll'
  await tabs(page).nth(4).click();
  await page.setViewportSize({width:1920,height:1080});
  await page.waitForFunction(()=>[...document.querySelectorAll('.board')].filter(element=>element.getClientRects().length).length===5);
+ await page.waitForFunction(()=>[...document.querySelectorAll('.board')].every(item=>item.getAttribute('role')===null&&item.getAttribute('aria-labelledby')===null));
  assert.equal(await page.locator('.mobile-board-tabs').isVisible(),false);
+ assert.equal(await page.locator('.board').evaluateAll(items=>items.every(item=>item.getAttribute('role')===null&&item.getAttribute('aria-labelledby')===null)),true,'desktop boards do not retain mobile tabpanel semantics');
  const sizes=await page.locator('.board:visible').evaluateAll(items=>items.map(element=>element.getBoundingClientRect().width));
  assert.ok(Math.max(...sizes)-Math.min(...sizes)<2);
  await page.waitForFunction(()=>document.querySelector('.board[data-column="4"] .all-track').getAnimations().length>0);
@@ -88,4 +94,18 @@ test('resizing from phone restores equal-width fixed TV columns and auto scroll'
  await page.setViewportSize({width:800,height:600});
  assert.equal(await page.locator('.mobile-board-tabs').isVisible(),false,'800x600 remains the TV layout');
  assert.equal(await page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight&&document.documentElement.scrollWidth<=innerWidth),true);
+});
+
+test('focused tab follows real frozen and yesterday label transitions without losing focus',{timeout:30000},async t=>{
+ const {page,state}=await fixture(t,{width:390,height:844});
+ const first=tabs(page).first(),panel=page.locator('.board[data-column="0"]');await first.focus();const tabId=await first.getAttribute('id');
+ assert.equal(await panel.getAttribute('role'),'tabpanel');assert.equal(await panel.getAttribute('aria-labelledby'),tabId);
+ state.frozen=true;await page.keyboard.press('8');await page.waitForFunction(()=>document.querySelector('.mobile-board-tabs [role="tab"]').textContent==='Yesterday Top Groups');
+ assert.equal(await panel.locator('.board-head b').textContent(),'Yesterday Top Groups');assert.equal(await page.evaluate(()=>document.activeElement?.id),tabId,'frozen refresh retains the focused tab');
+ state.frozen=false;await page.keyboard.press('8');await page.waitForFunction(()=>document.querySelector('.mobile-board-tabs [role="tab"]').textContent==='Daily Top Groups');
+ assert.equal(await page.evaluate(()=>document.activeElement?.id),tabId,'live refresh retains the focused tab');
+ await page.evaluate(()=>document.getElementById('daily-history').click());await page.waitForFunction(()=>document.querySelector('.mobile-board-tabs [role="tab"]').textContent==='Yesterday Top Groups');
+ assert.equal(await panel.locator('.board-head b').textContent(),'Yesterday Top Groups');assert.equal(await page.evaluate(()=>document.activeElement?.id),tabId,'yesterday toggle retains the focused tab');
+ await page.evaluate(()=>document.getElementById('daily-history').click());await page.waitForFunction(()=>document.querySelector('.mobile-board-tabs [role="tab"]').textContent==='Daily Top Groups');
+ assert.equal(await page.evaluate(()=>document.activeElement?.id),tabId,'returning to current scores retains the focused tab');
 });
