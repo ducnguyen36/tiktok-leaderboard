@@ -14,6 +14,7 @@ async function fixture(t,admin=false){
  app.post('/auth/revoke',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.revoked.push(req.body.id);state.devices=state.devices.filter(d=>d.id!==req.body.id);res.json({ok:true})});
  app.post('/auth/logout',(req,res)=>{state.admin=false;state.authorized=false;res.json({ok:true})});
  app.get('/auth',(req,res)=>res.sendFile(path.resolve(__dirname,'../public/access.html')));
+ app.get('/',(req,res)=>res.type('html').send('<h1>Approved fixture leaderboard</h1>'));
  app.get('/auth/access.js',(req,res)=>res.sendFile(path.resolve(__dirname,'../public/access.js')));
  app.get('/auth/access.css',(req,res)=>res.sendFile(path.resolve(__dirname,'../public/access.css')));
  app.use(express.static(path.resolve(__dirname,'../public')));
@@ -56,4 +57,15 @@ test('unconfigured OAuth disables pairing and login with clear setup notice',asy
  assert.equal(await page.locator('#request-pair').isDisabled(),true);
  assert.equal(await page.locator('#google-login').getAttribute('aria-disabled'),'true');
  assert.equal(await page.locator('#admin-panel').isVisible(),false);
+});
+
+test('approved TV opens automatically and administrator logout clears local ranking data',async t=>{
+ const tv=await fixture(t);await tv.page.goto(tv.url);await tv.page.locator('#request-pair').click();
+ await tv.page.waitForFunction(()=>document.querySelector('#pair-code').textContent.length>0);
+ tv.state.authorized=true;await tv.page.waitForURL(url=>url.pathname==='/',{timeout:10000});
+ const admin=await fixture(t,true);await admin.page.goto(admin.url);await admin.page.locator('#admin-panel').waitFor();
+ await admin.page.evaluate(()=>{localStorage.setItem('helios_leaderboard_v2_history_2026-08','private');localStorage.setItem('helios_leaderboard_v2_current','private names');localStorage.setItem('leaderboard_config','legacy private names')});
+ await admin.page.locator('#access-logout').click();await admin.page.waitForFunction(()=>document.querySelector('#access-logout').hidden);
+ assert.equal(await admin.page.evaluate(()=>Object.keys(localStorage).some(key=>key.startsWith('helios_leaderboard_')||key==='leaderboard_config')),false);
+ assert.equal(await admin.page.locator('#admin-panel').isVisible(),false);
 });
