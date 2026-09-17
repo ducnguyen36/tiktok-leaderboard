@@ -40,7 +40,7 @@ function completedSnapshot(month, data = { individual: [], group: [] }) {
     const period = historyPeriodForMonth(month, now);
     return {
         _id: archiveIdForPeriod(period),
-        aggregationVersion: 1,
+        aggregationVersion: 2,
         timezone: 'Asia/Ho_Chi_Minh',
         month,
         periodStart: period.start,
@@ -109,7 +109,7 @@ test('archive id deterministically includes version, month, timezone and exact b
     const period = historyPeriodForMonth('2026-08', new Date('2026-09-18T00:00:00.000Z'));
     assert.equal(
         archiveIdForPeriod(period),
-        'leaderboard:v1:2026-08:Asia/Ho_Chi_Minh:2026-08-01T00:00:00.000Z:2026-09-01T00:00:00.000Z'
+        'leaderboard:v2:2026-08:Asia/Ho_Chi_Minh:2026-08-01T00:00:00.000Z:2026-09-01T00:00:00.000Z'
     );
 });
 
@@ -132,9 +132,22 @@ test('empty completed snapshot is a cache hit and does not invoke the builder', 
         },
         generatedAt: '2026-09-01T00:00:03.000Z',
         source: 'snapshot',
-        aggregationVersion: 1,
+        aggregationVersion: 2,
     });
     assert.deepEqual(repository.calls, { find: 1, upsert: 0 });
+});
+
+test('old capped v1 archive remains immutable while complete v2 archive is created', async () => {
+    const legacyId = 'leaderboard:v1:2026-08:Asia/Ho_Chi_Minh:2026-08-01T00:00:00.000Z:2026-09-01T00:00:00.000Z';
+    const old = { ...completedSnapshot('2026-08'), _id: legacyId, aggregationVersion: 1 };
+    const repository = createFakeRepository([old]);
+    const full = { individual: Array.from({ length: 71 }, (_, i) => ({ id: String(i), name: `Idol ${i}`, value: i })), group: [] };
+    const service = createHistoryArchiveService({ repository, build: async () => full, clock: () => new Date('2026-09-18T00:00:00Z') });
+    const result = await service.get('2026-08');
+    assert.equal(result.data.individual.length, 71);
+    assert.equal(result.aggregationVersion, 2);
+    assert.deepEqual(repository.documents.get(legacyId), old);
+    assert.equal(repository.documents.size, 2);
 });
 
 test('completed rebuild is atomically persisted and reused on the next request', async () => {

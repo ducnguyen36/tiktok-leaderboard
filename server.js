@@ -7,17 +7,15 @@ const fs = require('fs');
 const crypto = require('crypto');
 const { MongoClient } = require('mongodb');
 const dns = require('dns');
-const { computeMonthlyWindows, MONTHLY_RESET_HOUR, computeDailyWindows } = require('./monthlyWindows');
 const {
     createHistoryArchiveService,
-    createSerializedContextBuilder,
-    leaderboardBuildContextKey,
     latestClosedHistoryMonth,
     loadLeaderboardDependencies,
     parseFreshContext,
     previousCalendarMonth,
     validateRequestedHistoryMonth,
 } = require('./leaderboardHistory');
+const { createWindowContext, buildGiftBucketPipeline, decodeGiftBuckets, createLeaderboardCache, createSessionBucketStore } = require('./leaderboardPerformance');
 
 // --- Global crash guards: prevent container from dying on unhandled errors ---
 process.on('uncaughtException', (err) => {
@@ -182,6 +180,7 @@ async function connectDB() {
 
         // Ensure indexes
         await db.collection('gifts').createIndex({ timeStamp: 1 });
+        await db.collection('gifts').createIndex({ sessionId: 1, timeStamp: 1 });
         await db.collection('gifts').createIndex({ receivedTalent: 1 });
         await db.collection('profiles').createIndex({ updatedAt: -1 });
         await db.collection('leaderboard_monthly_snapshots').createIndex(
@@ -193,6 +192,7 @@ async function connectDB() {
         mongoClient.on('close', () => {
             console.warn('[Database] Connection closed unexpectedly');
             db = null;
+            invalidateLeaderboard();
             scheduleReconnect();
         });
         mongoClient.on('error', (err) => {
@@ -226,10 +226,7 @@ function scheduleReconnect() {
                 .catch(err => console.error('[History] Reconnect backfill failed:', err.message));
             // Refresh cache
             try {
-                const data = await buildLeaderboardData(lastResetHour, lastFreezeUntil);
-                cachedData = data;
-                cacheTimestamp = Date.now();
-                broadcastLeaderboard(data);
+                await buildLeaderboardData(lastResetHour, lastFreezeUntil);
             } catch (e) { /* cache refresh can fail gracefully */ }
         } catch (err) {
             console.error('[Database] Reconnect failed:', err.message);
@@ -542,7 +539,7 @@ async function resolveAvatar(avatarUrl, tiktokUsername) {
 // PROFILE & TALENT DATA HELPERS
 // ==========================================
 async function readProfilesFromDb() {
-    const all = await db.collection('profiles').find().toArray();
+    const all = await db.collection('profiles').find({}, { projection: { name: 1, avatar: 1, username: 1, talents: 1, updatedAt: 1, locationId: 1 } }).toArray();
     // Filter out accidental "new profile" entries.
     return all.filter(profile => {
         const name = (profile.name || '').toLowerCase().trim();
@@ -573,423 +570,100 @@ const liveDependencyRepository = {
     readLocations: readLocationsFromDb,
 };
 
-function buildTalentAvatars(profiles) {
-    // Returns { talentName: { avatarUrl, uniqueId } }
-    const map = {};
-    for (const profile of profiles) {
-        if (profile.talents) {
-            for (const [name, info] of Object.entries(profile.talents)) {
-                map[name] = {
-                    id: info.id || info.uniqueId || name,
-                    avatarUrl: info.avatarUrl || '',
-                    uniqueId: info.uniqueId || ''
-                };
-            }
-        }
-    }
-    return map;
-}
-
-function buildProfileMap(profiles) {
-    // Returns { profileId: { name, avatar, username, talentNames[], updatedAt, locationId } }
-    const map = {};
-    for (const profile of profiles) {
-        const pid = profile._id;
-        map[pid] = {
-            name: profile.name || pid.toString(),
-            avatar: profile.avatar || '',
-            username: profile.username || '',
-            talentNames: profile.talents ? Object.keys(profile.talents) : [],
-            updatedAt: profile.updatedAt ? new Date(profile.updatedAt).getTime() : 0,
-            locationId: profile.locationId || ''
-        };
-    }
-    return map;
-}
-
-function buildTalentToProfileMap(profiles) {
-    const map = {};
-    for (const profile of profiles) {
-        const profileId = profile._id;
-        const profileName = profile.name || profileId.toString();
-        if (profile.talents) {
-            for (const talentName of Object.keys(profile.talents)) {
-                map[talentName] = { profileId, profileName };
-            }
-        }
-    }
-    return map;
-}
-
-// Maps profile display name -> profileId (for new helioscontrol format
-// where group gifts are saved with receivedTalent = profile name)
-function buildProfileNameToIdMap(profiles) {
-    const map = {};
-    for (const profile of profiles) {
-        const pid = profile._id;
-        const name = profile.name || pid.toString();
-        map[name] = pid;
-    }
-    return map;
-}
-
-// Maps talent UID -> { talentName, profileId, profileName }
-// Used to resolve gifts by UID instead of nickname
-function buildUidMaps(profiles) {
-    const uidToTalent = {};   // uid -> talentName
-    const uidToProfile = {};  // uid -> profileId
-    for (const profile of profiles) {
-        const pid = profile._id;
-        const pName = profile.name || pid.toString();
-        if (profile.talents) {
-            for (const [talentName, info] of Object.entries(profile.talents)) {
-                if (info.id) {
-                    uidToTalent[info.id] = talentName;
-                    uidToProfile[info.id] = { profileId: pid, profileName: pName };
-                }
-            }
-        }
-    }
-    return { uidToTalent, uidToProfile };
-}
-
-// ==========================================
-// GIFT ENTRY RESOLVER
-// Extracts talent names from a gift, handling all formats:
-// - New: receivedTalents: [{name, uid}, ...] (objects with UIDs)
-// - Old: receivedTalents: ["name", ...] (plain strings)
-// - Legacy: receivedTalent: "name" (single string, no array)
-// Returns: [{ name, uid }]
-// ==========================================
-function resolveGiftTalents(gift, uidToTalent) {
-    const results = [];
-
-    // Prefer receivedTalents array (new format)
-    if (gift.receivedTalents && Array.isArray(gift.receivedTalents) && gift.receivedTalents.length > 0) {
-        for (const entry of gift.receivedTalents) {
-            if (typeof entry === 'object' && entry.name) {
-                // {name, uid} format — resolve name by UID if possible
-                const resolvedName = (entry.uid && uidToTalent[entry.uid]) || entry.name;
-                results.push({ name: resolvedName, uid: entry.uid || '' });
-            } else {
-                // Plain string
-                results.push({ name: String(entry), uid: '' });
-            }
-        }
-        return results;
-    }
-
-    // Fallback: single receivedTalent string
-    if (gift.receivedTalent) {
-        // Try to resolve by UID if available
-        const uid = gift.receivedTalentUid || gift.toMemberUid || '';
-        const resolvedName = (uid && uidToTalent[uid]) || gift.receivedTalent;
-        results.push({ name: resolvedName, uid });
-    }
-
-    return results;
-}
-
-// ==========================================
-// AGGREGATION — INDIVIDUAL
-// Fetches raw gifts and processes in JS to handle multi-talent splitting + UID resolution
-// ==========================================
-function aggregateIndividual(gifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile) {
-    const allProfileNames = Object.keys(profileNameToId);
-    const allTalentNames = Object.keys(talentAvatarMap);
-
-    // Accumulate diamonds per talent (individual gifts)
-    const talentTotals = {};
-    // Accumulate group/profile gifts per profileId for later splitting
-    const profileGroupTotals = {};
-
-    for (const gift of gifts) {
-        const talents = resolveGiftTalents(gift, uidToTalent);
-        if (talents.length === 0) continue;
-
-        // Separate individual talents vs group-level entries
-        const individualTalents = [];
-        const groupEntries = [];
-
-        for (const t of talents) {
-            if (t.name === 'Group' || t.name === 'Unassigned' || allProfileNames.includes(t.name)) {
-                groupEntries.push(t);
-            } else {
-                individualTalents.push(t);
-            }
-        }
-
-        // Process individual talents — each gets cost / total_talents_in_gift
-        if (individualTalents.length > 0) {
-            const perTalentCost = Math.floor(gift.cost / talents.length);
-            for (const t of individualTalents) {
-                talentTotals[t.name] = (talentTotals[t.name] || 0) + perTalentCost;
-            }
-        }
-
-        // Process group-level entries — accumulate for later splitting among members
-        if (groupEntries.length > 0) {
-            const perEntryCost = Math.floor(gift.cost / talents.length);
-
-            for (const t of groupEntries) {
-                // Resolve which profile this group gift belongs to
-                let pid = null;
-
-                // Try UID first
-                const uid = t.uid || gift.toMemberUid || '';
-                if (uid && uidToProfile[uid]) {
-                    pid = uidToProfile[uid].profileId;
-                }
-
-                // Try profile name match
-                if (!pid && allProfileNames.includes(t.name)) {
-                    pid = profileNameToId[t.name];
-                }
-
-                // Try talent → profile mapping (shouldn't normally hit here, but safety)
-                if (!pid && talentToProfile[t.name]) {
-                    pid = talentToProfile[t.name].profileId;
-                }
-
-                if (pid) {
-                    profileGroupTotals[pid] = (profileGroupTotals[pid] || 0) + perEntryCost;
-                }
-            }
-        }
-    }
-
-    // Split accumulated group gifts evenly among each profile's talent members
-    for (const [pid, groupTotal] of Object.entries(profileGroupTotals)) {
-        const pInfo = profileMap[pid];
-        if (!pInfo || !pInfo.talentNames || pInfo.talentNames.length === 0) continue;
-
-        const perMember = Math.floor(groupTotal / pInfo.talentNames.length);
-        for (const talentName of pInfo.talentNames) {
-            talentTotals[talentName] = (talentTotals[talentName] || 0) + perMember;
-        }
-    }
-
-    // Merge with all known talents (ensure 0-diamond entries appear)
-    // Only include talents registered in profiles — old/renamed nicknames are excluded
-    const results = allTalentNames.map(name => ({
-        _id: name,
-        totalDiamonds: talentTotals[name] || 0
-    }));
-
-    results.sort((a, b) => b.totalDiamonds - a.totalDiamonds || a._id.localeCompare(b._id));
-    return results.slice(0, 50);
-}
-
-// ==========================================
-// AGGREGATION — GROUP
-// Accumulates total income per profile using the sessions collection to
-// map gifts to their owning profile. Includes ALL gifts (manual + auto).
-// Each gift's FULL cost goes to the owning profile — no splitting when
-// all talents belong to the same profile. Unmatched/unknown talents and
-// Group/Unassigned labels fall back to session-based profile lookup.
-// ==========================================
-function aggregateGroup(gifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap) {
-    // Start with ALL profiles at 0
-    const profileTotals = {};
-    for (const [pid, pInfo] of Object.entries(profileMap)) {
-        profileTotals[pid] = { name: pInfo.name, totalDiamonds: 0 };
-    }
-
-    // Helper: resolve a single talent entry to a profileId
-    function resolveToProfile(t) {
-        // 1. Check by UID
-        if (t.uid && uidToProfile[t.uid]) {
-            return uidToProfile[t.uid].profileId;
-        }
-        // 2. Check by talent name -> profile
-        const talentMapping = talentToProfile[t.name];
-        if (talentMapping) {
-            return talentMapping.profileId;
-        }
-        // 3. Check if it's a profile name directly
-        const profileId = profileNameToId[t.name];
-        if (profileId) {
-            return profileId;
-        }
-        return null;
-    }
-
-    // Helper: get the owning profile from the sessions collection
-    function getSessionProfile(gift) {
-        const sid = gift.sessionId ? gift.sessionId.toString() : '';
-        return sessionProfileMap[sid] || null;
-    }
-
-    for (const gift of gifts) {
-        const talents = resolveGiftTalents(gift, uidToTalent);
-        const cost = gift.cost || 0;
-
-        // If no talent info at all, fall back to session
-        if (talents.length === 0) {
-            const sessionPid = getSessionProfile(gift);
-            if (sessionPid && profileTotals[sessionPid]) {
-                profileTotals[sessionPid].totalDiamonds += cost;
-            }
-            continue;
-        }
-
-        // Resolve all talent entries to profiles
-        const resolvedPids = new Set();
-
-        for (const t of talents) {
-            // "Group" and "Unassigned" labels — try UID first
-            if (t.name === 'Group' || t.name === 'Unassigned') {
-                const uid = t.uid || gift.toMemberUid || '';
-                if (uid && uidToProfile[uid]) {
-                    resolvedPids.add(uidToProfile[uid].profileId);
-                }
-                continue;
-            }
-
-            const pid = resolveToProfile(t);
-            if (pid) {
-                resolvedPids.add(pid);
-            }
-        }
-
-        // If resolved to exactly one profile → credit FULL cost (no splitting)
-        if (resolvedPids.size === 1) {
-            const pid = [...resolvedPids][0];
-            if (profileTotals[pid]) {
-                profileTotals[pid].totalDiamonds += cost;
-            }
-            continue;
-        }
-
-        // If resolved to multiple profiles → split evenly among distinct profiles
-        if (resolvedPids.size > 1) {
-            const share = Math.floor(cost / resolvedPids.size);
-            for (const pid of resolvedPids) {
-                if (profileTotals[pid]) {
-                    profileTotals[pid].totalDiamonds += share;
-                }
-            }
-            continue;
-        }
-
-        // Nothing resolved via talent/UID → use sessions collection
-        const sessionPid = getSessionProfile(gift);
-        if (sessionPid) {
-            if (!profileTotals[sessionPid]) {
-                const pInfo = profileMap[sessionPid];
-                profileTotals[sessionPid] = { name: pInfo ? pInfo.name : sessionPid, totalDiamonds: 0 };
-            }
-            profileTotals[sessionPid].totalDiamonds += cost;
-        }
-    }
-
-    return Object.entries(profileTotals)
-        .map(([id, data]) => ({ _id: id, name: data.name, totalDiamonds: data.totalDiamonds }))
-        .sort((a, b) => b.totalDiamonds - a.totalDiamonds || a.name.localeCompare(b.name))
-        .slice(0, 50);
-}
+const { buildTalentAvatars, buildProfileMap, buildTalentToProfileMap, buildProfileNameToIdMap, buildUidMaps, aggregateIndividual, aggregateGroup } = require('./leaderboardAggregation');
 
 // ==========================================
 // SHARED AGGREGATION (used by API + SSE push)
 // ==========================================
-let lastResetHour = 0; // default, updated from client requests
-let lastFreezeUntil = '09:00'; // e.g. '09:15' — freeze yesterday's daily scores until this time
+const lastResetHour = 0; // background warm-up only; client settings are scoped per request
+const lastFreezeUntil = '09:00';
 
 // ==========================================
 // DATA CACHE — serve instantly, refresh in background
 // ==========================================
-let cachedData = null;
-let cacheTimestamp = 0;
 const CACHE_BG_INTERVAL = 60 * 60 * 1000; // 1 hour background refresh when no clients
 
 // ==========================================
 // PERSISTENT SNAPSHOT — instant cold start
 // The last computed result is stored in MongoDB so a fresh container can
-// serve it in <100ms while the (slow) full rebuild runs in the background.
+// serve it after one small read while a full rebuild runs in the background.
 // Survives restarts AND container replacement (each deploy = new container).
 // ==========================================
 const SNAPSHOT_COLLECTION = 'leaderboard_cache';
-const SNAPSHOT_ID = 'latest';
 const SNAPSHOT_SAVE_THROTTLE = 60 * 1000; // persist at most once/min (builds run every ~10s)
-let lastSnapshotSave = 0;
+const snapshotSavedAt = new Map();
+const hydratedContexts = new Set();
+// Sixteen bounded durable slots. Collisions only discard a warm-start opportunity;
+// identity validation below prevents ever serving another context's result.
+function snapshotId(context) { return `v2:${crypto.createHash('sha256').update(context.key).digest('hex')[0]}`; }
 
-async function loadSnapshot() {
+async function loadSnapshot(context) {
     if (!db) return null;
     try {
-        const doc = await db.collection(SNAPSHOT_COLLECTION).findOne({ _id: SNAPSHOT_ID });
-        return doc && doc.data ? doc.data : null;
+        return await db.collection(SNAPSHOT_COLLECTION).findOne({ _id: snapshotId(context) });
     } catch (e) {
         console.error('[Snapshot] Load failed:', e.message);
         return null;
     }
 }
 
-function saveSnapshot(data) {
-    if (!db || !data) return;
+async function saveSnapshot(document, context) {
+    if (!db) return;
     const now = Date.now();
-    if (now - lastSnapshotSave < SNAPSHOT_SAVE_THROTTLE) return;
-    lastSnapshotSave = now;
-    db.collection(SNAPSHOT_COLLECTION)
-        .updateOne({ _id: SNAPSHOT_ID }, { $set: { data, computedAt: now } }, { upsert: true })
-        .catch(e => console.error('[Snapshot] Save failed:', e.message));
+    const id = snapshotId(context);
+    if (now - (snapshotSavedAt.get(id) || 0) < SNAPSHOT_SAVE_THROTTLE) return;
+    snapshotSavedAt.set(id, now);
+    try {
+        await db.collection(SNAPSHOT_COLLECTION).updateOne({ _id: id }, { $set: document }, { upsert: true });
+    } catch (error) { snapshotSavedAt.delete(id); throw error; }
 }
 
-const runSerializedLeaderboardBuild = createSerializedContextBuilder(
-    (_contextKey, resetHour, freezeUntil, strictDependencies) =>
-        _buildLeaderboardDataInner(resetHour, freezeUntil, { strictDependencies })
-);
+const giftBucketStore = createSessionBucketStore({
+    async read(context, sessionIds) {
+        if (!db) throw new Error('Database not connected');
+        const docs = await db.collection('gifts').aggregate(buildGiftBucketPipeline({ windows: context.windows, sessionIds }), { allowDiskUse: true, maxTimeMS: 60000 }).toArray();
+        return decodeGiftBuckets(docs);
+    },
+});
+const leaderboardCache = createLeaderboardCache({
+    build: (context, options) => _buildLeaderboardDataInner(context, options),
+    isStale: context => giftBucketStore.isStale(context),
+    onPublish(document, context) {
+        debouncedBroadcast();
+        return saveSnapshot(document, context);
+    },
+    onError: error => console.error('[LeaderboardCache]', error.message),
+});
 
-async function buildLeaderboardData(
-    resetHour,
-    freezeUntil,
-    { persist = true, strictDependencies = false } = {}
-) {
-    const normalizedFreeze = freezeUntil || '';
-    const data = await runSerializedLeaderboardBuild(
-        leaderboardBuildContextKey(resetHour, normalizedFreeze, strictDependencies),
-        resetHour,
-        normalizedFreeze,
-        strictDependencies
-    );
-    if (persist) saveSnapshot(data); // persist normal shared-cache builds, never scoped forced refreshes
-    return data;
-}
-
-async function _buildLeaderboardDataInner(resetHour, freezeUntil, { strictDependencies = false } = {}) {
-    const now = new Date();
-
-    // Daily + yesterday boundaries (use the daily resetHour, independent of the monthly 07:00 reset)
-    const { dailyStart, yesterdayStart } = computeDailyWindows(now, resetHour);
-    const dailyStartMs = dailyStart.getTime();
-    const yesterdayStartMs = yesterdayStart.getTime();
-    const yesterdayEndMs = dailyStartMs; // yesterday ends where today starts
-
-    // Check if we should freeze (show yesterday's daily data as today's)
-    let isFrozen = false;
-    if (freezeUntil) {
-        const [fh, fm] = freezeUntil.split(':').map(Number);
-        if (!isNaN(fh) && !isNaN(fm)) {
-            const freezeTime = new Date(now);
-            freezeTime.setHours(fh, fm, 0, 0);
-            // Frozen = current time is before the freeze-until time AND after daily reset
-            if (now < freezeTime && now >= dailyStart) {
-                isFrozen = true;
-            }
-            console.log(`[Freeze] freezeUntil=${freezeUntil}, now=${now.toLocaleTimeString()}, freezeTime=${freezeTime.toLocaleTimeString()}, dailyStart=${dailyStart.toLocaleTimeString()}, isFrozen=${isFrozen}`);
+async function getLeaderboardResult(resetHour, freezeUntil, { force = false } = {}) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const context = createWindowContext(resetHour, freezeUntil || '');
+        if (!force && !hydratedContexts.has(context.key)) {
+            hydratedContexts.add(context.key);
+            while (hydratedContexts.size > 8) hydratedContexts.delete(hydratedContexts.values().next().value);
+            const document = await loadSnapshot(context);
+            leaderboardCache.hydrate(document, context);
         }
+        const result = await leaderboardCache.get(context, { force });
+        // A slow cold build must not cross a freeze/month/day boundary and return
+        // yesterday's context to a request completing after that boundary.
+        if (createWindowContext(resetHour, freezeUntil || '').key === context.key) return result;
     }
+    throw new Error('Leaderboard window changed during refresh; retry shortly');
+}
 
-    // Monthly boundary + grace-period display (decoupled from daily resetHour).
-    // monthlyStart = active accumulating window (gifts count from 07:00 on the 1st).
-    // During grace, the DISPLAYED monthly window is the previous month [displayStart, displayEnd).
-    const mw = computeMonthlyWindows(now, MONTHLY_RESET_HOUR);
-    const displayStartMs = mw.displayStart.getTime();
-    const displayEndMs = mw.displayEnd ? mw.displayEnd.getTime() : null;
+async function buildLeaderboardData(resetHour, freezeUntil, options = {}) {
+    return (await getLeaderboardResult(resetHour, freezeUntil, options)).data;
+}
+
+async function _buildLeaderboardDataInner(context, { force = false } = {}) {
+    const isFrozen = context.frozen;
+    const mw = context.monthly;
 
     const { profiles, sessionProfileMap, locations } = await loadLeaderboardDependencies(
         liveDependencyRepository,
         {
-            strict: strictDependencies,
+            strict: true,
             onOptionalError(name, error) {
                 if (name === 'readProfiles') {
                     console.error('[Profiles] Error loading:', error.message);
@@ -1003,30 +677,13 @@ async function _buildLeaderboardDataInner(resetHour, freezeUntil, { strictDepend
     const profileNameToId = buildProfileNameToIdMap(profiles);
     const { uidToTalent, uidToProfile } = buildUidMaps(profiles);
 
-    const giftProjection = { projection: { receivedTalent: 1, receivedTalents: 1, receivedTalentUid: 1, toMemberUid: 1, cost: 1, sessionId: 1, timeStamp: 1, user: 1 } };
-
-    // Load gifts once from the EARLIEST window start so daily, yesterday, and the displayed
-    // monthly window are all fully covered. The monthly window uses the 07:00 reset while
-    // daily/yesterday use the daily resetHour, so displayStart is NOT always the earliest
-    // (on the 2nd, yesterdayStart can precede it). Take the min of all three.
-    const loadStartMs = Math.min(displayStartMs, dailyStartMs, yesterdayStartMs);
-    const allMonthlyGifts = await db.collection('gifts').find(
-        { timeStamp: { $gte: loadStartMs } },
-        giftProjection
-    ).toArray();
-
-    console.log(`[Build] Loaded ${allMonthlyGifts.length} monthly gifts`);
-    logMemory('after-gift-load');
-
-    // Split into daily and yesterday subsets (no extra MongoDB queries!)
-    const allDailyGifts = allMonthlyGifts.filter(g => g.timeStamp >= dailyStartMs);
-    const allYesterdayGifts = allMonthlyGifts.filter(g => g.timeStamp >= yesterdayStartMs && g.timeStamp < yesterdayEndMs);
-    // Displayed monthly window: previous month during grace, current month otherwise.
-    const inDisplayWindow = g => g.timeStamp >= displayStartMs && (displayEndMs === null || g.timeStamp < displayEndMs);
-    const allDisplayedMonthlyGifts = allMonthlyGifts.filter(inDisplayWindow);
+    const allBuckets = await giftBucketStore.get(context, { force });
+    const allDailyGifts = allBuckets.filter(g => g.daily);
+    const allYesterdayGifts = allBuckets.filter(g => g.yesterday);
+    const allDisplayedMonthlyGifts = allBuckets.filter(g => g.monthly);
 
     // Individual view excludes manual gifts
-    const isNotManual = g => !(g.user && g.user.userId === 'Manual');
+    const isNotManual = g => !g.manual;
     const dailyGifts = allDailyGifts.filter(isNotManual);
     const yesterdayGifts = allYesterdayGifts.filter(isNotManual);
     const monthlyGifts = allDisplayedMonthlyGifts.filter(isNotManual);
@@ -1161,23 +818,11 @@ async function buildHistoricalLeaderboardData(period) {
 
     const sessionProfileMap = await readSessionProfileMapFromDb();
 
-    const giftProjection = {
-        projection: {
-            receivedTalent: 1,
-            receivedTalents: 1,
-            receivedTalentUid: 1,
-            toMemberUid: 1,
-            cost: 1,
-            sessionId: 1,
-            timeStamp: 1,
-            user: 1,
-        },
-    };
-    const allGifts = await db.collection('gifts').find(
-        { timeStamp: { $gte: Date.parse(period.start), $lt: Date.parse(period.end) } },
-        giftProjection
-    ).toArray();
-    const individualGifts = allGifts.filter(gift => !(gift.user && gift.user.userId === 'Manual'));
+    const allGifts = decodeGiftBuckets(await db.collection('gifts').aggregate(
+        buildGiftBucketPipeline({ start: Date.parse(period.start), end: Date.parse(period.end) }),
+        { allowDiskUse: true, maxTimeMS: 60000 }
+    ).toArray());
+    const individualGifts = allGifts.filter(gift => !gift.manual);
 
     const individualRaw = aggregateIndividual(
         individualGifts,
@@ -1268,8 +913,8 @@ async function ensureLatestClosedHistory() {
 // ==========================================
 // SSE: REAL-TIME PUSH TO BROWSERS
 // ==========================================
-function broadcastLeaderboard(data) {
-    const message = `data: ${JSON.stringify({ status: 'ok', data })}\n\n`;
+function broadcastLeaderboard() {
+    const message = `data: ${JSON.stringify({ status: 'ok', invalidated: true })}\n\n`;
     for (const client of sseClients) {
         try {
             client.write(message);
@@ -1298,29 +943,8 @@ app.get('/api/leaderboard/stream', (req, res) => {
     sseClients.add(res);
     console.log(`[SSE] Client connected (${sseClients.size} total)`);
 
-    // Send initial data immediately (from cache or fresh)
-    if (cachedData) {
-        res.write(`data: ${JSON.stringify({ status: 'ok', data: cachedData })}\n\n`);
-        // Refresh in background if stale (>30s old)
-        if (Date.now() - cacheTimestamp > 30000 && db) {
-            buildLeaderboardData(lastResetHour, lastFreezeUntil)
-                .then(data => {
-                    cachedData = data;
-                    cacheTimestamp = Date.now();
-                })
-                .catch(() => {});
-        }
-    } else if (db) {
-        buildLeaderboardData(lastResetHour, lastFreezeUntil)
-            .then(data => {
-                cachedData = data;
-                cacheTimestamp = Date.now();
-                res.write(`data: ${JSON.stringify({ status: 'ok', data })}\n\n`);
-            })
-            .catch(err => {
-                console.error('[SSE] Initial data error:', err.message);
-            });
-    }
+    // Each browser revalidates its own reset/freeze context through /current.
+    res.write(`data: ${JSON.stringify({ status: 'ok', invalidated: true })}\n\n`);
 
     // Cleanup on disconnect
     req.on('close', () => {
@@ -1335,6 +959,13 @@ app.get('/api/leaderboard/stream', (req, res) => {
 let debounceTimer = null;
 let activeGiftsStream = null;
 let activeProfilesStream = null;
+let activeSessionsStream = null;
+let activeLocationsStream = null;
+
+function invalidateLeaderboard() {
+    giftBucketStore.invalidate();
+    leaderboardCache.invalidate();
+}
 
 function stopChangeStreams() {
     if (activeGiftsStream) {
@@ -1345,24 +976,33 @@ function stopChangeStreams() {
         try { activeProfilesStream.close(); } catch (e) { /* ignore */ }
         activeProfilesStream = null;
     }
+    for (const stream of [activeSessionsStream, activeLocationsStream]) {
+        if (stream) stream.close().catch(() => {});
+    }
+    activeSessionsStream = activeLocationsStream = null;
 }
 
 function startChangeStreams() {
     if (!db) return;
 
-    // Close any existing streams first to avoid duplicates
+    // Close any existing streams first to avoid duplicates.
     stopChangeStreams();
+    invalidateLeaderboard();
 
     try {
         // Watch gifts collection
         activeGiftsStream = db.collection('gifts').watch([], { fullDocument: 'updateLookup' });
         activeGiftsStream.on('change', (change) => {
             console.log(`[ChangeStream] Gift ${change.operationType}`);
+            giftBucketStore.change(change);
+            leaderboardCache.invalidate();
             debouncedBroadcast();
         });
         activeGiftsStream.on('error', (err) => {
             console.error('[ChangeStream] Gifts stream error:', err.message);
             activeGiftsStream = null;
+            invalidateLeaderboard();
+            debouncedBroadcast();
             // Don't restart here — the MongoDB client 'close' event will trigger reconnection
         });
 
@@ -1370,16 +1010,34 @@ function startChangeStreams() {
         activeProfilesStream = db.collection('profiles').watch([], { fullDocument: 'updateLookup' });
         activeProfilesStream.on('change', (change) => {
             console.log(`[ChangeStream] Profile ${change.operationType}`);
+            invalidateLeaderboard();
             debouncedBroadcast();
         });
         activeProfilesStream.on('error', (err) => {
             console.error('[ChangeStream] Profiles stream error:', err.message);
             activeProfilesStream = null;
+            invalidateLeaderboard();
+            debouncedBroadcast();
         });
 
-        console.log('[ChangeStream] Watching gifts + profiles collections for real-time updates');
+        function watchDependency(collection) {
+            const stream = db.collection(collection).watch([], { fullDocument: 'updateLookup' });
+            stream.on('change', () => { invalidateLeaderboard(); debouncedBroadcast(); });
+            stream.on('error', error => {
+                console.error(`[ChangeStream] ${collection} stream error:`, error.message);
+                if (collection === 'sessions') activeSessionsStream = null;
+                else activeLocationsStream = null;
+                invalidateLeaderboard(); debouncedBroadcast();
+            });
+            return stream;
+        }
+        activeSessionsStream = watchDependency('sessions');
+        activeLocationsStream = watchDependency('locations');
+
+        console.log('[ChangeStream] Watching gifts, profiles, sessions and locations');
     } catch (err) {
         console.error('[ChangeStream] Failed to start:', err.message);
+        invalidateLeaderboard();
     }
 }
 
@@ -1389,21 +1047,18 @@ const BROADCAST_THROTTLE = 10000; // At most 1 rebuild every 10 seconds
 function debouncedBroadcast() {
     // Throttle + debounce: ensure at most 1 rebuild per 10s
     // If a build happened recently, schedule one for later
-    if (debounceTimer) clearTimeout(debounceTimer);
+    // Keep the first scheduled deadline; continuous gifts must not postpone it.
+    if (debounceTimer) return;
 
     const timeSinceLast = Date.now() - lastBroadcastTime;
     const delay = Math.max(BROADCAST_THROTTLE - timeSinceLast, 2000); // at least 2s debounce
 
     debounceTimer = setTimeout(async () => {
+        debounceTimer = null;
         if (!db) return; // guard against broadcasting when DB is down
         try {
             lastBroadcastTime = Date.now();
-            const data = await buildLeaderboardData(lastResetHour, lastFreezeUntil);
-            if (!data) return; // skipped (concurrent guard)
-            // Update cache
-            cachedData = data;
-            cacheTimestamp = Date.now();
-            broadcastLeaderboard(data);
+            broadcastLeaderboard();
         } catch (err) {
             console.error('[ChangeStream] Broadcast error:', err.message);
         }
@@ -1425,54 +1080,29 @@ app.get('/api/leaderboard/fresh', async (req, res) => {
     }
 
     try {
-        const data = await buildLeaderboardData(
+        const result = await getLeaderboardResult(
             context.resetHour,
             context.freezeUntil,
-            { persist: false, strictDependencies: true }
+            { force: true }
         );
-        // A forced scoped build is returned only to its requester. It must not overwrite
-        // the shared live cache or broadcast a reset/freeze context to other devices.
-        res.json({ status: 'ok', data });
+        // Only this exact window/settings cache entry is replaced.
+        res.set('Cache-Control', 'no-store').json(result);
     } catch (err) {
         console.error('[LeaderboardFresh] Error:', err.message);
         res.status(500).json({ status: 'error', message: err.message });
     }
 });
 
-app.get('/api/leaderboard', async (req, res) => {
-    const parsed = parseInt(req.query.resetHour);
-    const resetHour = isNaN(parsed) ? 0 : parsed;
-    lastResetHour = resetHour; // Save for SSE broadcasts
-
-    // Freeze-until setting (e.g. '09:15')
-    const freezeUntil = req.query.freezeUntil || '';
-    if (freezeUntil) lastFreezeUntil = freezeUntil;
-
-    // Return cached data instantly if available
-    if (cachedData) {
-        res.json({ status: 'ok', data: cachedData });
-        // Refresh in background if stale (>10s)
-        if (Date.now() - cacheTimestamp > 10000 && db) {
-            buildLeaderboardData(resetHour, lastFreezeUntil)
-                .then(data => { cachedData = data; cacheTimestamp = Date.now(); })
-                .catch(() => {});
-        }
-        return;
-    }
-
-    // No cache — must build fresh
-    if (!db) {
-        return res.status(503).json({ status: 'error', message: 'Database not connected' });
-    }
-
+app.get(['/api/leaderboard/current', '/api/leaderboard'], async (req, res) => {
+    let context;
+    try { context = parseFreshContext(req.query); }
+    catch (error) { return res.status(400).json({ status: 'error', message: error.message }); }
     try {
-        const data = await buildLeaderboardData(resetHour, lastFreezeUntil);
-        cachedData = data;
-        cacheTimestamp = Date.now();
-        res.json({ status: 'ok', data });
+        const result = await getLeaderboardResult(context.resetHour, context.freezeUntil);
+        res.set('Cache-Control', 'no-store').json(result);
     } catch (err) {
-        console.error('[Leaderboard] Error:', err);
-        res.json({ status: 'error', message: err.message });
+        console.error('[Leaderboard] Error:', err.message);
+        res.status(db ? 500 : 503).json({ status: 'error', message: err.message });
     }
 });
 
@@ -1537,27 +1167,9 @@ app.listen(PORT, '0.0.0.0', () => {
         ensureLatestClosedHistory()
             .catch(err => console.error('[History] Startup backfill failed:', err.message));
 
-        // Instant cold start: serve the last snapshot immediately (<100ms),
-        // then rebuild from raw gifts in the background without blocking serving.
-        try {
-            const snap = await loadSnapshot();
-            if (snap) {
-                cachedData = snap;
-                cacheTimestamp = Date.now();
-                console.log('[Cache] Served leaderboard snapshot for instant cold start');
-            }
-        } catch (err) {
-            console.error('[Cache] Snapshot load error:', err.message);
-        }
-
+        // The same strict context cache serves startup and browser requests.
         buildLeaderboardData(lastResetHour, lastFreezeUntil)
-            .then(data => {
-                if (!data) return;
-                cachedData = data;
-                cacheTimestamp = Date.now();
-                broadcastLeaderboard(data); // push fresh data to any clients connected during warm-up
-                console.log('[Cache] Background rebuild complete (snapshot refreshed)');
-            })
+            .then(() => console.log('[Cache] Startup context available'))
             .catch(err => console.error('[Cache] Startup rebuild error:', err.message));
     } catch (err) {
         console.error('[Startup] Initial DB connection failed:', err.message);
@@ -1571,14 +1183,17 @@ setInterval(async () => {
     if (!db) return; // skip if DB is down
     if (sseClients.size > 0) return; // clients connected = cache stays fresh via change streams
     try {
-        const data = await buildLeaderboardData(lastResetHour, lastFreezeUntil);
-        cachedData = data;
-        cacheTimestamp = Date.now();
+        await buildLeaderboardData(lastResetHour, lastFreezeUntil);
         console.log('[Cache] Background refresh (no clients connected)');
     } catch (err) {
         console.error('[Cache] Background refresh error:', err.message);
     }
 }, CACHE_BG_INTERVAL);
+
+// Recover standalone stream failures too (not every stream error closes MongoClient).
+setInterval(() => {
+    if (db && (!activeGiftsStream || !activeProfilesStream || !activeSessionsStream || !activeLocationsStream)) startChangeStreams();
+}, 30000);
 
 // Ensure the latest closed calendar month exists even when no browser is open.
 // A failed attempt is intentionally not memoized, so the next minute retries.

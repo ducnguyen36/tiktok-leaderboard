@@ -17,6 +17,8 @@ RUN npm ci --omit=dev
 COPY server.js ./
 COPY monthlyWindows.js ./
 COPY leaderboardHistory.js ./
+COPY leaderboardAggregation.js ./
+COPY leaderboardPerformance.js ./
 COPY public/ ./public/
 
 # Create local avatars cache directory

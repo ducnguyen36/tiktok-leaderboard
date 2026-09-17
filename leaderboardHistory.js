@@ -1,7 +1,9 @@
 'use strict';
 
 const TIMEZONE = 'Asia/Ho_Chi_Minh';
-const AGGREGATION_VERSION = 1;
+// v2 preserves the same scoring math and removes the historical top-50 cap.
+// New immutable ids keep v1 archives intact while publishing complete rankings.
+const AGGREGATION_VERSION = 2;
 const VIETNAM_OFFSET_HOURS = 7;
 const MONTH_CLOSE_HOUR = 7;
 
