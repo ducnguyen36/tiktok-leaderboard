@@ -55,7 +55,7 @@ Local verification: `node --test test/leaderboardAuth.test.js test/accessGuard.t
 
 ### Local verification recorded on 2026-09-18
 
-- Combined access/mobile implementation: `npm test` — 96 passed, 0 failed (independent final run: 41.64 seconds).
+- Combined access/mobile implementation, including final accessibility fixes at `fc395ae`: `npm test` — 97 passed, 0 failed (independent final run: 34.18 seconds). Independent scoped re-review closed all findings; ready for local handoff, not deployment.
 - `npm audit --omit=dev` — 0 reported vulnerabilities, with TLS certificate verification enabled.
 - Separate actual-server probe: all 13 private HTML/API/avatar/overlay/SSE paths returned 401 without credentials; `/auth` remained reachable. The probe used an unavailable loopback database, not production MongoDB.
 - Phone portrait 390×844 and landscape 844×390, desktop/TV layouts, optional history tabs, language changes, settings and phone-to-TV resizing are covered by browser tests. Fixture screenshots were inspected at 390×844 and 1920×1080.
