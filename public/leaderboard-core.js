@@ -11,7 +11,7 @@
   for(const key of ['total','lastMonth','yesterdayGroups','yesterdayIdols'])c[key]=bool(x[key],c[key]);
   c.speed=number(x.speed,60,10,150);c.pause=number(x.pause,2,0,10);c.tickerSpeed=number(x.tickerSpeed,165,30,300);c.resetHour=Math.floor(number(x.resetHour,0,0,23));
   c.freezeUntil=x.freezeUntil===''||/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(x.freezeUntil)?x.freezeUntil:defaults.freezeUntil;
-  c.locations=flags(x.locations,defaults.locations);c.groups=flags(x.groups,{});return c;
+  c.locations=flags(x.locations,defaults.locations);c.groups=flags(x.groups,{});c.talents=flags(x.talents,{});return c;
  }
  function migrate(x){if(!x||typeof x!=='object')return normalize({});return normalize({scores:['group-daily','individual-daily','group-monthly','individual-monthly','individual-monthly'].map(k=>x.showIncome?.[k]),total:x.total,resetHour:x.resetHour,freezeUntil:x.freezeUntil,yesterdayGroups:x.showYesterday?.['group-daily'],yesterdayIdols:x.showYesterday?.['individual-daily'],locations:x.visibleLocations,groups:x.visibleGroups,lastMonth:false})}
  function filtered(rows,c,locations=[]){return (Array.isArray(rows)?rows:[]).filter(e=>{
@@ -21,7 +21,7 @@
   return true;
  }).slice().sort((a,b)=>Number(b.value)-Number(a.value)||a.name.localeCompare(b.name));}
  const mapping=[['group','daily'],['individual','daily'],['group','monthly'],['individual','monthly'],['individual','monthly']];
- function selectRows(raw,c,index,history=null,yesterday=false){const [kind,period]=mapping[index]||['individual','history'];const rows=index===5?history?.individual:raw?.[kind]?.[yesterday&&index<2?'yesterday':period];const result=filtered(rows,c,raw?.locations||[]);return index<4?result.slice(0,10):result}
+ function selectRows(raw,c,index,history=null,yesterday=false){const [kind,period]=mapping[index]||['individual','history'];const rows=index===5?history?.individual:raw?.[kind]?.[yesterday&&index<2?'yesterday':period];const result=filtered(rows,c,raw?.locations||[]).filter(e=>kind!=='individual'||c.talents?.[e.name]!==false);return index<4?result.slice(0,10):result}
  function total(raw,c,yesterday=false){return filtered(raw?.group?.[yesterday?'yesterday':'daily'],c,raw?.locations||[]).reduce((sum,e)=>sum+Number(e.value),0)}
  function formatPoints(n){return Math.ceil(Number(n)||0).toLocaleString('en-US')}
  function historyMonth(date=new Date()){const vn=new Date(date.getTime()+7*3600000);const prev=new Date(Date.UTC(vn.getUTCFullYear(),vn.getUTCMonth()-1,1));return prev.toISOString().slice(0,7)}

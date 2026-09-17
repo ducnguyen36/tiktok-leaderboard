@@ -11,6 +11,20 @@ test('invalid stored values cannot break layout, timing or score switches',()=>{
  assert.deepEqual(c.scores,[false,true,true,true,true]);assert.equal(c.speed,10);assert.equal(c.pause,0);assert.equal(c.resetHour,23);assert.equal(c.freezeUntil,'09:00');assert.equal(c.tickerSpeed,165);assert.deepEqual(c.locations,{h:true});assert.equal(c.theme,undefined);
 });
 const rows=Array.from({length:14},(_,i)=>({name:'Idol '+i,value:14-i,groupId:i===0?'hidden':'g',locationId:'loc_hcm'}));
+test('individual visibility survives saved settings and filters before top ten without changing group totals',()=>{
+ const c=C.normalize({talents:{'Idol 0':false,'Idol 2':false,invalid:'false'}});
+ const raw={individual:{daily:rows,monthly:rows,yesterday:rows},group:{daily:[rows[0]],monthly:[rows[0]]}};
+ assert.equal(c.talents['Idol 0'],false);assert.equal(c.talents.invalid,undefined);
+ for(const index of [1,3,4,5]){
+  const selected=C.selectRows(raw,c,index,{individual:rows});
+  assert.equal(selected[0].name,'Idol 1');assert.ok(!selected.some(r=>r.name==='Idol 2'));
+  assert.equal(selected.length,index<4?10:12);
+ }
+ assert.equal(C.selectRows(raw,c,1,null,true)[0].name,'Idol 1');
+ assert.equal(C.total(raw,c),14);assert.equal(C.selectRows(raw,c,0).length,1);
+ assert.deepEqual(C.normalize({}).talents,{});
+ assert.equal(C.normalize(JSON.parse(JSON.stringify(c))).talents['Idol 0'],false);
+});
 test('filter before ranking top ten, all ranking remains untruncated, total avoids double counting',()=>{
  const c=C.normalize({groups:{hidden:false}});const raw={group:{daily:[{name:'G',value:1200000,groupId:'g',locationId:'loc_hcm'}]},individual:{monthly:rows,daily:rows},locations:[{id:'loc_hcm'}]};
  assert.equal(C.selectRows(raw,c,3).length,10);assert.equal(C.selectRows(raw,c,4).length,13);assert.equal(C.selectRows(raw,c,3)[0].name,'Idol 1');assert.equal(C.total(raw,c),1200000);assert.equal(C.formatPoints(5270072),'5,270,072');

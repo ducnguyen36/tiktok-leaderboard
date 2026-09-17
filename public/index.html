@@ -11,8 +11,9 @@
 <div class="settings-dialog" id="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" hidden>
 <section class="settings-box"><header class="settings-titlebar"><h2 id="settings-title">Settings</h2><button id="close-settings" aria-label="Close settings">✕</button></header>
 <div class="settings-content"><nav class="settings-nav" aria-label="Settings sections">
-<button data-page="0" class="active">Display</button><button data-page="1" class="">Timing</button><button data-page="2" class="">Locations & Groups</button><button data-page="3" class="">History & Refresh</button><button data-page="4" class="">Defaults</button><button data-page="5" class="">Shortcuts</button></nav>
+<button data-page="0" class="active">Display</button><button data-page="1" class="">Timing</button><button data-page="2" class="">Locations & Groups</button><button data-page="3" class="">History & Refresh</button><button data-page="4" class="">Defaults</button><button data-page="5" class="">Shortcuts</button><button data-page="6">Talents</button></nav>
 <div class="settings-pages">
+<section class="settings-page" data-pane="6"><h3>Individual Talents</h3><div class="filter-items" id="talent-items"></div><div class="pager"><button id="talents-prev">Previous</button><span id="talents-page"></span><button id="talents-next">Next</button></div><p>Checked = visible in idol rankings, including last month. Group/location filters still apply. Group scores and total points are unchanged.</p></section>
 <section class="settings-page active" data-pane="0"><h3>Display</h3>
 <label>Daily Top Groups — points <input type="checkbox" data-score="0"></label><label>Daily Top Idols — points <input type="checkbox" data-score="1"></label><label>Monthly Top Groups — points <input type="checkbox" data-score="2"></label><label>Monthly Top Idols — points <input type="checkbox" data-score="3"></label><label>Monthly Ranking — points <input type="checkbox" data-score="4"></label>
 <label>Today's Total Points (9)<input type="checkbox" data-config="total"></label>

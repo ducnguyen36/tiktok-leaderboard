@@ -138,12 +138,12 @@ async function loadHistory(force=false){
  const month=C.historyMonth();if(historyMonth!==month){historyMonth=month;historyPayload=null;historyRequest++;rowSignatures[5]='';renderRows(5);setupScroll()}
  if(historyPayload&&C.historyValid(historyPayload,month)&&!force)return;
  if(historyInFlight?.month===month)return historyInFlight.promise;
- if(!force){const cached=readStored(storageKey+'_history_'+month);if(C.historyValid(cached,month)){historyPayload={...cached,source:'device cache'};renderRows(5);setupScroll();renderSummary();return}}
+ if(!force){const cached=readStored(storageKey+'_history_'+month);if(C.historyValid(cached,month)){historyPayload={...cached,source:'device cache'};renderRows(5);setupScroll();renderSummary();renderTalents();return}}
  const version=++historyRequest;boards[5].classList.add('loading');
  const promise=(async()=>{try{const payload=await fetchJSON('/api/leaderboard/history?month='+month);if(version!==historyRequest||month!==C.historyMonth())return;
    if(payload.period?.month!==month||!Array.isArray(payload.data?.individual)||!Array.isArray(payload.data?.group))throw Error('Invalid history');
    historyPayload=payload;columnData[5]=rawData;if(C.historyValid(payload,month)){try{localStorage.setItem(storageKey+'_history_'+month,JSON.stringify(payload))}catch{notify('Month loaded; device cache could not be saved.')}}
-   renderRows(5);setupScroll();renderSummary();if(force)notify('Last month snapshot refreshed');
+   renderRows(5);setupScroll();renderSummary();renderTalents();if(force)notify('Last month snapshot refreshed');
   }catch(e){if(version===historyRequest)notify('Unable to load last month. Existing snapshot is kept.')}
   finally{if(version===historyRequest)boards[5].classList.remove('loading');if(historyInFlight?.version===version)historyInFlight=null}
  })();historyInFlight={month,version,promise};return promise;
@@ -155,7 +155,7 @@ function renderLocations(){
  const select=document.getElementById('location-choice');const locations=allLocations.length?allLocations:[{id:'',name:'All / unassigned'}];
  if(!locations.some(l=>l.id===selectedLocation))selectedLocation=locations.find(l=>config.locations[l.id])?.id||locations[0].id;
  const signature=JSON.stringify(locations);if(select.dataset.signature!==signature){select.replaceChildren();locations.forEach(l=>{const option=document.createElement('option');option.value=l.id;option.textContent=l.name;select.append(option)});select.dataset.signature=signature}
- select.value=selectedLocation;renderGroups();
+ select.value=selectedLocation;renderGroups();renderTalents();
 }
 function renderGroups(){
  const groupList=allGroups.filter(g=>g.locationId===selectedLocation),size=innerWidth<700?4:6,total=Math.max(1,Math.ceil(groupList.length/size));page=Math.max(0,Math.min(page,total-1));
@@ -167,7 +167,25 @@ function renderGroups(){
 }
 
 
-function showSettings(){cancelHold();clearTimeout(remoteTimer);dialog.hidden=false;gear.classList.remove('idle');document.querySelector('.quick-toolbar').classList.remove('idle');scrollAnimations.forEach(a=>a.pause());tickerAnimation?.pause();dialog.querySelector('.settings-nav button.active').focus()}
+let talentPage=0;
+function renderTalents(){
+ const sources=[rawData,...columnData.slice(0,5)],names=new Set(Object.keys(config.talents||{}));
+ for(const source of sources)for(const rows of Object.values(source?.individual||{}))for(const row of rows||[])if(typeof row.name==='string')names.add(row.name);
+ for(const row of historyPayload?.data?.individual||[])if(typeof row.name==='string')names.add(row.name);
+ const list=[...names].sort((a,b)=>a.localeCompare(b)),size=innerWidth<700?4:6,total=Math.max(1,Math.ceil(list.length/size));talentPage=Math.max(0,Math.min(talentPage,total-1));
+ const container=document.getElementById('talent-items'),shown=list.slice(talentPage*size,(talentPage+1)*size),signature=JSON.stringify(shown);
+ if(container.dataset.signature!==signature){
+  container.replaceChildren();for(const name of shown){const label=document.createElement('label'),span=document.createElement('span'),input=document.createElement('input');span.textContent=name;span.title=name;input.type='checkbox';input.dataset.talent=name;input.setAttribute('aria-label',name);label.append(span,input);container.append(label);
+   input.onchange=()=>{config.talents[name]=input.checked;apply();document.getElementById('save-status').textContent='Changes saved on this device'};
+  }container.dataset.signature=signature;
+ }
+ for(const input of container.querySelectorAll('input'))input.checked=config.talents[input.dataset.talent]!==false;
+ document.getElementById('talents-page').textContent=(talentPage+1)+' / '+total;
+ document.getElementById('talents-prev').disabled=talentPage===0;document.getElementById('talents-next').disabled=talentPage>=total-1;
+}
+document.getElementById('talents-prev').onclick=()=>{talentPage--;renderTalents();document.querySelector('#talent-items input')?.focus()};
+document.getElementById('talents-next').onclick=()=>{talentPage++;renderTalents();document.querySelector('#talent-items input')?.focus()};
+function showSettings(){renderTalents();cancelHold();clearTimeout(remoteTimer);dialog.hidden=false;gear.classList.remove('idle');document.querySelector('.quick-toolbar').classList.remove('idle');scrollAnimations.forEach(a=>a.pause());tickerAnimation?.pause();dialog.querySelector('.settings-nav button.active').focus()}
 function closeSettings(){finishEdit(false);dialog.hidden=true;scrollAnimations.forEach(a=>a.play());tickerAnimation?.play();stage.tabIndex=-1;stage.focus();revealGear()}
 document.getElementById('quick-lastmonth').onclick=()=>{config.lastMonth=!config.lastMonth;apply();revealGear()};
 document.getElementById('quick-refresh').onclick=()=>{refreshAll();revealGear()};
@@ -303,7 +321,7 @@ quickToolbar.addEventListener('click',e=>{if(dialog.hidden&&e.detail>0){stage.ta
 revealGear();
 document.addEventListener('keyup',e=>{if(['Enter','Accept','Select'].includes(e.key)||e.keyCode===23)clearTimeout(remoteTimer)});
 window.addEventListener('blur',()=>{cancelHold();clearTimeout(remoteTimer)});
-window.addEventListener('resize',()=>{setupScroll();setupTicker();renderGroups()});
+window.addEventListener('resize',()=>{setupScroll();setupTicker();renderGroups();renderTalents()});
 
 
 document.getElementById('refresh-all').onclick=refreshAll;
