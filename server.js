@@ -1,7 +1,10 @@
 require('dotenv').config();
+// Authentication must never inherit a process-wide TLS verification bypass.
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '1';
 process.env.TZ = 'Asia/Ho_Chi_Minh';
 const express = require('express');
-const cors = require('cors');
+const { createLeaderboardAuth } = require('./leaderboardAuth');
+const { privateHtmlName, safeAvatarPath } = require('./privateAssets');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -42,8 +45,9 @@ try { dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']); } catch (e) { /* ignore
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-app.use(cors());
-app.use(express.json());
+const leaderboardAuth = createLeaderboardAuth({ getDb: () => db });
+app.use(leaderboardAuth.middleware);
+app.use(express.json({ limit: '16kb' }));
 
 // Cache-busting version for static assets: a content hash of every client runtime file.
 // Cloudflare/browsers cache these with a 4h TTL, so without this a deploy can
@@ -52,7 +56,7 @@ app.use(express.json());
 function computeAssetVersion() {
     try {
         const h = crypto.createHash('sha1');
-        for (const file of ['app.js', 'style.css', 'leaderboard-core.js', 'keep-awake.js']) {
+        for (const file of ['app.js', 'style.css', 'leaderboard-core.js', 'keep-awake.js', 'i18n.js', 'access-guard.js']) {
             const filePath = path.join(__dirname, 'public', file);
             if (fs.existsSync(filePath)) h.update(fs.readFileSync(filePath));
         }
@@ -65,24 +69,28 @@ const ASSET_VERSION = computeAssetVersion();
 
 // OBS overlay (/?overlay=true) + cache-busted index.html.
 // Registered BEFORE express.static, which would otherwise serve index.html for '/'.
-app.get('/', (req, res) => {
-    if (req.query.overlay === 'true') {
-        res.set('Cache-Control', 'no-cache');
-        return res.sendFile(path.join(__dirname, 'public', 'overlay.html'));
-    }
+function servePrivateHtml(req, res) {
     // Serve index.html with versioned asset URLs so JS/CSS updates take effect on the
     // next load instead of waiting out the CDN/browser TTL. HTML itself is not cached.
     try {
-        const html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8')
+        const filename = req.query.overlay === 'true' ? 'overlay.html' : privateHtmlName(req.path) || 'index.html';
+        const html = fs.readFileSync(path.join(__dirname, 'public', filename), 'utf8')
+            .replace('<head>', `<head><script src="/access-guard.js?v=${ASSET_VERSION}"></script>`)
             .replace('/style.css', `/style.css?v=${ASSET_VERSION}`)
             .replace('/app.js', `/app.js?v=${ASSET_VERSION}`)
             .replace('/leaderboard-core.js', `/leaderboard-core.js?v=${ASSET_VERSION}`)
-            .replace('/keep-awake.js', `/keep-awake.js?v=${ASSET_VERSION}`);
-        res.set('Cache-Control', 'no-cache');
+            .replace('/keep-awake.js', `/keep-awake.js?v=${ASSET_VERSION}`)
+            .replace('/i18n.js', `/i18n.js?v=${ASSET_VERSION}`);
         res.type('html').send(html);
     } catch (e) {
-        res.sendFile(path.join(__dirname, 'public', 'index.html'));
+        res.status(503).send('Private page unavailable');
     }
+}
+app.get(['/', '/index.html', '/overlay.html'], servePrivateHtml);
+// Canonicalize encoded/Windows aliases before static serving so all private HTML has the guard.
+app.use((req, res, next) => {
+    if (['GET', 'HEAD'].includes(req.method) && privateHtmlName(req.path)) return servePrivateHtml(req, res);
+    next();
 });
 
 // Serve static files from public/
@@ -99,11 +107,8 @@ if (!fs.existsSync(LOCAL_AVATARS)) fs.mkdirSync(LOCAL_AVATARS, { recursive: true
 // Serve avatars at /userdata/avatars/* (matches the avatarUrl format in MongoDB)
 app.get('/userdata/avatars/:filename', (req, res) => {
     const filename = req.params.filename;
-    const paths = [
-        path.join(ELECTRON_AVATARS, filename),
-        path.join(DEV_AVATARS, filename),
-        path.join(LOCAL_AVATARS, filename)
-    ];
+    const paths = [ELECTRON_AVATARS, DEV_AVATARS, LOCAL_AVATARS].map(root => safeAvatarPath(root, filename));
+    if (paths.some(candidate => !candidate)) return res.status(400).send('Invalid avatar filename');
 
     for (const p of paths) {
         if (fs.existsSync(p)) {
@@ -115,7 +120,7 @@ app.get('/userdata/avatars/:filename', (req, res) => {
 
 // --- Health Check (lightweight, no aggregation) ---
 app.get('/api/health', (req, res) => {
-    res.json({ status: db ? 'ok' : 'no_db', uptime: process.uptime() });
+    res.json({ status: 'ok' });
 });
 
 // --- Debug: compare time boundaries and gift counts ---
@@ -917,7 +922,7 @@ function broadcastLeaderboard() {
     const message = `data: ${JSON.stringify({ status: 'ok', invalidated: true })}\n\n`;
     for (const client of sseClients) {
         try {
-            client.write(message);
+            void client.send(message);
         } catch (e) {
             sseClients.delete(client);
         }
@@ -931,24 +936,24 @@ app.get('/api/leaderboard/stream', (req, res) => {
     // SSE headers
     res.writeHead(200, {
         'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*'
+        'Cache-Control': 'private, no-store',
+        'Connection': 'keep-alive'
     });
 
     // Keep-alive
-    res.write(':ok\n\n');
+    const client = leaderboardAuth.guardStream(req, res);
+    void client.send(':ok\n\n');
 
     // Track client
-    sseClients.add(res);
+    sseClients.add(client);
     console.log(`[SSE] Client connected (${sseClients.size} total)`);
 
     // Each browser revalidates its own reset/freeze context through /current.
-    res.write(`data: ${JSON.stringify({ status: 'ok', invalidated: true })}\n\n`);
+    void client.send(`data: ${JSON.stringify({ status: 'ok', invalidated: true })}\n\n`);
 
     // Cleanup on disconnect
-    req.on('close', () => {
-        sseClients.delete(res);
+    res.on('close', () => {
+        sseClients.delete(client);
         console.log(`[SSE] Client disconnected (${sseClients.size} remaining)`);
     });
 });
@@ -1157,7 +1162,7 @@ app.get('/api/leaderboard/lastmonth', async (req, res) => {
 // Catch-all: serve index.html (but NOT for /api/ routes)
 app.use((req, res, next) => {
     if (req.path.startsWith('/api/')) return next();
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    servePrivateHtml(req, res);
 });
 
 // --- Start Server ---

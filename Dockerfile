@@ -15,6 +15,7 @@ RUN npm ci --omit=dev
 
 # Copy application files
 COPY server.js ./
+COPY leaderboardAuth.js authStore.js privateAssets.js ./
 COPY monthlyWindows.js ./
 COPY leaderboardHistory.js ./
 COPY leaderboardAggregation.js ./
