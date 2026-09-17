@@ -40,6 +40,49 @@ test('cache-first reads show actual age; forced refresh wins over pending automa
  assert.equal(state.requests.filter(r=>!r.forced).length,before,'automatic refresh must not cancel or join a pending forced refresh');
 });
 
+test('scoped refresh keeps aggregate metadata truthful and uses the forced endpoint',{timeout:20000},async t=>{
+ const {app,state}=createFixtureServer();state.stale=true;state.computedAt=Date.UTC(2026,8,17,3,0,0);
+ const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
+ const browser=await chromium.launch({channel:process.env.PLAYWRIGHT_CHANNEL||'chrome',headless:true});
+ t.after(async()=>{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r))});
+ const page=await browser.newPage();await page.goto('http://127.0.0.1:'+server.address().port);await page.waitForSelector('.row');
+ state.source='computed';state.stale=false;state.computedAt=Date.UTC(2026,8,17,4,0,0);state.offset=444;
+ const forcedBefore=state.requests.filter(r=>r.forced).length;
+ await page.locator('.board-head').first().click();await page.locator('.column-refresh').first().click();await page.waitForFunction(()=>!document.querySelector('.board').classList.contains('loading'));
+ assert.equal(state.requests.filter(r=>r.forced).length,forcedBefore+1,'scoped refresh must call the forced endpoint');
+ const mixed=await page.locator('#connection').textContent();assert.match(mixed,/MIXED/);assert.match(mixed,/CACHED/);assert.match(mixed,/STALE|UPDATING/);
+ const footer=await page.locator('.footer>span:last-child').textContent();assert.match(footer,/17\/09\/2026, 10:00:00/,'oldest visible computation time remains visible');assert.match(footer,/MIXED/);
+ state.invalidate();await page.waitForResponse(r=>r.url().includes('/current?')&&r.ok());await page.waitForFunction(()=>!document.querySelector('#connection').textContent.includes('MIXED'));
+ assert.match(await page.locator('.footer>span:last-child').textContent(),/17\/09\/2026, 11:00:00/,'automatic all-column load reconciles metadata');
+});
+
+test('source enum, stale computed refresh and stream failures keep honest status',{timeout:20000},async t=>{
+ const {app,state}=createFixtureServer();state.source='unexpected-source';state.computedAt=null;
+ const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
+ const browser=await chromium.launch({channel:process.env.PLAYWRIGHT_CHANNEL||'chrome',headless:true});
+ t.after(async()=>{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r))});
+ const page=await browser.newPage();await page.goto('http://127.0.0.1:'+server.address().port);await page.waitForSelector('.row');
+ const unknown=await page.locator('#connection').textContent();assert.match(unknown,/CONNECTED/);assert.doesNotMatch(unknown,/CACHED|LIVE/,'unknown sources cannot claim cached or live data');
+ assert.equal(await page.locator('.footer>span:last-child').textContent(),'Updated: unknown','missing computation metadata cannot look newly fetched');
+ state.source='computed';state.freshStale=true;await page.keyboard.press('8');await page.waitForFunction(()=>!document.querySelector('.board').classList.contains('loading'));
+ const staleComputed=await page.locator('#connection').textContent();assert.match(staleComputed,/STALE|UPDATING/);assert.doesNotMatch(staleComputed,/CACHED/,'computed stale data is not a cache hit');
+ assert.match(await page.locator('.toast').textContent(),/newer updates pending/i,'manual stale success cannot claim latest freshness');
+ state.source='cache';state.stale=true;state.freshStale=false;state.invalidate();await page.waitForResponse(r=>r.url().includes('/current?')&&r.ok());
+ state.closeStreams();await page.waitForFunction(()=>document.querySelector('#connection').textContent.includes('RECONNECTING'));
+ const reconnecting=await page.locator('#connection').textContent();assert.match(reconnecting,/CACHED/);assert.match(reconnecting,/STALE|UPDATING/);
+ state.fail=true;await page.keyboard.press('8');await page.waitForFunction(()=>document.querySelector('#connection').textContent.includes('OFFLINE'));
+ const connections=state.streamConnections;state.closeStreams();await page.waitForTimeout(3500);
+ assert.ok(state.streamConnections>connections,'fixture stream reconnected');assert.match(await page.locator('#connection').textContent(),/OFFLINE · RETAINED/,'stream error or reopen cannot erase the failed refresh state');
+});
+
+test('aggregation v1 device history is refetched and never rendered as complete v2',{timeout:20000},async t=>{
+ const {app,state}=createFixtureServer();const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
+ const browser=await chromium.launch({channel:process.env.PLAYWRIGHT_CHANNEL||'chrome',headless:true});t.after(async()=>{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r))});
+ const page=await browser.newPage();await page.addInitScript(()=>{const vn=new Date(Date.now()+7*3600000),month=new Date(Date.UTC(vn.getUTCFullYear(),vn.getUTCMonth()-1,1)).toISOString().slice(0,7),[y,m]=month.split('-').map(Number);localStorage.setItem('helios_leaderboard_v2_current',JSON.stringify({lastMonth:true}));localStorage.setItem('helios_leaderboard_v2_history_'+month,JSON.stringify({aggregationVersion:1,period:{month,start:new Date(Date.UTC(y,m-1,1)).toISOString(),end:new Date(Date.UTC(y,m,1)).toISOString(),complete:true},data:{individual:[{name:'TRUNCATED V1',value:999}],group:[]}}))});
+ await page.goto('http://127.0.0.1:'+server.address().port);await page.waitForSelector('.board:nth-child(6) .row');
+ assert.equal(state.historyRequests,1);assert.doesNotMatch(await page.locator('.board').nth(5).innerText(),/TRUNCATED V1/);
+});
+
 test('TV keep-alive does not reload the document while data is pending',{timeout:20000},async t=>{
  const {app,state}=createFixtureServer();state.delay=5000;
  const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));

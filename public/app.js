@@ -14,9 +14,10 @@ config=stored?C.normalize(stored):saved?C.normalize(saved):C.migrate(readStored(
 const defaults=C.clone(C.defaults);
 function persist(){try{localStorage.setItem(storageKey+'_current',JSON.stringify(config))}catch(e){notify('Storage unavailable. Changes apply for this session only.')}}
 let rawData=null,historyPayload=null,allLocations=[],allGroups=[],dailyHistory=false,unfreezeUntil=0;
-let dataMeta=null,dataError=false;const manualPending=new Map(),manualEpoch=new Map();
+let dataError=false;const manualPending=new Map(),manualEpoch=new Map();
 const columnData=Array(6).fill(null),columnVersion=Array(6).fill(0),rowSignatures=Array(6).fill('');
-let scrollAnimations=[],tickerAnimation,tickerMessage='',lastContext='',historyMonth='',historyRequest=0,requestCounter=0,liveInFlight=new Map(),lastUpdated=null,lastMotion='',lastTickerSpeed=0;
+const columnMeta=Array(5).fill(null);
+let scrollAnimations=[],tickerAnimation,tickerMessage='',lastContext='',historyMonth='',historyRequest=0,requestCounter=0,liveInFlight=new Map(),lastMotion='',lastTickerSpeed=0;
 const configInputs=[...dialog.querySelectorAll('[data-config]')],scoreInputs=[...dialog.querySelectorAll('[data-score]')];
 const camera=document.querySelector('.camera-notice');
 camera.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h4l2-3h6l2 3h4v13H3z"/><circle cx="12" cy="13" r="4"/><path d="M2 2l20 20"/></svg>';
@@ -101,11 +102,23 @@ function requestContext(){return new URLSearchParams({resetHour:String(config.re
 // Keep the shared in-flight request alive instead of repeatedly aborting/retrying it.
 async function fetchJSON(url){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),600000);try{const response=await fetch(url,{signal:controller.signal,cache:'no-store'});const payload=await response.json();if(!response.ok||payload.status!=='ok'||!payload.data)throw Error(payload.message||'Data unavailable');return payload}finally{clearTimeout(timer)}}
 function connection(text){document.getElementById('connection').textContent=text}
+function visibleMetadata(){
+ const entries=columnMeta.filter((_,i)=>Boolean(columnData[i])),knownSources=new Set(['computed','cache','snapshot']);
+ const fingerprint=meta=>meta?JSON.stringify([meta.source||'',meta.stale===true,meta.computedAt||'',meta.contextKey||'']):'unknown';
+ const times=entries.map(meta=>meta?.computedAt).filter(value=>value!==null&&value!==undefined&&value!=='').map(value=>new Date(value).getTime()).filter(Number.isFinite);
+ return{entries,mixed:new Set(entries.map(fingerprint)).size>1,cached:entries.some(meta=>meta?.source==='cache'||meta?.source==='snapshot'),stale:entries.some(meta=>meta?.stale===true),allComputed:Boolean(entries.length)&&entries.every(meta=>meta?.source==='computed'),unknown:entries.some(meta=>!knownSources.has(meta?.source)),oldest:times.length?new Date(Math.min(...times)):null};
+}
+function renderUpdated(meta=visibleMetadata()){
+ const label=meta.oldest?'Updated: '+meta.oldest.toLocaleString('en-GB',{timeZone:'Asia/Ho_Chi_Minh'}):'Updated: unknown';
+ document.querySelector('.footer>span:last-child').textContent=label+(meta.mixed?' · MIXED':'');
+}
 function renderConnection(){
+ const meta=visibleMetadata();renderUpdated(meta);
  if(dataError){connection(rawData?'OFFLINE · RETAINED':'OFFLINE · NO DATA');return}
  if(!rawData){connection('CONNECTING');return}
- const cached=dataMeta?.source&&dataMeta.source!=='computed'&&dataMeta.source!=='fresh';
- connection(dataMeta?.stale?'CACHED · UPDATING':cached?'● CACHED':streamConnected?'● LIVE':'● CONNECTED');
+ const parts=[];if(meta.mixed)parts.push('MIXED');if(meta.cached)parts.push('CACHED');if(meta.stale)parts.push('STALE','UPDATING');
+ if(!parts.length)parts.push(meta.allComputed&&!meta.unknown&&streamConnected?'● LIVE':'● CONNECTED');
+ if(!streamConnected)parts.push('RECONNECTING');connection(parts.join(' · '));
 }
 async function loadCurrent(indices=[0,1,2,3,4],manual=false){
  const context=requestContext();if(!manual&&manualPending.get(context))return;
@@ -114,9 +127,9 @@ async function loadCurrent(indices=[0,1,2,3,4],manual=false){
  if(!liveInFlight.has(key)){const promise=fetchJSON('/api/leaderboard/'+(manual?'fresh':'current')+'?'+context).finally(()=>liveInFlight.delete(key));liveInFlight.set(key,promise)}
  try{const result=await liveInFlight.get(key);if(context!==requestContext()||(!manual&&epoch!==(manualEpoch.get(context)||0)))return;
   const accepted=indices.filter(i=>columnVersion[i]===request);if(!accepted.length)return;
-  rawData=result.data;dataMeta=result.meta||null;dataError=false;allLocations=(rawData.locations||[]).map(l=>({...l,id:String(l.id)}));allGroups=(rawData.groups||[]).map(g=>({...g,id:String(g.id),locationId:String(g.locationId||'')}));
-  accepted.forEach(i=>columnData[i]=rawData);let changed=false;accepted.forEach(i=>{changed=renderRows(i)||changed});if(changed)setupScroll();renderSummary();renderLocations();syncInputs();
-  lastUpdated=result.meta?.computedAt?new Date(result.meta.computedAt):null;document.querySelector('.footer>span:last-child').textContent=lastUpdated&&!isNaN(+lastUpdated)?'Updated: '+lastUpdated.toLocaleString('en-GB',{timeZone:'Asia/Ho_Chi_Minh'}):'Updated: unknown';renderConnection();if(manual)notify('Points refreshed');
+  rawData=result.data;dataError=false;allLocations=(rawData.locations||[]).map(l=>({...l,id:String(l.id)}));allGroups=(rawData.groups||[]).map(g=>({...g,id:String(g.id),locationId:String(g.locationId||'')}));
+  accepted.forEach(i=>{columnData[i]=rawData;columnMeta[i]=result.meta||null});let changed=false;accepted.forEach(i=>{changed=renderRows(i)||changed});if(changed)setupScroll();renderSummary();renderLocations();syncInputs();
+  renderConnection();if(manual)notify(result.meta?.stale===true?'Snapshot refreshed · newer updates pending':'Points refreshed');
  }catch(e){if(context===requestContext()&&(manual||epoch===(manualEpoch.get(context)||0))){dataError=true;renderConnection();if(manual||!rawData)notify('Unable to refresh. Previous data is kept.')}}
  finally{if(manual){const remaining=(manualPending.get(context)||1)-1;if(remaining)manualPending.set(context,remaining);else manualPending.delete(context)}indices.forEach(i=>{if(columnVersion[i]===request){boards[i].classList.remove('loading');boards[i].querySelector('.column-refresh')?.removeAttribute('disabled')}})}
 }
@@ -307,9 +320,9 @@ function connectStream(){
  stream=new EventSource('/api/leaderboard/stream');
  stream.onopen=()=>{streamConnected=true;renderConnection()};
  stream.onmessage=()=>streamInvalidation();
- stream.onerror=()=>{streamConnected=false;connection(rawData?'RECONNECTING · RETAINED':'CONNECTING')};
+ stream.onerror=()=>{streamConnected=false;renderConnection()};
 }
-setInterval(()=>{if(!streamConnected||dataMeta?.stale)loadCurrent();if(unfreezeUntil&&Date.now()>=unfreezeUntil){unfreezeUntil=0;lastContext='';apply()}},10000);
+setInterval(()=>{if(!streamConnected||columnMeta.some(meta=>meta?.stale))loadCurrent();if(unfreezeUntil&&Date.now()>=unfreezeUntil){unfreezeUntil=0;lastContext='';apply()}},10000);
 setInterval(()=>{loadCurrent();if(config.lastMonth)loadHistory(false)},60000);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){loadCurrent();if(config.lastMonth)loadHistory(false)}});
 apply();renderLocations();connectStream();

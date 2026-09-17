@@ -24,9 +24,9 @@ test('Vietnam calendar history target independent of display grace',()=>{
  assert.equal(C.historyMonth(new Date('2026-09-30T17:00:00Z')),'2026-09');
  assert.equal(C.historyMonth(new Date('2026-12-31T17:00:00Z')),'2026-12');
 });
-test('history cache rejects wrong month, incomplete and wrong bounds',()=>{
- const h={aggregationVersion:1,period:{month:'2026-08',start:'2026-08-01T00:00:00.000Z',end:'2026-09-01T00:00:00.000Z',complete:true},data:{individual:[],group:[]}};
- assert.equal(C.historyValid(h,'2026-08'),true);assert.equal(C.historyValid(h,'2026-07'),false);assert.equal(C.historyValid({...h,period:{...h.period,complete:false}},'2026-08'),false);assert.equal(C.historyValid({...h,period:{...h.period,end:'2026-08-31T17:00:00.000Z'}},'2026-08'),false);
+test('history cache accepts only complete exact-month aggregation v2 snapshots',()=>{
+ const h={aggregationVersion:2,period:{month:'2026-08',start:'2026-08-01T00:00:00.000Z',end:'2026-09-01T00:00:00.000Z',complete:true},data:{individual:[],group:[]}};
+ assert.equal(C.historyValid(h,'2026-08'),true);assert.equal(C.historyValid({...h,aggregationVersion:1},'2026-08'),false);assert.equal(C.historyValid(h,'2026-07'),false);assert.equal(C.historyValid({...h,period:{...h.period,complete:false}},'2026-08'),false);assert.equal(C.historyValid({...h,period:{...h.period,end:'2026-08-31T17:00:00.000Z'}},'2026-08'),false);
 });
 test('scroll pauses at both endpoints and does not animate a fitting list',()=>{
  assert.equal(C.scrollFrames(0,60,2),null);const a=C.scrollFrames(600,60,2);assert.equal(a.duration,24000);assert.equal(a.frames[0].transform,'translateY(0px)');assert.equal(a.frames[1].offset,2/24);assert.equal(a.frames[2].offset,12/24);assert.equal(a.frames[3].offset,14/24);assert.equal(a.frames[4].transform,'translateY(0px)');
