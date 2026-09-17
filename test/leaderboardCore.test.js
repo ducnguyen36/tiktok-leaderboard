@@ -22,7 +22,7 @@ test('individual visibility survives saved settings and filters before top ten w
  }
  assert.equal(C.selectRows(raw,c,1,null,true)[0].name,'Idol 1');
  assert.equal(C.total(raw,c),14);assert.equal(C.selectRows(raw,c,0).length,1);
- assert.deepEqual(C.normalize({}).talents,{});
+ assert.deepEqual(C.normalize({}).talents,{'TEAM A':false,'TEAM B':false});
  assert.equal(C.normalize(JSON.parse(JSON.stringify(c))).talents['Idol 0'],false);
 });
 test('filter before ranking top ten, all ranking remains untruncated, total avoids double counting',()=>{
@@ -44,4 +44,15 @@ test('history cache accepts only complete exact-month aggregation v2 snapshots',
 });
 test('scroll pauses at both endpoints and does not animate a fitting list',()=>{
  assert.equal(C.scrollFrames(0,60,2),null);const a=C.scrollFrames(600,60,2);assert.equal(a.duration,24000);assert.equal(a.frames[0].transform,'translateY(0px)');assert.equal(a.frames[1].offset,2/24);assert.equal(a.frames[2].offset,12/24);assert.equal(a.frames[3].offset,14/24);assert.equal(a.frames[4].transform,'translateY(0px)');
+});
+test('language normalizes and default exclusions target Kayzen group but only TEAM A/B talents',()=>{
+ const c=C.normalize({groups:{},talents:{}});
+ assert.equal(c.language,'en');assert.equal(C.normalize({language:'vi'}).language,'vi');assert.equal(C.normalize({language:'other'}).language,'en');
+ const groupId='1775469403434',locationId='loc_hcm';
+ const raw={group:{daily:[{name:'Kayzen',groupId,locationId,value:99},{name:'VENYXIS',groupId:'venyxis',locationId,value:50}]},individual:{monthly:[{name:'Member',groupId,locationId,value:100},{name:'TEAM A',groupId:'venyxis',locationId,value:90},{name:'TEAM B',groupId:'venyxis',locationId,value:80},{name:'Visible member',groupId:'venyxis',locationId,value:70}]}};
+ assert.deepEqual(C.selectRows(raw,c,4).map(e=>e.name),['Visible member']);assert.equal(C.total(raw,c),50);
+ const enabled=C.normalize({groups:{[groupId]:true},talents:{'TEAM A':true,'TEAM B':true},language:'vi'});
+ assert.equal(C.selectRows(raw,enabled,4).length,4);assert.equal(C.total(raw,enabled),149);
+ assert.equal(C.normalize(JSON.parse(JSON.stringify(enabled))).language,'vi');
+ assert.equal(C.migrate({}).groups[groupId],false);
 });

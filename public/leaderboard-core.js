@@ -1,7 +1,8 @@
 /* Shared pure data/settings helpers. Works in the browser and node:test. */
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory();else root.HeliosCore=factory()})(typeof globalThis==='object'?globalThis:this,function(){
  'use strict';
- const defaults={schemaVersion:2,scores:[true,true,true,true,true],total:true,lastMonth:false,resetHour:0,freezeUntil:'09:00',yesterdayGroups:false,yesterdayIdols:false,speed:60,pause:2,tickerSpeed:165,locations:{loc_hcm:true},groups:{}};
+ // Stable profile id verified against the live roster; TEAM A/B are talent names, not groups.
+ const defaults={schemaVersion:2,language:'en',scores:[true,true,true,true,true],total:true,lastMonth:false,resetHour:0,freezeUntil:'09:00',yesterdayGroups:false,yesterdayIdols:false,speed:60,pause:2,tickerSpeed:165,locations:{loc_hcm:true},groups:{'1775469403434':false},talents:{'TEAM A':false,'TEAM B':false}};
  const clone=x=>JSON.parse(JSON.stringify(x));
  const bool=(x,d)=>typeof x==='boolean'?x:d;
  const number=(x,d,min,max)=>Number.isFinite(Number(x))&&x!==null&&x!==''?Math.max(min,Math.min(max,Number(x))):d;
@@ -11,7 +12,8 @@
   for(const key of ['total','lastMonth','yesterdayGroups','yesterdayIdols'])c[key]=bool(x[key],c[key]);
   c.speed=number(x.speed,60,10,150);c.pause=number(x.pause,2,0,10);c.tickerSpeed=number(x.tickerSpeed,165,30,300);c.resetHour=Math.floor(number(x.resetHour,0,0,23));
   c.freezeUntil=x.freezeUntil===''||/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(x.freezeUntil)?x.freezeUntil:defaults.freezeUntil;
-  c.locations=flags(x.locations,defaults.locations);c.groups=flags(x.groups,{});c.talents=flags(x.talents,{});return c;
+  c.language=x.language==='vi'?'vi':'en';
+  c.locations=flags(x.locations,defaults.locations);c.groups={...defaults.groups,...flags(x.groups,{})};c.talents={...defaults.talents,...flags(x.talents,{})};return c;
  }
  function migrate(x){if(!x||typeof x!=='object')return normalize({});return normalize({scores:['group-daily','individual-daily','group-monthly','individual-monthly','individual-monthly'].map(k=>x.showIncome?.[k]),total:x.total,resetHour:x.resetHour,freezeUntil:x.freezeUntil,yesterdayGroups:x.showYesterday?.['group-daily'],yesterdayIdols:x.showYesterday?.['individual-daily'],locations:x.visibleLocations,groups:x.visibleGroups,lastMonth:false})}
  function filtered(rows,c,locations=[]){return (Array.isArray(rows)?rows:[]).filter(e=>{
