@@ -22,6 +22,7 @@ test('mouse language setting translates the full UI and persists through default
  assert.equal(await page.locator('.board').nth(1).locator('.points').first().textContent(),idolPoints,'full point values must not change');
  assert.match(await page.locator('.camera-notice').textContent(),/CẤM CHỤP ẢNH HOẶC QUAY VIDEO/);
  assert.deepEqual(await page.locator('.settings-nav button').allTextContents(),['Hiển thị','Thời gian','Phạm vi hiển thị','Lịch sử & Làm mới','Mặc định','Phím tắt']);
+ await page.locator('[data-page="2"]').click();assert.equal(await page.locator('#location-choice option').first().textContent(),'Tất cả chi nhánh');assert.equal(await page.locator('#location-toggles span').textContent(),'Hiện tất cả chi nhánh');assert.equal(await page.locator('#branch-items input').first().getAttribute('aria-label'),'Hiện TEST HCM');
  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('helios_leaderboard_v2_current')).language),'vi');
  for(let pane=0;pane<6;pane++){
   await page.locator('[data-page="'+pane+'"]').click();
@@ -44,5 +45,8 @@ test('remote OK and Back commit or cancel language edits while dynamic copy stay
  assert.match(await page.locator('#connection').textContent(),/BỘ NHỚ ĐỆM/);assert.doesNotMatch(await page.locator('#connection').textContent(),/CACHED/);
  assert.equal(await page.locator('#quick-refresh').getAttribute('title'),'Làm mới tất cả (8)');
  await page.locator('#done-settings').click();await page.keyboard.press('8');await page.waitForFunction(()=>document.querySelector('.toast').textContent.includes('Đã làm mới điểm'));
+ const vn=new Date(Date.now()+7*3600000),month=new Date(Date.UTC(vn.getUTCFullYear(),vn.getUTCMonth()-1,1)).toISOString().slice(0,7),[y,m]=month.split('-').map(Number),history={status:'ok',aggregationVersion:2,source:'rebuilt',period:{month,start:new Date(Date.UTC(y,m-1,1)).toISOString(),end:new Date(Date.UTC(y,m,1)).toISOString(),complete:true},data:{individual:[{name:'TEST ALPHA',value:1234567,locationId:'loc_hcm',groupId:'g0'}],group:[]}};
+ await page.route('**/api/leaderboard/history**',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(history)}));
  await page.keyboard.press('6');await page.waitForSelector('.board:nth-child(6) .row');assert.match(await page.locator('#history-note').textContent(),/Tháng trước:/);
+ assert.match(await page.locator('#history-note').textContent(),/đã tính lại/,'rebuilt history source is translated');
 });

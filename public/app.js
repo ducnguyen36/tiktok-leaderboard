@@ -97,10 +97,10 @@ function renderSummary(){
  translateUI();
 }
 function apply(){
- config=C.normalize(config);I.applyDocument(config.language,document);boards.forEach((b,i)=>b.classList.toggle('hide-points',i<5&&!config.scores[i]));
+ const previousLanguage=document.documentElement.lang;config=C.normalize(config);const languageChanged=previousLanguage!==config.language;I.applyDocument(config.language,document);boards.forEach((b,i)=>b.classList.toggle('hide-points',i<5&&!config.scores[i]));
  const changedLayout=sixth.hidden===config.lastMonth;sixth.hidden=!config.lastMonth;stage.classList.toggle('six',config.lastMonth);grid.style.setProperty('--columns',config.lastMonth?6:5);
  document.querySelector('.kpi').classList.toggle('hide-total',!config.total);
- let changed=false;boards.forEach((b,i)=>{changed=renderRows(i)||changed});const motion=config.speed+'|'+config.pause;if(changed||changedLayout||motion!==lastMotion)setupScroll();lastMotion=motion;renderSummary();renderConnection();if(lastTickerSpeed!==config.tickerSpeed)setupTicker();lastTickerSpeed=config.tickerSpeed;syncInputs();persist();
+ let changed=false;boards.forEach((b,i)=>{changed=renderRows(i)||changed});const motion=config.speed+'|'+config.pause;if(changed||changedLayout||motion!==lastMotion)setupScroll();lastMotion=motion;renderSummary();renderConnection();if(lastTickerSpeed!==config.tickerSpeed)setupTicker();lastTickerSpeed=config.tickerSpeed;syncInputs();persist();if(languageChanged)renderLocations();
  const context=requestContext();if(context!==lastContext){lastContext=context;loadCurrent([0,1,2,3,4])}
  if(config.lastMonth)loadHistory(false);
 }
