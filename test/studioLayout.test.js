@@ -9,6 +9,21 @@ async function fixture(t){
  const page=await browser.newPage({viewport:{width:1920,height:1080}});await page.goto('http://127.0.0.1:'+server.address().port);await page.waitForSelector('.row');return{page,state};
 }
 async function choose(page,value){await page.keyboard.press('7');await page.locator('.settings-nav [data-page="0"]').click();assert.equal(await page.locator('#layout-choice').count(),1,'Display settings offers both TV layouts');await page.locator('#layout-choice').selectOption(value);await page.locator('#done-settings').click();}
+test('all layouts keep Classic colored headers fully visible while scores refresh',async t=>{
+ const {page,state}=await fixture(t);
+ const backgrounds=()=>page.locator('.board-head').evaluateAll(es=>es.map(e=>getComputedStyle(e).backgroundImage));
+ const classic=await backgrounds();assert.ok(classic.every(value=>value.includes('linear-gradient')));
+ state.delay=700;
+ for(const layout of ['classic','studio','podium']){
+  await choose(page,layout);
+  assert.deepEqual(await backgrounds(),classic,layout+' keeps Classic header colors');
+  const completed=page.waitForResponse(r=>r.url().includes('/api/leaderboard/current'));
+  state.invalidate();await page.waitForSelector('.board.loading');
+  assert.equal(await page.locator('.board.loading .board-head').evaluateAll(es=>es.every(e=>getComputedStyle(e).opacity==='1')),true,layout+' does not dim headers during background refresh');
+  await completed;await page.waitForSelector('.board.loading',{state:'detached'});
+  assert.deepEqual(await backgrounds(),classic);
+ }
+});
 test('ranking order switches immediately, persists and preserves podium winners',async t=>{
  const {page,state}=await fixture(t);await page.keyboard.press('7');assert.equal(await page.locator('#rank-order-label').isVisible(),false);
  const calls=state.requests.length;

@@ -207,7 +207,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,.b
 #visibility-groups .pager,#visibility-talents .pager{margin-top:8px}
 .avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%}
 .empty-state{height:100%;display:grid;place-items:center;padding:12px;text-align:center;color:#baa996;font-size:clamp(12px,1vw,20px)}
-.board.loading .board-head{opacity:.65}.column-refresh[disabled]{opacity:.4}
+.column-refresh[disabled]{opacity:.4}
 .kpi span{white-space:nowrap}.kpi{overflow:hidden}
 .footer>span{min-width:0}.footer>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .settings-pages{min-width:0;min-height:0}.settings-box{box-shadow:0 20px 80px #0008}
@@ -249,7 +249,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,.b
  .tv[data-studio="true"] .board[data-column="3"]{grid-area:2/2;--accent:#ee9fb7}
  .tv[data-studio="true"] .board[data-column="4"]{grid-area:1/3/3/4;--accent:#f0ba91;background:linear-gradient(150deg,#292323,#19181c)}
  .tv[data-studio="true"] .board[data-column="5"]{grid-area:1/4/3/5;--accent:#d5bba3!important;background:linear-gradient(150deg,#242226,#17171b)}
- .tv[data-studio="true"] .board-head{padding:0 calc(var(--unit)*.85);background:transparent;border:0;border-top:3px solid var(--accent);gap:8px}
+ .tv[data-studio="true"] .board-head{padding:0 calc(var(--unit)*.85);background:linear-gradient(105deg,var(--a),var(--b));border:0;border-bottom:2px solid var(--accent);gap:8px}
  .tv[data-studio="true"] .board-head b{font-size:calc(var(--unit)*1.08);font-weight:700;letter-spacing:-.015em;color:#fff6ed}
  .tv[data-studio="true"] .board:nth-child(-n+4) .list{display:grid;grid-template-rows:repeat(5,minmax(0,1fr));grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-flow:column;padding:0 calc(var(--unit)*.45) calc(var(--unit)*.45);gap:calc(var(--unit)*.25) calc(var(--unit)*.45)}
  .tv[data-studio="true"] .board:nth-child(-n+4) .row{height:100%;min-width:0;border:1px solid #ffffff07;border-radius:calc(var(--unit)*.4);background:#ffffff03}
