@@ -108,7 +108,7 @@ const ticker=document.querySelector('.ticker-line');
 const tickerDivider='   ✦ ✧ ✦   ';
 function syncBannerPlacement(){
  const zone=document.querySelector('.ticker-zone');
- if(config.layout!=='classic'&&matchMedia('(min-width:1100px) and (min-height:600px)').matches){if(zone.parentElement!==grid)grid.append(zone)}
+ if(config.layout!=='classic'&&!isMobileLayout()){if(zone.parentElement!==grid)grid.append(zone)}
  else if(zone.parentElement!==stage)stage.insertBefore(zone,mobileTabs);
 }
 function buildTicker(){

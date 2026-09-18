@@ -31,7 +31,7 @@ test('Studio rearranges every ranking without losing rows, points or viewport fi
  const {page,state}=await fixture(t),before=await page.locator('.board .name').allTextContents();const requests=state.requests.length;
  await choose(page,'studio');assert.equal(await page.locator('.tv').getAttribute('data-layout'),'studio');
  assert.deepEqual(await page.locator('.board .name').allTextContents(),before);assert.equal(state.requests.length,requests,'layout change does not refetch scores');
- for(const size of [{width:1920,height:1080},{width:1366,height:768},{width:1100,height:600},{width:2560,height:1080}]){
+ for(const size of [{width:1920,height:1080},{width:1366,height:768},{width:1100,height:600},{width:2560,height:1080},{width:960,height:540},{width:1024,height:576}]){
   await page.setViewportSize(size);
   for(const history of [false,true]){
    if(history)await page.keyboard.press('6');await page.waitForTimeout(80);
@@ -91,7 +91,7 @@ test('Podium preserves all ranks, points, comparisons and rail scrolling at TV s
  const {page,state}=await fixture(t),names=await page.locator('.board').evaluateAll(bs=>bs.map(b=>[...b.querySelectorAll('.name')].map(e=>e.textContent))),calls=state.requests.length;
  await page.keyboard.press('7');assert.equal(await page.locator('#layout-choice option[value="podium"]').count(),1,'Podium is a selectable third layout');await page.locator('#layout-choice').selectOption('podium');await page.locator('.settings-nav [data-page="1"]').click();await page.locator('[data-config="yesterdayGroups"]').check();await page.locator('[data-config="yesterdayIdols"]').check();await page.locator('#done-settings').click();
  assert.deepEqual(await page.locator('.board').evaluateAll(bs=>bs.map((b,i)=>[...b.querySelectorAll('.name')].slice(0,i<4?10:Infinity).map(e=>e.textContent))),names);assert.equal(state.requests.length,calls);
- for(const size of [{width:1920,height:1080},{width:1366,height:768},{width:1100,height:600}]){
+ for(const size of [{width:1920,height:1080},{width:1366,height:768},{width:1100,height:600},{width:960,height:540},{width:1024,height:576}]){
   await page.setViewportSize(size);
   for(const history of [false,true]){
    if(history){await page.keyboard.press('6');await page.waitForSelector('.board[data-column="5"] .row')}
