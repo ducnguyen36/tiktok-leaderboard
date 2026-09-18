@@ -92,3 +92,33 @@ test('Podium preserves all ranks, points, comparisons and rail scrolling at TV s
  state.empty=true;await page.setViewportSize({width:1920,height:1080});await page.keyboard.press('8');await page.waitForSelector('.board[data-column="0"] .empty-state');
  assert.equal(await page.locator('.board[data-column="0"] .row').count(),0,'empty data never invents podium winners');
 });
+test('mobile Podium keeps a real 2-1-3 stage above ranks 4-11 in portrait and landscape',{timeout:30000},async t=>{
+ const {page}=await fixture(t);await choose(page,'podium');
+ for(const size of [{width:390,height:844},{width:844,height:390}]){
+  await page.setViewportSize(size);await page.waitForFunction(()=>document.querySelectorAll('.board.mobile-hidden').length===5);
+  const geometry=await page.locator('.board[data-column="0"]').evaluate(board=>{
+   const rows=[...board.querySelectorAll('.row')],rect=element=>{const r=element.getBoundingClientRect();return{x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height}};
+   const boxes=rows.map(rect),avatars=rows.map(row=>rect(row.querySelector('.avatar'))),list=rect(board.querySelector('.list'));
+   return{count:rows.length,order:boxes[1].x<boxes[0].x&&boxes[0].x<boxes[2].x,winnerRaised:boxes[0].y<boxes[1].y&&boxes[0].y<boxes[2].y,hierarchy:avatars[0].height>avatars[1].height&&avatars[0].height>avatars[2].height&&avatars[1].height>avatars[3].height&&avatars[2].height>avatars[3].height,lowerBelow:boxes.slice(3).every(box=>box.y>=Math.max(boxes[0].bottom,boxes[1].bottom,boxes[2].bottom)-1),fitsWidth:boxes.every(box=>box.x>=list.x-1&&box.right<=list.right+1),names:rows.slice(0,3).every(row=>{const name=row.querySelector('.name');return name.scrollWidth<=name.clientWidth&&name.scrollHeight<=name.clientHeight}),points:rows.every(row=>{const value=row.querySelector('.points');return value.textContent.includes(',')&&value.scrollWidth<=value.clientWidth})};
+  });
+  assert.equal(geometry.count,11);assert.equal(geometry.order,true,'mobile podium visual order is 2,1,3');assert.equal(geometry.winnerRaised,true,'mobile winner stands above runners-up');assert.equal(geometry.hierarchy,true,'mobile top three are larger than list rows');assert.equal(geometry.lowerBelow,true,'ranks 4-11 start below the stage');assert.equal(geometry.fitsWidth,true,'podium stays inside the phone width');assert.equal(geometry.names,true,'top-three names fit within their cards');assert.equal(geometry.points,true,'full point values remain readable');
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ }
+ await page.locator('.mobile-board-tabs [role="tab"]').nth(4).click();
+ assert.equal(await page.locator('.board[data-column="4"] .row').evaluateAll(rows=>rows.every((row,index)=>index===0||Math.abs(row.getBoundingClientRect().x-rows[0].getBoundingClientRect().x)<1)),true,'full monthly ranking remains a normal list');
+});
+test('mobile Podium keeps full scores and comparisons across all top boards at 320px',{timeout:30000},async t=>{
+ const {page}=await fixture(t);await choose(page,'podium');await page.keyboard.press('7');await page.locator('.settings-nav [data-page="1"]').click();await page.locator('[data-config="yesterdayGroups"]').check();await page.locator('[data-config="yesterdayIdols"]').check();await page.locator('#done-settings').click();await page.setViewportSize({width:320,height:568});
+ const expected=['1,000,000','5,270,072','1,000,000','5,270,072'];
+ for(let index=0;index<4;index++){
+  await page.locator('.mobile-board-tabs [role="tab"]').nth(index).click();const board=page.locator(`.board[data-column="${index}"]`);
+  assert.equal(await board.locator('.points').first().textContent(),expected[index]);
+  const fit=await board.evaluate(element=>[...element.querySelectorAll('.row')].every(row=>[...row.querySelectorAll('.name,.points,.yesterday')].every(value=>value.scrollWidth<=value.clientWidth&&value.scrollHeight<=value.clientHeight)));
+  assert.equal(fit,true,`board ${index+1} keeps names, full points and comparisons readable`);
+  assert.equal(await board.locator('.row:nth-child(-n+3) .yesterday').evaluateAll(values=>values.every(value=>parseFloat(getComputedStyle(value).fontSize)>=9)),true,'comparison labels remain legible');
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'narrow phone never scrolls horizontally');
+ }
+ await page.keyboard.press('6');assert.equal(await page.locator('.mobile-board-tabs [role="tab"]').count(),6);await page.locator('.mobile-board-tabs [role="tab"]').nth(5).click();await page.waitForSelector('.board[data-column="5"] .row');assert.equal(await page.locator('.board[data-column="5"] .row').count(),32);
+ assert.equal(await page.locator('.board[data-column="5"] .row').evaluateAll(rows=>rows.every((row,index)=>index===0||Math.abs(row.getBoundingClientRect().x-rows[0].getBoundingClientRect().x)<1)),true,'Last Month Ranking remains a normal full list');
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+});

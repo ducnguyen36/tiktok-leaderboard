@@ -342,6 +342,22 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,.b
  .rank,.top1 .rank,.top2 .rank,.top3 .rank{width:38px;height:34px;font-size:18px;padding-top:0}
  .avatar,.tv.six .avatar{width:48px;height:48px;font-size:17px}
  .name{font-size:16px;line-height:20px}.points{font-size:15px;line-height:18px}.yesterday{font-size:12px}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .list{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-template-rows:190px;grid-auto-rows:64px;grid-auto-flow:row;gap:5px 6px;padding:8px 6px 6px}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row{grid-column:1/-1;min-width:0}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row:nth-child(1){grid-area:1/3/2/5;--mobile-medal:#ffcf5b;height:190px}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row:nth-child(2){grid-area:1/1/2/3;--mobile-medal:#c6d0dc;height:166px}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row:nth-child(3){grid-area:1/5/2/7;--mobile-medal:#d79b7c;height:166px}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row:nth-child(-n+3){position:relative;align-self:end;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:22px 5px 17px;border:1px solid color-mix(in srgb,var(--mobile-medal) 45%,transparent);border-radius:12px 12px 3px 3px;background:linear-gradient(180deg,color-mix(in srgb,var(--mobile-medal) 12%,#211f23),#201d22);overflow:hidden}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row:nth-child(-n+3)::after{content:"";position:absolute;inset:auto 0 0;height:9px;background:linear-gradient(90deg,color-mix(in srgb,var(--mobile-medal) 45%,#211f23),var(--mobile-medal));opacity:.9}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row:nth-child(-n+3) .rank{position:absolute;top:6px;left:6px;width:34px;height:32px;font-size:15px;padding-top:0}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row:nth-child(-n+3) .avatar{width:62px;height:62px;flex:none;border-color:var(--mobile-medal);box-shadow:0 0 12px #0006}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row:nth-child(-n+3) .identity{width:100%;min-width:0;text-align:center}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row:nth-child(-n+3) .name{display:block;min-height:28px;max-height:28px;font-size:12px;line-height:14px;white-space:normal;overflow:hidden}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row:nth-child(-n+3) .points{font-size:13px;line-height:16px;color:var(--mobile-medal);white-space:nowrap}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row:nth-child(-n+3) .yesterday{font-size:9px;line-height:11px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row.top1 .avatar{width:78px;height:78px}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row.top1 .name{min-height:31px;max-height:31px;font-size:13px;line-height:15px;font-weight:800}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row.top1 .points{font-size:14px;font-weight:800}
  .footer{height:auto;min-height:86px;grid-template-columns:1fr;gap:5px;padding:12px;font-size:11px;text-align:center}
  .footer>span:last-child{text-align:center}.camera-notice{justify-content:center;font-size:13px}
  .quick-toolbar,.quick-toolbar.idle{top:8px;right:8px;opacity:1;visibility:visible;pointer-events:auto;transition:none}
@@ -358,4 +374,14 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,.b
  .filter-items{grid-template-columns:1fr}.settings-link{min-height:44px}
  .settings-actions{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:5px;min-width:0}
  .settings-actions #save-status{min-width:0;font-size:10px;overflow-wrap:anywhere}.settings-actions button{min-width:0;min-height:44px;padding:6px 10px}
+}
+@media (max-width:340px){
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .list{gap:4px 3px;padding-left:3px;padding-right:3px}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row:nth-child(-n+3){padding-left:2px;padding-right:2px}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row:nth-child(-n+3) .avatar{width:54px;height:54px}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row.top1 .avatar{width:68px;height:68px}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row:nth-child(-n+3) .name{font-size:11px;line-height:14px}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row.top1 .name{font-size:12px}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row:nth-child(-n+3) .points{font-size:12px;line-height:16px}
+ .tv[data-layout="podium"] .board:nth-child(-n+4) .row:nth-child(-n+3) .yesterday{font-size:9px;line-height:11px}
 }
