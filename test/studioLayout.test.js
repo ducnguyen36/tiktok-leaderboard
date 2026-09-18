@@ -9,6 +9,24 @@ async function fixture(t){
  const page=await browser.newPage({viewport:{width:1920,height:1080}});await page.goto('http://127.0.0.1:'+server.address().port);await page.waitForSelector('.row');return{page,state};
 }
 async function choose(page,value){await page.keyboard.press('7');await page.locator('.settings-nav [data-page="0"]').click();assert.equal(await page.locator('#layout-choice').count(),1,'Display settings offers both TV layouts');await page.locator('#layout-choice').selectOption(value);await page.locator('#done-settings').click();}
+test('ranking order switches immediately, persists and preserves podium winners',async t=>{
+ const {page,state}=await fixture(t);await page.keyboard.press('7');assert.equal(await page.locator('#rank-order-label').isVisible(),false);
+ const calls=state.requests.length;
+ for(const layout of ['studio','podium']){
+  await page.locator('#layout-choice').selectOption(layout);
+  for(const order of ['horizontal','vertical']){
+   await page.locator('#rank-order-choice').selectOption(order);
+   const positions=await page.locator('.board').first().locator('.row').evaluateAll(rows=>rows.map(row=>{const r=row.getBoundingClientRect();return{x:r.x,y:r.y}}));
+   const start=layout==='podium'?3:0;
+   if(order==='horizontal'){assert.ok(positions[start+1].x>positions[start].x);assert.ok(Math.abs(positions[start+1].y-positions[start].y)<1)}
+   else{assert.ok(positions[start+1].y>positions[start].y);assert.ok(Math.abs(positions[start+1].x-positions[start].x)<1)}
+   if(layout==='podium')assert.ok(positions[1].x<positions[0].x&&positions[0].x<positions[2].x);
+  }
+ }
+ assert.equal(state.requests.length,calls);await page.locator('#rank-order-choice').selectOption('horizontal');await page.locator('#done-settings').click();await page.reload();await page.waitForSelector('.row');assert.equal(await page.locator('.tv').getAttribute('data-rank-order'),'horizontal');
+ await page.keyboard.press('7');await page.locator('#language-choice').selectOption('vi');assert.equal(await page.locator('#rank-order-choice option[value="horizontal"]').textContent(),'Theo hàng (ngang trước)');
+ await page.locator('#layout-choice').selectOption('classic');assert.equal(await page.locator('#rank-order-label').isVisible(),false);
+});
 test('Studio rearranges every ranking without losing rows, points or viewport fit',{timeout:60000},async t=>{
  const {page,state}=await fixture(t),before=await page.locator('.board .name').allTextContents();const requests=state.requests.length;
  await choose(page,'studio');assert.equal(await page.locator('.tv').getAttribute('data-layout'),'studio');
@@ -26,8 +44,9 @@ test('Studio rearranges every ranking without losing rows, points or viewport fi
    assert.ok(geometry.bounds[2].y>geometry.bounds[0].bottom-1,'month boards below daily boards');
    assert.ok(geometry.bounds[4].height>geometry.bounds[0].height*1.8,'full ranking spans both rows');
    if(history)assert.equal(await page.locator('.board:nth-child(-n+4) .name').evaluateAll(es=>es.every(e=>e.scrollWidth<=e.clientWidth)),true,'normal fixture names stay readable when history is added');
-   assert.equal(geometry.ticker.y,0,'Studio congratulations occupy the top row');
-   assert.ok(geometry.ticker.bottom<=geometry.head.y+1,'congratulations above logo and total');
+   assert.ok(geometry.ticker.y>=geometry.bounds[0].bottom,'banner below daily tops');
+   assert.ok(geometry.ticker.bottom<=geometry.bounds[2].y,'banner above monthly tops');
+   assert.ok(geometry.ticker.right<=geometry.bounds[4].x,'banner never covers monthly ranking');
    assert.ok(geometry.brand.right<=geometry.kpi.x,'brand and total do not overlap');
    assert.equal(geometry.fits,true,'all 40 top entries fit fully');assert.equal(geometry.pointsFit,true,'point values remain complete');
    assert.ok(geometry.scroll[0]<=size.width&&geometry.scroll[1]<=size.height,'TV never scrolls');
@@ -38,6 +57,7 @@ test('Studio rearranges every ranking without losing rows, points or viewport fi
  }
  await page.setViewportSize({width:1100,height:600});await page.keyboard.press('7');await page.locator('.settings-nav [data-page="1"]').click();await page.locator('[data-config="yesterdayGroups"]').check();await page.locator('[data-config="yesterdayIdols"]').check();await page.locator('#done-settings').click();
  assert.equal(await page.locator('.board[data-column="0"] .yesterday').count(),10);
+ assert.equal(await page.locator('.board .yesterday:visible').count(),0,'comparison sublines are temporarily hidden');
  assert.equal(await page.locator('.board:nth-child(-n+2) .identity').evaluateAll(es=>es.every(e=>{const a=e.getBoundingClientRect(),b=e.closest('.row').getBoundingClientRect();return a.top>=b.top&&a.bottom<=b.bottom})),true,'comparison labels fit at the smallest Studio size');
  await page.setViewportSize({width:800,height:600});assert.equal(await page.locator('.board:visible').count(),5);
  assert.equal(await page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight),true);
@@ -78,7 +98,7 @@ test('Podium preserves all ranks, points, comparisons and rail scrolling at TV s
    const checks=await page.locator('.board:nth-child(-n+4)').evaluateAll(bs=>bs.map(b=>{
     const rows=[...b.querySelectorAll('.row')],r=rows.map(e=>e.getBoundingClientRect()),box=b.querySelector('.list').getBoundingClientRect();
     const avatars=rows.map(e=>e.querySelector('.avatar').getBoundingClientRect().height);
-    return{count:rows.length,order:r[1].x<r[0].x&&r[0].x<r[2].x,winner:r[0].y<r[1].y&&r[0].y<r[2].y,hierarchy:avatars[0]>avatars[1]&&avatars[0]>avatars[2]&&avatars[1]>avatars[3]&&avatars[2]>avatars[3]&&r[0].width>r[1].width&&r[0].width>r[2].width,balanced:Math.abs(r[6].bottom-r[10]?.bottom)<1,fit:r.every(a=>a.x>=box.x-1&&a.right<=box.right+1&&a.y>=box.y-1&&a.bottom<=box.bottom+1),text:rows.every(e=>[...e.querySelectorAll('.identity,.avatar,.name,.points,.yesterday')].every(x=>{const a=x.getBoundingClientRect(),p=e.getBoundingClientRect();return a.y>=p.y-1&&a.bottom<=p.bottom+1})),points:rows.every(e=>{const p=e.querySelector('.points');return p.scrollWidth<=p.clientWidth})};
+    return{count:rows.length,order:r[1].x<r[0].x&&r[0].x<r[2].x,winner:r[0].y<r[1].y&&r[0].y<r[2].y,hierarchy:avatars[0]>avatars[1]&&avatars[0]>avatars[2]&&avatars[1]>avatars[3]&&avatars[2]>avatars[3]&&r[0].width>r[1].width&&r[0].width>r[2].width,balanced:Math.abs(r[6].bottom-r[10]?.bottom)<1,fit:r.every(a=>a.x>=box.x-1&&a.right<=box.right+1&&a.y>=box.y-1&&a.bottom<=box.bottom+1),text:rows.every(e=>[...e.querySelectorAll('.identity,.avatar,.name,.points')].every(x=>{const a=x.getBoundingClientRect(),p=e.getBoundingClientRect();return a.y>=p.y-1&&a.bottom<=p.bottom+1})),points:rows.every(e=>{const p=e.querySelector('.points');return p.scrollWidth<=p.clientWidth})};
    }));
    for(const c of checks){assert.equal(c.count,11);assert.equal(c.order,true,'podium positions are 2,1,3');assert.equal(c.winner,true,'winner is raised');assert.equal(c.hierarchy,true,'winner larger than runners-up, runners-up larger than lower ranks');assert.equal(c.balanced,true,'ranks 7 and 11 finish at the same height');assert.equal(c.fit,true,'all ranks fit');assert.equal(c.text,true,`identity and comparisons fit ${JSON.stringify(size)}`);assert.equal(c.points,true,'unabbreviated points fit')}
    assert.equal(await page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight&&document.documentElement.scrollWidth<=innerWidth),true);

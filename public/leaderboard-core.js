@@ -13,6 +13,8 @@
   c.speed=number(x.speed,60,10,150);c.pause=number(x.pause,2,0,10);c.tickerSpeed=number(x.tickerSpeed,165,30,300);c.resetHour=Math.floor(number(x.resetHour,0,0,23));
   c.freezeUntil=x.freezeUntil===''||/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(x.freezeUntil)?x.freezeUntil:defaults.freezeUntil;
   c.language=x.language==='vi'?'vi':'en';c.layout=['studio','podium'].includes(x.layout)?x.layout:'classic';
+  c.rankOrder=x.rankOrder==='horizontal'?'horizontal':'vertical';
+  c.celebrationSound=bool(x.celebrationSound,true);
   c.locations=flags(x.locations,defaults.locations);c.groups={...defaults.groups,...flags(x.groups,{})};c.talents={...defaults.talents,...flags(x.talents,{})};return c;
  }
  function migrate(x){if(!x||typeof x!=='object')return normalize({});return normalize({scores:['group-daily','individual-daily','group-monthly','individual-monthly','individual-monthly'].map(k=>x.showIncome?.[k]),total:x.total,resetHour:x.resetHour,freezeUntil:x.freezeUntil,yesterdayGroups:x.showYesterday?.['group-daily'],yesterdayIdols:x.showYesterday?.['individual-daily'],locations:x.visibleLocations,groups:x.visibleGroups,lastMonth:false})}

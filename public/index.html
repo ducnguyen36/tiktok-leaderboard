@@ -18,6 +18,7 @@
 <label>Daily Top Groups — points <input type="checkbox" data-score="0"></label><label>Daily Top Idols — points <input type="checkbox" data-score="1"></label><label>Monthly Top Groups — points <input type="checkbox" data-score="2"></label><label>Monthly Top Idols — points <input type="checkbox" data-score="3"></label><label>Monthly Ranking — points <input type="checkbox" data-score="4"></label>
 <label>Today's Total Points (9)<input type="checkbox" data-config="total"></label><label>Language<select id="language-choice" data-config="language"><option value="en">English</option><option value="vi">Tiếng Việt</option></select></label>
 <label id="layout-label">TV layout<select id="layout-choice" data-config="layout"><option value="classic">Classic</option><option value="studio">Helios Studio</option><option value="podium">Studio · Podium</option></select></label>
+<label id="rank-order-label" hidden>Ranking order<select id="rank-order-choice" data-config="rankOrder"><option value="vertical">Down columns first</option><option value="horizontal">Across rows first</option></select></label>
 </section>
 <section class="settings-page" data-pane="1"><h3>Timing & Daily History</h3>
 <label>Daily reset hour<input type="number" min="0" max="23" data-config="resetHour"></label>
@@ -27,6 +28,7 @@
 <label>Ranking speed (px/s)<input type="number" min="10" max="150" data-config="speed"></label>
 <label>Pause at each end (seconds)<input type="number" min="0" max="10" step=".5" data-config="pause"></label>
 <label>Ticker speed (px/s)<input type="number" min="30" max="300" data-config="tickerSpeed"></label>
+<label id="celebration-sound-label">Celebration sound · every 50,000 diamonds<input type="checkbox" data-config="celebrationSound"></label>
 <p>Monthly close: 07:00 on day 1 (Vietnam time). Daily reset is separate. Clear freeze time for live daily scores.</p></section>
 <section class="settings-page" data-pane="2"><h3>Visibility</h3><label>Location<select id="location-choice"></select></label><div id="location-toggles"></div><div class="filter-items" id="branch-items"></div><label>Choose<select id="visibility-kind"><option value="groups">Groups</option><option value="talents">Talents</option></select></label><div id="visibility-groups"><div class="filter-items" id="group-items"></div><div class="pager"><button id="groups-prev">Previous</button><span id="groups-page"></span><button id="groups-next">Next</button></div></div><div id="visibility-talents" hidden><div class="filter-items" id="talent-items"></div><div class="pager"><button id="talents-prev">Previous</button><span id="talents-page"></span><button id="talents-next">Next</button></div></div><p>Unchecked = hidden. Location and group filters also hide their talents. Talent choices do not change group scores or total points.</p></section>
 <section class="settings-page" data-pane="3"><h3>History & Refresh</h3>

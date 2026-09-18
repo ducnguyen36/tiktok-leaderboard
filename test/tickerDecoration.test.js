@@ -8,10 +8,9 @@ test('congratulations have sparkle boundaries for one or many teams, fitting or 
  await page.route('**/api/leaderboard/current?*',async route=>{const response=await route.fetch(),json=await response.json();if(mode==='single')json.data.group.daily=[{name:'VELVET',value:400000,groupId:'g0',locationId:'loc_hcm'}];await route.fulfill({json})});
  await page.goto('http://127.0.0.1:'+server.address().port);await page.waitForSelector('.row');
  const line=page.locator('.ticker-line');
- assert.equal(await line.locator('.ticker-separator').count(),2,'one short congratulations is framed on both ends');
- assert.match(await line.textContent(),/^\s*✦ ✧ ✦\s+CONGRATULATIONS TO VELVET ON REACHING 400,000 POINTS\s+✦ ✧ ✦\s*$/);
- assert.equal(await line.evaluate(e=>e.getAnimations().length),0,'fitting message does not need scrolling');
- assert.equal(await page.evaluate(()=>{const line=document.querySelector('.ticker-line').getBoundingClientRect(),banner=document.querySelector('.ticker').getBoundingClientRect();return Math.abs((line.left+line.right)/2-(banner.left+banner.right)/2)<=1}),true,'a non-scrolling congratulations is centered in the banner');
+ assert.equal(await line.locator(':scope > span').first().locator('.ticker-separator').count(),2,'one short congratulations is framed on both ends');
+ assert.match(await line.locator(':scope > span').first().textContent(),/^\s*✦ ✧ ✦\s+CONGRATULATIONS TO VELVET ON REACHING 400,000 POINTS\s+✦ ✧ ✦\s*$/);
+ assert.equal(await line.evaluate(e=>e.getAnimations().length),1,'even a fitting message scrolls');
  for(const size of [{width:390,height:844}]){
   await page.setViewportSize(size);await page.waitForFunction(()=>document.querySelector('.ticker-line').getAnimations().length===1);
   assert.equal(await line.locator(':scope > [aria-hidden="true"]').count(),1,'scroll duplicate is hidden from accessibility tree');
