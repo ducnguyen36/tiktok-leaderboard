@@ -15,11 +15,11 @@ function scores(api, gifts, ps = profiles) {
     const pm = maps.buildProfileMap(ps), tp = maps.buildTalentToProfileMap(ps);
     const { uidToTalent: ut, uidToProfile: up } = maps.buildUidMaps(ps);
     return JSON.parse(JSON.stringify({
-        individual: api.aggregateIndividual(gifts.filter(g => !g.manual && g.user?.userId !== 'Manual'), avatars, names, ut, tp, pm, up),
+        individual: api.aggregateIndividual(gifts, avatars, names, ut, tp, pm, up),
         group: api.aggregateGroup(gifts, tp, pm, names, ut, up, { s: 'p' }),
     }));
 }
-test('compact repeated gifts preserve per-gift floors, pooled floors, UID rename, duplicate recipients and manual exclusion', () => {
+test('compact repeated gifts preserve per-gift floors, pooled floors, UID rename, duplicate recipients and manual credits', () => {
     assert.equal(typeof perf.compactGifts, 'function');
     const production = require('../leaderboardAggregation');
     const gifts = [
@@ -35,7 +35,7 @@ test('compact repeated gifts preserve per-gift floors, pooled floors, UID rename
     assert.ok(compact.length < gifts.length);
     assert.deepEqual(scores(production, compact), scores(reference.api, gifts));
     // 6*floor(5/2) + floor(3/3) + 2*floor(7/3) + 11 (Group UID resolves Alice).
-    assert.equal(scores(production, compact).individual.find(x => x._id === 'Alice').totalDiamonds, 28);
+    assert.equal(scores(production, compact).individual.find(x => x._id === 'Alice').totalDiamonds, 128);
 });
 test('all known idols are returned including zero rows beyond rank fifty', () => {
     assert.equal(typeof perf.compactGifts, 'function');

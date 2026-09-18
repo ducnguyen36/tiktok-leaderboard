@@ -1,6 +1,6 @@
 # Private leaderboard access
 
-The new server starts locked. With absent or invalid Google settings it serves the setup/pairing shell, but no rankings, avatars, history, debug output, app scripts or SSE. `/api/health` reports only `{ "status": "ok" }`; it indicates a responding process, not database readiness.
+The current production rollout leaves access control temporarily off at the owner's request. Set `LEADERBOARD_ACCESS_CONTROL=true` to enable the protections described below after staging verification; otherwise rankings remain publicly accessible. Once enabled, absent or invalid Google settings serve the setup/pairing shell but no rankings, avatars, history, debug output, app scripts or SSE. `/api/health` reports only `{ "status": "ok" }`; it indicates a responding process, not database readiness.
 
 ## Configure Google before cutover
 
@@ -39,7 +39,7 @@ Browser approval is not physical-device binding: an approved browser profile, co
 
 ## Stage, verify and cut over
 
-This implementation does not restart the old process, push, publish an image, or deploy. New guard JavaScript is injected only by the new server when rendering protected HTML; it is not added to shared static HTML that the old running process still serves.
+Guard JavaScript is injected only when `LEADERBOARD_ACCESS_CONTROL=true`; it is not injected during the temporary public rollout. Enable the flag on staging for the checks below, then configure the production environment and recreate the container to activate protection.
 
 Prepare a separate staging process/container and database, with its own stable origin and registered callback. Verify a real Google login for the allowed accounts, deny an unrelated account, request and approve a TV code, revoke it while its SSE is connected, and confirm a fresh private/incognito browser cannot read direct app/API/avatar/overlay URLs. Verify store loss closes access and that login works again after database recovery. These live Google and MongoDB checks need real staging configuration; injected test providers are not evidence of live sign-in.
 

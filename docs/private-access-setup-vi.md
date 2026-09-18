@@ -2,7 +2,7 @@
 
 ## Trạng thái
 
-Phần mềm đã có cơ chế khóa ở server. Việc sửa mã nguồn **không tự khóa bản đang chạy**: cần cấu hình Google, kiểm thử bản staging rồi mới thay server đang dùng. Chưa cấu hình Google thì server mới chỉ hiện trang thiết lập, không trả dữ liệu xếp hạng.
+Release này tạm tắt khóa truy cập theo yêu cầu để TV tiếp tục hoạt động: `LEADERBOARD_ACCESS_CONTROL` chưa đặt hoặc khác `true` thì bảng vẫn truy cập công khai. Chỉ bật `LEADERBOARD_ACCESS_CONTROL=true` sau khi cấu hình và kiểm thử Google trên staging. Khi đã bật, thiếu cấu hình Google sẽ khóa dữ liệu và hiện trang thiết lập.
 
 Ba tài khoản quản trị mặc định:
 
@@ -28,6 +28,7 @@ Lưu các biến sau trong môi trường riêng của server:
 
 ```dotenv
 PUBLIC_ORIGIN=https://ranking.heliostalent.online
+LEADERBOARD_ACCESS_CONTROL=true
 GOOGLE_CLIENT_ID=<Client ID của Web application>
 GOOGLE_CLIENT_SECRET=<Client Secret của Web application>
 ADMIN_EMAILS=ducnguyen36@gmail.com,heliostalentofficial@gmail.com,kimlinh727@gmail.com
@@ -47,7 +48,7 @@ Chạy staging riêng, không thay thế TV đang dùng ngay. Xác nhận:
 - Thu hồi TV đang mở bảng → bảng bị xóa khỏi màn hình và không lấy thêm được dữ liệu.
 - Khởi động lại staging vẫn giữ các thiết bị đã duyệt; mất kết nối database thì khóa dữ liệu, không tự mở công khai.
 
-Chỉ sau các kiểm tra này mới lên lịch chuyển server/NAS. Bản Docker mới mặc định bị khóa; publish image có thể khiến Watchtower tự cập nhật, nên không publish trước khi chuẩn bị xong. Khi chuyển bản, kiểm tra quy tắc cache/CDN và xóa các phản hồi công khai đã được cache trước đó.
+Sau khi kiểm thử, thêm các biến trên vào `.env` cạnh `docker-compose.nas.yml` trên NAS. Chạy `docker compose -f docker-compose.nas.yml up -d --force-recreate leaderboard` để container nhận cấu hình mới (restart đơn thuần không cập nhật biến môi trường). Sau đó duyệt từng TV qua `/auth`. Kiểm tra quy tắc cache/CDN và xóa các phản hồi công khai đã được cache trước đó. Nếu cần hoãn kích hoạt, đặt `LEADERBOARD_ACCESS_CONTROL=false` rồi tạo lại container; lúc đó bảng lại công khai.
 
 ## 3. Dùng hằng ngày
 

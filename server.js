@@ -46,7 +46,14 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 const leaderboardAuth = createLeaderboardAuth({ getDb: () => db });
-app.use(leaderboardAuth.middleware);
+// Staged rollout: enable only after OAuth and TV enrollment are prepared.
+const accessControlEnabled = process.env.LEADERBOARD_ACCESS_CONTROL === 'true';
+if (accessControlEnabled) app.use(leaderboardAuth.middleware);
+else {
+    app.get('/auth/status', (req, res) => res.set('Cache-Control', 'no-store').json({ authorized: true, admin: false, accessControlEnabled: false }));
+    app.use('/auth', (req, res) => res.status(503).type('text').send('Device access is not enabled yet. Configure Google OAuth and set LEADERBOARD_ACCESS_CONTROL=true on the server.'));
+    leaderboardAuth.guardStream = (req, res) => ({ send: async message => { if (!res.writableEnded) res.write(message); }, close: () => res.end() });
+}
 app.use(express.json({ limit: '16kb' }));
 
 // Cache-busting version for static assets: a content hash of every client runtime file.
@@ -75,7 +82,7 @@ function servePrivateHtml(req, res) {
     try {
         const filename = req.query.overlay === 'true' ? 'overlay.html' : privateHtmlName(req.path) || 'index.html';
         const html = fs.readFileSync(path.join(__dirname, 'public', filename), 'utf8')
-            .replace('<head>', `<head><script src="/access-guard.js?v=${ASSET_VERSION}"></script>`)
+            .replace('<head>', accessControlEnabled ? `<head><script src="/access-guard.js?v=${ASSET_VERSION}"></script>` : '<head>')
             .replace('/style.css', `/style.css?v=${ASSET_VERSION}`)
             .replace('/app.js', `/app.js?v=${ASSET_VERSION}`)
             .replace('/leaderboard-core.js', `/leaderboard-core.js?v=${ASSET_VERSION}`)
@@ -690,14 +697,17 @@ async function _buildLeaderboardDataInner(context, { force = false } = {}) {
     const allYesterdayGifts = allBuckets.filter(g => g.yesterday);
     const allDisplayedMonthlyGifts = allBuckets.filter(g => g.monthly);
 
-    // Individual view excludes manual gifts
-    const isNotManual = g => !g.manual;
-    const dailyGifts = allDailyGifts.filter(isNotManual);
-    const yesterdayGifts = allYesterdayGifts.filter(isNotManual);
-    const monthlyGifts = allDisplayedMonthlyGifts.filter(isNotManual);
+    // Manual gifts are explicit talent credits/adjustments (helioscontrol createManualEntry,
+    // assigned:true) and must count toward BOTH individual and group totals — same as the
+    // group board. Previously the individual view filtered them out, so manual corrections
+    // (positive and negative) were invisible on the individual board while still counting
+    // for the group. Include them here so the two boards agree.
+    const dailyGifts = allDailyGifts;
+    const yesterdayGifts = allYesterdayGifts;
+    const monthlyGifts = allDisplayedMonthlyGifts;
 
     // Run all 6 aggregations (today + yesterday for daily)
-    // Individual uses non-manual gifts; Group uses ALL gifts + session map
+    // Individual + Group both include manual gifts; Group also uses the session map
     const [individualDaily, individualYesterday, individualMonthly, groupDaily, groupYesterday, groupMonthly] = await Promise.all([
         aggregateIndividual(dailyGifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
         aggregateIndividual(yesterdayGifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
@@ -830,7 +840,7 @@ async function buildHistoricalLeaderboardData(period) {
         buildGiftBucketPipeline({ start: Date.parse(period.start), end: Date.parse(period.end) }),
         { allowDiskUse: true, maxTimeMS: 60000 }
     ).toArray());
-    const individualGifts = allGifts.filter(gift => !gift.manual);
+    const individualGifts = allGifts; // Manual adjustments count for individual rankings too.
 
     const individualRaw = aggregateIndividual(
         individualGifts,

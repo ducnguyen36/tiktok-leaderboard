@@ -160,11 +160,11 @@ test('configured OAuth defaults to the three confirmed administrators only',asyn
 });
 test('actual server locks every private route and serves only a setup shell without credentials',async t=>{
  const reserve=net.createServer();await new Promise(resolve=>reserve.listen(0,'127.0.0.1',resolve));const port=reserve.address().port;await new Promise(resolve=>reserve.close(resolve));
- const child=spawn(process.execPath,['server.js'],{cwd:path.join(__dirname,'..'),env:{...process.env,PORT:String(port),MONGODB_URI:'mongodb://127.0.0.1:1',GOOGLE_CLIENT_ID:'',GOOGLE_CLIENT_SECRET:'',PUBLIC_ORIGIN:'',ADMIN_EMAILS:'',NODE_TLS_REJECT_UNAUTHORIZED:'1'},stdio:'ignore'});t.after(()=>child.kill());
+ const child=spawn(process.execPath,['server.js'],{cwd:path.join(__dirname,'..'),env:{...process.env,LEADERBOARD_ACCESS_CONTROL:'true',PORT:String(port),MONGODB_URI:'mongodb://127.0.0.1:1',GOOGLE_CLIENT_ID:'',GOOGLE_CLIENT_SECRET:'',PUBLIC_ORIGIN:'',ADMIN_EMAILS:'',NODE_TLS_REJECT_UNAUTHORIZED:'1'},stdio:'ignore'});t.after(()=>child.kill());
  const base=`http://127.0.0.1:${port}`;let started=false;
  for(let i=0;i<100;i++){try { await fetch(base+'/api/health');started=true;break; }catch {await new Promise(resolve=>setTimeout(resolve,50));}}
  assert.equal(started,true);
- for(const route of ['/','/?overlay=true','/index.html','/overlay.html','/api/debug','/api/leaderboard/current','/api/leaderboard/history','/api/leaderboard/stream','/userdata/avatars/x.jpg','/app.js']) {
+ for(const route of ['/','/?overlay=true','/index.html','/overlay.html','/v1.html','/v1-app.js','/api/debug','/api/leaderboard/current','/api/leaderboard/history','/api/leaderboard/stream','/userdata/avatars/x.jpg','/app.js']) {
    const response=await fetch(base+route);assert.equal(response.status,401,route);assert.match(response.headers.get('cache-control'),/private.*no-store/);assert.equal(response.headers.get('access-control-allow-origin'),null);
  }
  assert.equal((await fetch(base+'/auth')).status,200);assert.equal((await (await fetch(base+'/auth/status')).json()).setupRequired,true);
