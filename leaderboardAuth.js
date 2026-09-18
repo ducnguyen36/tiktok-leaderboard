@@ -2,6 +2,7 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const express = require('express');
 const { OAuth2Client } = require('google-auth-library');
+const QRCode = require('qrcode');
 const { createAuthStore } = require('./authStore');
 const TEN_MINUTES = 600000, ADMIN_LIFETIME = 12 * 3600000, DEVICE_LIFETIME = 180 * 86400000;
 const COOKIE = 'helios_access', FLOW_COOKIE = 'helios_oauth';
@@ -10,6 +11,11 @@ const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const random = () => crypto.randomBytes(32).toString('base64url');
 const csrfFor = secret => hash(`csrf:${secret}`);
 const verifierFor = secret => crypto.createHash('sha256').update(`pkce:${secret}`).digest('base64url');
+const pairingCode = value => {
+  if (typeof value !== 'string' || !/^[A-Fa-f0-9\s-]{10,14}$/.test(value)) return '';
+  const normalized = value.replace(/[-\s]/g, '').toUpperCase();
+  return /^[A-F0-9]{10}$/.test(normalized) ? normalized : '';
+};
 function cookies(req) {
   const values = {};
   for (const part of (req.headers.cookie || '').split(';')) {
@@ -96,7 +102,8 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     if (!configured) return fail(res, 503, 'setup_required');
     if (!await bounded(req, 'login', 20)) return fail(res, 429, 'rate_limited');
     const secret = random(), state = random(), nonce = random();
-    await store.put({ _id: `oauth:${hash(state)}`, binding: hash(secret), nonce: hash(nonce), expiresAt: new Date(+now() + TEN_MINUTES) });
+    const pair = pairingCode(req.query.pair);
+    await store.put({ _id: `oauth:${hash(state)}`, binding: hash(secret), nonce: hash(nonce), pair: pair || undefined, expiresAt: new Date(+now() + TEN_MINUTES) });
     setCookie(res, FLOW_COOKIE, secret, TEN_MINUTES);
     res.redirect(provider.generateAuthUrl({ scope: 'openid email', state, nonce, code_challenge_method: 'S256',
       code_challenge: crypto.createHash('sha256').update(verifierFor(secret)).digest('base64url'), redirect_uri: callback, prompt: 'select_account' }));
@@ -117,7 +124,7 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     const old = cookies(req)[COOKIE]; if (validSecret(old)) await store.remove(`session:${hash(old)}`);
     const session = random();
     await store.put({ _id: `session:${hash(session)}`, kind: 'admin', email, subject: claims.sub, expiresAt: new Date(+now() + ADMIN_LIFETIME) });
-    setCookie(res, COOKIE, session, ADMIN_LIFETIME); res.redirect('/auth');
+    setCookie(res, COOKIE, session, ADMIN_LIFETIME); res.redirect(transaction.pair ? `/auth?pair=${encodeURIComponent(transaction.pair)}` : '/auth');
   }));
   router.use(['/auth/pair', '/auth/approve', '/auth/revoke', '/auth/logout'], express.json({ limit: '4kb' }));
   router.post('/auth/pair', endpoint(async (req, res) => {
@@ -125,10 +132,19 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     if (record.kind !== 'pending') return fail(res, 400, 'already_authorized');
     const code = crypto.randomBytes(5).toString('hex').toUpperCase(), pairId = `pair:${hash(code)}`;
     const expiresAt = new Date(Math.min(+record.expiresAt, +now() + TEN_MINUTES));
-    await store.put({ _id: pairId, browserId: record._id, expiresAt });
+    const pairingUrl = `${origin}/auth?pair=${encodeURIComponent(code)}`;
+    const qrSvg = await QRCode.toString(pairingUrl, { type: 'svg', errorCorrectionLevel: 'M', margin: 1, width: 320, color: { dark: '#171614', light: '#FFF6ED' } });
+    await store.put({ _id: pairId, browserId: record._id, expiresAt, qrSvg });
     if (!await store.setPair(record._id, pairId, now(), record.pairId)) { await store.remove(pairId); return fail(res, 409, 'pairing_changed'); }
     if (record.pairId) await store.remove(record.pairId);
-    res.json({ code, expiresAt });
+    res.json({ code, expiresAt, pairingUrl });
+  }));
+  router.get('/auth/pair-qr', endpoint(async (req, res) => {
+    const code = pairingCode(req.query.code), record = await identity(req);
+    const pairId = code ? `pair:${hash(code)}` : '';
+    const pair = pairId ? await store.get(pairId) : null;
+    if (!record || record.kind !== 'pending' || record.pairId !== pairId || !pair || pair.browserId !== record._id || +pair.expiresAt <= +now() || typeof pair.qrSvg !== 'string') return fail(res, 401, 'pairing_required');
+    res.type('image/svg+xml').send(pair.qrSvg);
   }));
   router.post('/auth/approve', endpoint(async (req, res) => {
     if (!await mutation(req, res, true)) return;

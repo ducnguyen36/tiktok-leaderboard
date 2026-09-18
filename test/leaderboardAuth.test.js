@@ -81,6 +81,32 @@ test('pairing approval is one-time and bound to requesting browser; admin can re
  const rawSecrets=[...tv.jar.values()];assert.ok(!JSON.stringify([...h.store.records.values()]).includes(rawSecrets[0]));
  assert.equal((await admin.request('/auth/revoke',{method:'POST',body:{id:devices.devices[0].id}})).status,200);assert.equal((await tv.request('/api/debug')).status,401);
 });
+test('TV receives a same-origin QR for its active code and other browsers cannot render it',async t=>{
+ const h=await harness(t,{publicOrigin:'https://ranking.example.test'});const tv=h.browser();await tv.status();
+ const pair=await (await tv.request('/auth/pair',{method:'POST',body:{}})).json();
+ assert.equal(pair.pairingUrl,`https://ranking.example.test/auth?pair=${pair.code}`);
+ const storedPair=[...h.store.records.values()].find(record=>record._id.startsWith('pair:'));
+ assert.match(storedPair.qrSvg,/<svg/,'QR is rendered once when the short-lived pair record is created');
+ const image=await tv.request('/auth/pair-qr?code='+encodeURIComponent(pair.code));
+ assert.equal(image.status,200);assert.match(image.headers.get('content-type'),/^image\/svg\+xml/);
+ const svg=await image.text();assert.match(svg,/<svg/);
+ const pendingOutsider=h.browser();await pendingOutsider.status();
+ assert.equal((await pendingOutsider.request('/auth/pair-qr?code='+encodeURIComponent(pair.code))).status,401);
+ const rotated=await (await tv.request('/auth/pair',{method:'POST',body:{}})).json();
+ assert.equal((await tv.request('/auth/pair-qr?code='+encodeURIComponent(pair.code))).status,401);
+ assert.equal((await tv.request('/auth/pair-qr?code='+encodeURIComponent(rotated.code))).status,200);
+ h.advance(600001);
+ assert.equal((await tv.request('/auth/pair-qr?code='+encodeURIComponent(rotated.code))).status,401);
+});
+test('QR pairing code survives Google sign-in and returns the administrator to one-tap approval',async t=>{
+ const h=await harness(t,{publicOrigin:'https://ranking.example.test'});const admin=h.browser();await admin.status();
+ const start=await admin.request('/auth/google?pair=A1B2-C3D4-E5');assert.equal(start.status,302);
+ const callback=await admin.request('/auth/google/callback?code=good&state='+h.params().state);
+ assert.equal(callback.status,302);assert.equal(callback.headers.get('location'),'/auth?pair=A1B2C3D4E5');
+ const malformed=h.browser();await malformed.status();await malformed.request('/auth/google?pair=----A1B2C3');
+ const malformedCallback=await malformed.request('/auth/google/callback?code=good&state='+h.params().state);
+ assert.equal(malformedCallback.headers.get('location'),'/auth');
+});
 test('expired pairing codes and device credentials fail even before TTL cleanup',async t=>{
  const h=await harness(t);const admin=h.browser();await admin.login();await admin.status();const tv=h.browser();await tv.status();const pair=await (await tv.request('/auth/pair',{method:'POST',body:{}})).json();h.advance(600001);assert.equal((await admin.request('/auth/approve',{method:'POST',body:{code:pair.code,name:'Expired'}})).status,400);
  await tv.status();const next=await (await tv.request('/auth/pair',{method:'POST',body:{}})).json();assert.equal((await admin.request('/auth/approve',{method:'POST',body:{code:next.code,name:'TV'}})).status,200);h.advance(180*86400000+1);assert.equal((await tv.request('/api/debug')).status,401);

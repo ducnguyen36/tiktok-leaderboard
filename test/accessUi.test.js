@@ -5,10 +5,11 @@ const path=require('node:path');
 const {chromium}=require('playwright');
 
 async function fixture(t,admin=false){
- const state={admin,authorized:admin,setupRequired:false,pairs:0,approved:[],revoked:[],devices:[]};
+ const state={admin,authorized:admin,setupRequired:false,pairs:0,approved:[],revoked:[],devices:[],qrFails:false};
  const app=express();app.use(express.json());
  app.get('/auth/status',(req,res)=>res.json({...state,csrf:'test-csrf',email:admin?'ducnguyen36@gmail.com':undefined}));
- app.post('/auth/pair',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.pairs++;res.json({code:'ABCD-EFGH',expiresAt:new Date(Date.now()+600000).toISOString()})});
+ app.post('/auth/pair',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.pairs++;res.json({code:'ABCD-EF12-34',pairingUrl:'http://example.test/auth?pair=ABCDEF1234',expiresAt:new Date(Date.now()+600000).toISOString()})});
+ app.get('/auth/pair-qr',(req,res)=>state.qrFails?res.sendStatus(503):res.type('image/svg+xml').send('<svg xmlns="http://www.w3.org/2000/svg"/>'));
  app.get('/auth/devices',(req,res)=>res.json({devices:state.devices}));
  app.post('/auth/approve',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.approved.push(req.body);res.json({ok:true})});
  app.post('/auth/revoke',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.revoked.push(req.body.id);state.devices=state.devices.filter(d=>d.id!==req.body.id);res.json({ok:true})});
@@ -28,13 +29,32 @@ async function fixture(t,admin=false){
 test('access shell requests a TV pairing code, switches language and fits phone',async t=>{
  const {page,state,url}=await fixture(t);await page.goto(url);
  await page.locator('#request-pair').click();
- await page.waitForFunction(()=>document.querySelector('#pair-code').textContent==='ABCD-EFGH');
- assert.equal(await page.locator('#pair-code').textContent(),'ABCD-EFGH');assert.equal(state.pairs,1);
+ await page.waitForFunction(()=>document.querySelector('#pair-code').textContent==='ABCD-EF12-34');
+ assert.equal(await page.locator('#pair-code').textContent(),'ABCD-EF12-34');assert.equal(state.pairs,1);
+ assert.match(await page.locator('#pair-qr').getAttribute('src'),/^\/auth\/pair-qr\?code=ABCD-EF12-34$/);
+ assert.equal(await page.locator('#pair-manual-help').isVisible(),true);
  await page.locator('#access-language').selectOption('vi');
  assert.equal(await page.locator('html').getAttribute('lang'),'vi');
  assert.equal(await page.locator('#google-login').getAttribute('href'),'/auth/google');
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  assert.equal(await page.locator('#admin-panel').isVisible(),false);
+});
+
+test('QR image failure explains the fallback without hiding the manual code',async t=>{
+ const {page,state,url}=await fixture(t);state.qrFails=true;await page.goto(url);await page.locator('#request-pair').click();
+ await page.locator('#pair-qr-error').waitFor();
+ assert.equal(await page.locator('#pair-qr-error').isVisible(),true);
+ assert.equal(await page.locator('#pair-code').isVisible(),true);
+ assert.match(await page.locator('#pair-manual-help').textContent(),/Manual pairing/);
+});
+
+test('scanned QR prefills one-tap approval while manual entry remains editable',async t=>{
+ const {page,state,url}=await fixture(t,true);await page.goto(url+'?pair=ABCD-EF12-34');await page.locator('#admin-panel').waitFor();
+ assert.equal(await page.locator('#approval-code').inputValue(),'ABCD-EF12-34');
+ assert.equal(await page.locator('#device-name').inputValue(),'TV ABCD');
+ await page.locator('#approve-device').click();await page.waitForFunction(()=>document.querySelector('#approval-code').value==='');
+ assert.deepEqual(state.approved,[{code:'ABCD-EF12-34',name:'TV ABCD'}]);
+ await page.locator('#approval-code').fill('1234-5678');assert.equal(await page.locator('#approval-code').inputValue(),'1234-5678');
 });
 
 test('administrator can approve and revoke named devices with safe text rendering',async t=>{
