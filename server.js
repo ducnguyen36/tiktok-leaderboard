@@ -56,7 +56,7 @@ app.use(express.json({ limit: '16kb' }));
 function computeAssetVersion() {
     try {
         const h = crypto.createHash('sha1');
-        for (const file of ['app.js', 'style.css', 'leaderboard-core.js', 'keep-awake.js', 'i18n.js', 'access-guard.js']) {
+        for (const file of ['app.js', 'style.css', 'leaderboard-core.js', 'keep-awake.js', 'i18n.js', 'access-guard.js', 'ui-version.js', 'v1.html', 'v1-app.js', 'v1-style.css']) {
             const filePath = path.join(__dirname, 'public', file);
             if (fs.existsSync(filePath)) h.update(fs.readFileSync(filePath));
         }
@@ -80,7 +80,10 @@ function servePrivateHtml(req, res) {
             .replace('/app.js', `/app.js?v=${ASSET_VERSION}`)
             .replace('/leaderboard-core.js', `/leaderboard-core.js?v=${ASSET_VERSION}`)
             .replace('/keep-awake.js', `/keep-awake.js?v=${ASSET_VERSION}`)
-            .replace('/i18n.js', `/i18n.js?v=${ASSET_VERSION}`);
+            .replace('/i18n.js', `/i18n.js?v=${ASSET_VERSION}`)
+            .replace('/ui-version.js', `/ui-version.js?v=${ASSET_VERSION}`)
+            .replace('/v1-app.js', `/v1-app.js?v=${ASSET_VERSION}`)
+            .replace('/v1-style.css', `/v1-style.css?v=${ASSET_VERSION}`);
         res.type('html').send(html);
     } catch (e) {
         res.status(503).send('Private page unavailable');

@@ -35,11 +35,13 @@ test('mouse language setting translates the full UI and persists through default
  await page.reload();await page.waitForSelector('.row');assert.equal(await page.locator('html').getAttribute('lang'),'vi');assert.equal(await page.locator('#settings-title').textContent(),'Cài đặt');
 });
 
-test('remote OK and Back commit or cancel language edits while dynamic copy stays bilingual',{timeout:30000},async t=>{
+test('remote language selection applies immediately and Back keeps it while dynamic copy stays bilingual',{timeout:30000},async t=>{
  const page=await openFixture(t,{width:1280,height:720});await page.keyboard.press('7');const language=page.locator('#language-choice');assert.equal(await language.count(),1,'Display settings expose a language selector');
- await language.focus();await page.keyboard.press('Enter');await page.keyboard.press('ArrowDown');await page.keyboard.press('Escape');
- assert.equal(await language.inputValue(),'en');assert.equal(await page.locator('html').getAttribute('lang'),'en');assert.equal(await page.locator('#save-status').textContent(),'Edit cancelled');
- await language.focus();await page.keyboard.press('Enter');await page.keyboard.press('ArrowDown');await page.keyboard.press('Enter');
+ await language.focus();await page.keyboard.press('Enter');await page.keyboard.press('ArrowDown');
+ assert.equal(await page.locator('html').getAttribute('lang'),'vi','selection translates before OK or Back');
+ assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('helios_leaderboard_v2_current')).language),'vi');
+ await page.keyboard.press('ArrowUp');assert.equal(await page.locator('html').getAttribute('lang'),'en');
+ await page.keyboard.press('ArrowDown');await page.keyboard.press('Escape');
  await page.waitForFunction(()=>document.documentElement.lang==='vi');assert.equal(await language.inputValue(),'vi');assert.equal(await page.locator('#save-status').textContent(),'Đã áp dụng thay đổi');
  assert.match(await page.locator('.ticker-line').textContent(),/CHÚC MỪNG TEST GROUP 1 ĐẠT 1,000,000 ĐIỂM/);
  assert.match(await page.locator('#connection').textContent(),/BỘ NHỚ ĐỆM/);assert.doesNotMatch(await page.locator('#connection').textContent(),/CACHED/);

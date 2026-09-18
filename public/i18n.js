@@ -2,6 +2,7 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory();else root.HeliosI18n=factory()})(typeof globalThis==='object'?globalThis:this,function(){
  'use strict';
  const en={
+  'settings.useV1':'Switch to V1 Original · Tabs','settings.layout':'TV layout','layout.classic':'Classic','layout.studio':'Helios Studio','layout.podium':'Studio · Podium',
   brandSub:'LIVE PERFORMANCE COMMAND CENTER',pageTitle:'Helios Talent · Leaderboard',camera:'NO PHOTOS OR VIDEOS ALLOWED',
   'board.dailyGroups':'Daily Top Groups','board.dailyIdols':'Daily Top Idols','board.monthlyGroups':'Monthly Top Groups','board.monthlyIdols':'Monthly Top Idols','board.monthlyRanking':'Monthly Ranking','board.lastMonth':'Last Month Ranking','board.yesterdayGroups':'Yesterday Top Groups','board.yesterdayIdols':'Yesterday Top Idols',
   'row.yesterday':'Yesterday: {points}','row.empty':'No entries for this selection','row.waiting':'Waiting for data…',
@@ -25,6 +26,7 @@
   'actions.controls':'Leaderboard controls','actions.toggleLast':'Toggle Last Month Ranking','actions.lastTitle':'Last Month Ranking (6)','actions.refreshAll':'Refresh all columns','actions.refreshAllTitle':'Refresh All (8)','actions.openSettings':'Open settings','actions.settingsTitle':'Settings (7 / S / hold anywhere)','actions.columns':'Leaderboard columns','actions.mobileTabs':'Leaderboard views','actions.showRefresh':'Show refresh for {name}','actions.refresh':'Refresh {name}'
  };
  const vi={
+  'settings.useV1':'Chuyển sang V1 ban đầu · Các tab','settings.layout':'Bố cục TV','layout.classic':'Cổ điển','layout.studio':'Helios Studio','layout.podium':'Studio · Bục Top 3',
   brandSub:'TRUNG TÂM ĐIỀU HÀNH HIỆU SUẤT LIVE',pageTitle:'Helios Talent · Bảng xếp hạng',camera:'CẤM CHỤP ẢNH HOẶC QUAY VIDEO',
   'board.dailyGroups':'Top Nhóm Hôm Nay','board.dailyIdols':'Top Idol Hôm Nay','board.monthlyGroups':'Top Nhóm Tháng','board.monthlyIdols':'Top Idol Tháng','board.monthlyRanking':'BXH Tháng','board.lastMonth':'BXH Tháng Trước','board.yesterdayGroups':'Top Nhóm Hôm Qua','board.yesterdayIdols':'Top Idol Hôm Qua',
   'row.yesterday':'Hôm qua: {points}','row.empty':'Không có dữ liệu cho lựa chọn này','row.waiting':'Đang chờ dữ liệu…',
@@ -55,6 +57,7 @@
  function setLead(doc,selector,key,lang){const el=one(doc,selector);if(!el)return;const node=[...el.childNodes].find(n=>n.nodeType===3);if(node)node.nodeValue=t(lang,key)}
  function setAttr(doc,selector,attr,key,lang){const el=one(doc,selector);if(el)el.setAttribute(attr,t(lang,key))}
  const textBindings=[
+  ['#layout-choice option[value="classic"]','layout.classic'],['#layout-choice option[value="studio"]','layout.studio'],['#layout-choice option[value="podium"]','layout.podium'],
   ['.brand-sub','brandSub'],['.board[data-column="0"] .board-head b','board.dailyGroups'],['.board[data-column="1"] .board-head b','board.dailyIdols'],['.board[data-column="2"] .board-head b','board.monthlyGroups'],['.board[data-column="3"] .board-head b','board.monthlyIdols'],['.board[data-column="4"] .board-head b','board.monthlyRanking'],['.board[data-column="5"] .board-head b','board.lastMonth'],
   ['#settings-title','settings.title'],['.settings-nav [data-page="0"]','settings.display'],['.settings-nav [data-page="1"]','settings.timing'],['.settings-nav [data-page="2"]','settings.visibility'],['.settings-nav [data-page="3"]','settings.history'],['.settings-nav [data-page="4"]','settings.defaults'],['.settings-nav [data-page="5"]','settings.shortcuts'],
   ['[data-pane="0"] h3','settings.display'],['[data-pane="1"] h3','settings.timingTitle'],['[data-pane="1"] p','settings.timingHelp'],['[data-pane="2"] h3','settings.visibilityTitle'],['#visibility-kind option[value="groups"]','settings.groups'],['#visibility-kind option[value="talents"]','settings.talents'],['#groups-prev','settings.previous'],['#groups-next','settings.next'],['#talents-prev','settings.previous'],['#talents-next','settings.next'],['[data-pane="2"] p','settings.visibilityHelp'],
@@ -63,6 +66,7 @@
   ['[data-pane="5"] h3','settings.shortcutsTitle'],['#manage-access','settings.manageAccess'],['#save-status','settings.savedDevice'],['#save-default','settings.saveDefault'],['#done-settings','settings.done'],['#language-choice option[value="en"]','settings.english'],['#language-choice option[value="vi"]','settings.vietnamese']
  ];
  const leadBindings=[
+  ['#layout-label','settings.layout'],['#use-v1','settings.useV1'],
   ['[data-pane="0"] label:nth-of-type(1)','settings.dailyGroupsPoints'],['[data-pane="0"] label:nth-of-type(2)','settings.dailyIdolsPoints'],['[data-pane="0"] label:nth-of-type(3)','settings.monthlyGroupsPoints'],['[data-pane="0"] label:nth-of-type(4)','settings.monthlyIdolsPoints'],['[data-pane="0"] label:nth-of-type(5)','settings.monthlyRankingPoints'],['[data-pane="0"] label:nth-of-type(6)','settings.total'],['[data-pane="0"] label:nth-of-type(7)','settings.language'],
   ['[data-pane="1"] label:nth-of-type(1)','settings.resetHour'],['[data-pane="1"] label:nth-of-type(2)','settings.freezeUntil'],['[data-pane="1"] label:nth-of-type(3)','settings.yesterdayGroups'],['[data-pane="1"] label:nth-of-type(4)','settings.yesterdayIdols'],['[data-pane="1"] label:nth-of-type(5)','settings.rankingSpeed'],['[data-pane="1"] label:nth-of-type(6)','settings.pause'],['[data-pane="1"] label:nth-of-type(7)','settings.tickerSpeed'],['[data-pane="2"] label:nth-of-type(1)','settings.location'],['[data-pane="2"] label:nth-of-type(2)','settings.choose'],['[data-pane="3"] label','settings.showLastMonth']
  ];

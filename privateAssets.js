@@ -3,7 +3,7 @@ function privateHtmlName(requestPath) {
   let decoded;
   try { decoded = decodeURIComponent(requestPath).replace(/\\/g, '/'); } catch { return null; }
   if (/^\/+$/u.test(decoded)) return 'index.html';
-  const match = decoded.match(/(?:^|\/)(index|overlay)\.html[. ]*\/*$/i);
+  const match = decoded.match(/(?:^|\/)(index|overlay|v1)\.html[. ]*\/*$/i);
   return match ? `${match[1].toLowerCase()}.html` : null;
 }
 function safeAvatarPath(root, filename) {

@@ -1,6 +1,31 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const C=require('../public/leaderboard-core');
+test('Podium takes eleven after filtering while Classic and Studio keep ten',()=>{
+ const entries=Array.from({length:15},(_,i)=>({name:'Talent '+(i+1),value:100-i,groupId:'g',locationId:'loc_hcm'}));
+ const raw={group:{daily:entries,monthly:entries},individual:{daily:entries,monthly:entries}};
+ for(const layout of ['classic','studio','podium']){
+  const c=C.normalize({layout,talents:{'Talent 1':false}});
+  for(const column of [0,1,2,3])assert.equal(C.selectRows(raw,c,column).length,layout==='podium'?11:10);
+  assert.equal(C.selectRows(raw,c,1)[0].name,'Talent 2');assert.equal(C.selectRows(raw,c,4).length,14);
+ }
+});
+test('fresh defaults show Quy Nhon except Velora across rankings and totals, preserving saved choices',()=>{
+ const q={name:'Quy Nhon member',value:40,groupId:'qn-other',locationId:'loc_quynhon'};
+ const v={name:'Velora member',value:100,groupId:'1784445344024',locationId:'loc_quynhon'};
+ const h={name:'HCM member',value:20,groupId:'hcm-other',locationId:'loc_hcm'};
+ const raw={locations:[{id:'loc_quynhon'},{id:'loc_hcm'}],group:{daily:[v,q,h],monthly:[v,q,h]},individual:{daily:[v,q,h],monthly:[v,q,h]}};
+ for(const config of [C.normalize({}),C.migrate({})]){
+  for(let index=0;index<6;index++)assert.deepEqual(C.selectRows(raw,config,index,{individual:[v,q,h]}).map(row=>row.name),['Quy Nhon member','HCM member']);
+  assert.equal(C.total(raw,config),60);
+ }
+ const saved=C.normalize({locations:{loc_hcm:true,loc_quynhon:false},groups:{'1784445344024':true}});
+ assert.deepEqual(C.selectRows(raw,saved,4).map(row=>row.name),['HCM member']);
+ saved.locations.loc_quynhon=true;
+ const restored=C.normalize(JSON.parse(JSON.stringify(saved)));
+ assert.deepEqual(C.selectRows(raw,restored,4).map(row=>row.name),['Velora member','Quy Nhon member','HCM member']);
+ assert.equal(C.total(raw,restored),160);
+});
 test('new and legacy devices start with five columns, independent idol score switches',()=>{
  const c=C.migrate({showIncome:{'individual-monthly':false,'group-daily':false},rotation:90,visibleGroups:{g:false}});
  assert.equal(c.lastMonth,false);assert.deepEqual(c.scores,[false,true,true,false,false]);assert.equal(c.groups.g,false);assert.equal(c.rotation,undefined);

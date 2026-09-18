@@ -1,0 +1,31 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const {chromium}=require('playwright');
+const {createFixtureServer}=require('./support/command-center-server');
+const {privateHtmlName}=require('../privateAssets');
+
+test('V1 tab frontend and current frontend switch immediately and remember selection',{timeout:45000},async t=>{
+ const {app,state}=createFixtureServer(),server=app.listen(0,'127.0.0.1');
+ await new Promise(r=>server.once('listening',r));
+ const browser=await chromium.launch({channel:'chrome',headless:true,args:['--disable-gpu']});
+ t.after(async()=>{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r))});
+ const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const url='http://127.0.0.1:'+server.address().port;
+ await page.goto(url);await page.waitForSelector('.row');
+ await page.keyboard.press('7');await page.locator('[data-page="4"]').click();
+ await page.locator('#use-v1').click();await page.waitForURL('**/v1.html');
+ await page.waitForFunction(()=>document.body.textContent.includes('TEST GROUP 1'));
+ assert.equal(await page.locator('#app-wrapper').count(),1);
+ assert.equal(await page.locator('.tv').count(),0);
+ await page.goto(url);await page.waitForURL('**/v1.html');
+ await page.waitForFunction(()=>document.body.textContent.includes('TEST GROUP 1'));
+ const requests=state.requests.length;state.invalidate();
+ await page.waitForTimeout(300);assert.ok(state.requests.length>requests,'V1 refetches on current SSE invalidation');
+ await page.keyboard.press('7');
+ await page.locator('#ui-version-choice').selectOption('current');
+ await page.waitForURL(url+'/');await page.waitForSelector('.row');
+ await page.reload();await page.waitForSelector('.row');
+ assert.equal(await page.evaluate(()=>localStorage.getItem('helios_leaderboard_ui_version')),'current');
+ assert.deepEqual(errors,[]);
+ for(const path of ['/v1.html','/V1.HTML','/%761.html','/v1.html/'])assert.equal(privateHtmlName(path),'v1.html');
+});

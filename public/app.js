@@ -93,8 +93,9 @@ function syncMobileLayout(){
 function setupScroll(){
  const previous=new Map(scrollAnimations.map(a=>[a.column,{progress:(Number(a.currentTime)||0)/a.effect.getTiming().duration}]));
  scrollAnimations.forEach(a=>a.cancel());scrollAnimations=[];
- if(isMobileLayout()){stage.style.removeProperty('--row-height');return}
- stage.style.setProperty('--row-height',boards[0].querySelector('.list').clientHeight/10+'px');
+ if(isMobileLayout()){stage.style.removeProperty('--row-height');boards.slice(0,4).forEach(b=>b.style.removeProperty('--row-height'));return}
+ stage.style.setProperty('--row-height',boards[4].querySelector('.list').clientHeight/10+'px');
+ boards.slice(0,4).forEach(b=>b.style.setProperty('--row-height',b.querySelector('.list').clientHeight/(config.layout==='podium'?11:10)+'px'));
  for(const index of [4,5]){if(boards[index].hidden)continue;const viewport=boards[index].querySelector('.list'),track=viewport.querySelector('.all-track');if(!track||typeof track.animate!=='function')continue;
   const motion=C.scrollFrames(track.scrollHeight-viewport.clientHeight,config.speed*innerHeight/1080,config.pause);if(!motion)continue;
   const animation=track.animate(motion.frames,{duration:motion.duration,iterations:Infinity,easing:'linear'});animation.column=index;
@@ -103,14 +104,21 @@ function setupScroll(){
  }
 }
 const ticker=document.querySelector('.ticker-line');
+const tickerDivider='   ✦ ✧ ✦   ';
 function buildTicker(){
  const leaders=C.filtered(rawData?.group?.daily,config,allLocations).filter(e=>e.value>=100000).slice(0,5);
- return leaders.length?leaders.map(e=>t('ticker.congratulations',{name:e.name,points:C.formatPoints(Math.floor(e.value/100000)*100000)})).join('   ·   '):t('ticker.fallback');
+ return leaders.length?tickerDivider+leaders.map(e=>t('ticker.congratulations',{name:e.name,points:C.formatPoints(Math.floor(e.value/100000)*100000)})).join(tickerDivider)+tickerDivider:t('ticker.fallback');
+}
+function tickerContent(){
+ const content=document.createDocumentFragment();tickerMessage.split(tickerDivider).forEach((text,index)=>{
+  if(index){const ornament=document.createElement('span');ornament.className='ticker-separator';ornament.textContent=tickerDivider;ornament.setAttribute('aria-hidden','true');content.append(ornament)}
+  content.append(document.createTextNode(text));
+ });return content;
 }
 function setupTicker(){
- if(tickerAnimation)tickerAnimation.cancel();ticker.textContent=tickerMessage;
- if(ticker.scrollWidth<=ticker.parentElement.clientWidth||!ticker.animate)return;
- const span=document.createElement('span');span.textContent=tickerMessage+'   ·   ';span.style.display='inline-block';span.style.paddingRight='40px';ticker.replaceChildren(span);
+ if(tickerAnimation)tickerAnimation.cancel();ticker.classList.remove('is-centered');ticker.replaceChildren(tickerContent());
+ if(ticker.scrollWidth<=ticker.parentElement.clientWidth||!ticker.animate){ticker.classList.add('is-centered');return}
+ const span=document.createElement('span');span.append(tickerContent());span.style.display='inline-block';span.style.paddingRight='40px';ticker.replaceChildren(span);
  const duplicate=span.cloneNode(true);duplicate.setAttribute('aria-hidden','true');ticker.append(duplicate);
  const distance=span.getBoundingClientRect().width;tickerAnimation=ticker.animate([{transform:'translateX(0)'},{transform:'translateX(-'+distance+'px)'}],{duration:distance/(config.tickerSpeed*innerWidth/1920)*1000,iterations:Infinity,easing:'linear'});
  if(!dialog.hidden)tickerAnimation.pause();
@@ -136,10 +144,10 @@ function renderSummary(){
 }
 function apply(){
  const previousLanguage=document.documentElement.lang;config=C.normalize(config);const languageChanged=previousLanguage!==config.language;I.applyDocument(config.language,document);boards.forEach((b,i)=>b.classList.toggle('hide-points',i<5&&!config.scores[i]));
- const changedLayout=sixth.hidden===config.lastMonth;sixth.hidden=!config.lastMonth;stage.classList.toggle('six',config.lastMonth);grid.style.setProperty('--columns',config.lastMonth?6:5);
+ const changedLayout=sixth.hidden===config.lastMonth||stage.dataset.layout!==config.layout;stage.dataset.layout=config.layout;stage.dataset.studio=String(config.layout!=='classic');sixth.hidden=!config.lastMonth;stage.classList.toggle('six',config.lastMonth);grid.style.setProperty('--columns',config.lastMonth?6:5);
  syncMobileLayout();
  document.querySelector('.kpi').classList.toggle('hide-total',!config.total);
- let changed=false;boards.forEach((b,i)=>{changed=renderRows(i)||changed});const motion=config.speed+'|'+config.pause;if(changed||changedLayout||motion!==lastMotion)setupScroll();lastMotion=motion;renderSummary();renderConnection();if(lastTickerSpeed!==config.tickerSpeed)setupTicker();lastTickerSpeed=config.tickerSpeed;syncInputs();persist();if(languageChanged)renderLocations();
+ let changed=false;boards.forEach((b,i)=>{changed=renderRows(i)||changed});const motion=config.speed+'|'+config.pause;if(changed||changedLayout||motion!==lastMotion)setupScroll();lastMotion=motion;renderSummary();renderConnection();if(changedLayout||lastTickerSpeed!==config.tickerSpeed)setupTicker();lastTickerSpeed=config.tickerSpeed;syncInputs();persist();if(languageChanged)renderLocations();
  const context=requestContext();if(context!==lastContext){lastContext=context;loadCurrent([0,1,2,3,4])}
  if(config.lastMonth)loadHistory(false);
 }
@@ -245,9 +253,11 @@ function saveDefault(){try{localStorage.setItem(storageKey+'_default',JSON.strin
 ['save-default','save-default-page'].forEach(id=>document.getElementById(id).onclick=saveDefault);
 document.getElementById('restore-default').onclick=()=>{config=C.normalize(saved||defaults);apply();renderLocations();notify(t('toast.defaultRestored'))};
 document.getElementById('factory').onclick=()=>{config=C.normalize(defaults);apply();renderLocations();notify(t('toast.factory'))};
-configInputs.forEach(e=>e.onchange=()=>{if(editing===e)return;let value=e.type==='checkbox'?e.checked:e.type==='number'?Number(e.value):e.value;
+configInputs.forEach(e=>e.onchange=()=>{if(editing===e&&!['layout','language'].includes(e.dataset.config))return;let value=e.type==='checkbox'?e.checked:e.type==='number'?Number(e.value):e.value;
  if(e.type==='number'){value=Math.max(Number(e.min),Math.min(Number(e.max),value));if(!Number.isFinite(value))return}
  config[e.dataset.config]=value;apply();if(['speed','pause'].includes(e.dataset.config))setupScroll();if(e.dataset.config==='tickerSpeed')setupTicker();document.getElementById('save-status').textContent=t('settings.changesSaved')});
+['layout-choice','language-choice'].forEach(id=>document.getElementById(id).oninput=e=>e.target.onchange());
+document.getElementById('use-v1').onclick=()=>window.HeliosVersion.choose('v1');
 scoreInputs.forEach(e=>e.onchange=()=>{config.scores[+e.dataset.score]=e.checked;apply();document.getElementById('save-status').textContent=t('settings.changesSaved')});
 function openPage(index){document.querySelectorAll('[data-page]').forEach(e=>e.classList.toggle('active',+e.dataset.page===index));document.querySelectorAll('[data-pane]').forEach(e=>e.classList.toggle('active',+e.dataset.pane===index))}
 document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>openPage(+b.dataset.page));
@@ -286,6 +296,7 @@ function beginEdit(el){
 function finishEdit(commit){
  if(!editing)return;
  const el=editing;editing=null;
+ if(['layout','language'].includes(el.dataset.config))commit=true;
  if(!commit)el.value=editOriginal;
  el.classList.remove('remote-editing');
  if(commit||el.id==='location-choice'||el.id==='visibility-kind')el.dispatchEvent(new Event('change',{bubbles:true}));
@@ -310,6 +321,9 @@ document.addEventListener('keydown',e=>{
  if(!dialog.hidden){
   if(back){e.preventDefault();goBack();return}
   if(editing){
+    if(['layout','language'].includes(editing.dataset.config)&&['ArrowUp','ArrowDown','Home','End'].includes(e.key)){
+     e.preventDefault();const el=editing,last=el.options.length-1;el.selectedIndex=e.key==='Home'?0:e.key==='End'?last:Math.max(0,Math.min(last,el.selectedIndex+(e.key==='ArrowDown'?1:-1)));el.dispatchEvent(new Event('change',{bubbles:true}));return;
+    }
     if(ok){e.preventDefault();if(!e.repeat)finishEdit(true)}
     else if(e.key==='Tab'){
      e.preventDefault();const current=editing;finishEdit(true);const items=modalControls(),i=items.indexOf(current);
