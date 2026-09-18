@@ -16,5 +16,14 @@ test('milestones play once, suppress repeats, respect mute and survive reload',{
   return{counts,particles:document.querySelectorAll('.banner-spark').length};
  });
  assert.deepEqual(result.counts,[0,4,4,4,4,4,8,8,8,8,12]);assert.ok(result.particles>0);
+ for(const viewport of [{width:390,height:844},{width:1920,height:1080}]){
+  await page.setViewportSize(viewport);
+  const visuals=await page.evaluate(()=>{
+   fireworks.replaceChildren();bannerBurst();
+   const spark=fireworks.querySelector('.banner-spark'),animation=spark.getAnimations()[0];animation.pause();animation.currentTime=500;
+   return{width:spark.getBoundingClientRect().width,opacity:Number(getComputedStyle(spark).opacity),blooms:fireworks.querySelectorAll('.banner-bloom').length,height:fireworks.clientHeight};
+  });
+  assert.ok(visuals.width>=8,'rays visibly expand instead of remaining subpixel');assert.equal(visuals.opacity,1);assert.equal(visuals.blooms,3);assert.ok(visuals.height>=40);
+ }
  await page.emulateMedia({reducedMotion:'reduce'});assert.equal(await page.locator('.banner-fireworks').isVisible(),false);
 });
