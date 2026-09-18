@@ -12,8 +12,12 @@
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 10000);
     try {
       const response = await fetch('/auth/status', { cache: 'no-store', credentials: 'same-origin', signal: controller.signal });
-      if (!response.ok || !(await response.json()).authorized) clearPrivateView();
-    } catch { clearPrivateView(); } finally { clearTimeout(timer); checking = false; }
+      if (!response.ok) return;
+      if (!(await response.json()).authorized) clearPrivateView();
+    } catch {
+      // Container restarts and temporary network failures are not access revocations.
+      // The next scheduled check will verify authorization again.
+    } finally { clearTimeout(timer); checking = false; }
   }
   // Never let a late response repaint or repersist private history after denial.
   const originalFetch = window.fetch;
