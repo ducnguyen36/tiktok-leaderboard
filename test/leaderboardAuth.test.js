@@ -61,9 +61,17 @@ test('unknown browsers cannot obtain any private route, including static assets 
 test('missing OAuth configuration serves setup shell but cannot unlock data',async t=>{
  const h=await harness(t,{googleClientSecret:''});const b=h.browser();assert.equal((await b.status()).setupRequired,true);assert.equal((await b.request('/api/debug')).status,401);assert.equal((await b.request('/auth/google')).status,503);
 });
-test('verified allowlisted Google account receives expiring administrator session; callback cannot replay',async t=>{
+test('verified allowlisted Google account keeps administrator session until explicit logout; callback cannot replay',async t=>{
  const h=await harness(t);const b=h.browser();const {response,callback}=await b.login();assert.equal(response.status,302);assert.equal((await b.status()).admin,true);assert.equal((await b.request('/index.html')).status,200);assert.match((await b.request('/index.html')).headers.get('cache-control'),/private.*no-store/);assert.equal((await b.request(callback)).status,400);
- h.advance(12*60*60*1000+1);assert.equal((await b.request('/api/debug')).status,401);
+ h.advance(365*24*60*60*1000);assert.equal((await b.request('/api/debug')).status,200);
+});
+test('an administrator session issued before the rollout is migrated before its old deadline',async t=>{
+ const h=await harness(t);const b=h.browser();await b.login();
+ const session=[...h.store.records.values()].find(record=>record.kind==='admin');
+ session.expiresAt=new Date(Date.now()+60000);h.store.records.set(session._id,session);
+ assert.equal((await b.status()).admin,true);
+ assert.equal(h.store.records.get(session._id).expiresAt,undefined);
+ h.advance(365*24*60*60*1000);assert.equal((await b.request('/api/debug')).status,200);
 });
 test('wrong identity, verification, nonce or callback state is rejected',async t=>{
  const h=await harness(t);
@@ -121,9 +129,10 @@ test('store outages deny status/data and independently terminate existing SSE',a
  const h=await harness(t);const b=h.browser();await b.login();await b.status();const response=await b.request('/api/leaderboard/stream');const reader=response.body.getReader();assert.match(new TextDecoder().decode((await reader.read()).value),/private/);
  h.store.broken=true;assert.equal((await b.request('/api/debug')).status,503);assert.equal((await b.request('/auth/status')).status,503);const done=await Promise.race([reader.read(),new Promise((_,reject)=>setTimeout(()=>reject(Error('stream remained open')),1000))]);assert.equal(done.done,true);
 });
-test('logout removes authorization and independent SSE lifetime expires without broadcasts',async t=>{
- const h=await harness(t);const b=h.browser();await b.login();await b.status();const response=await b.request('/api/leaderboard/stream');const reader=response.body.getReader();await reader.read();h.advance(12*3600000+1);assert.equal((await reader.read()).done,true);
+test('logout removes authorization and explicitly closes the administrator SSE',async t=>{
+ const h=await harness(t);const b=h.browser();await b.login();await b.status();const response=await b.request('/api/leaderboard/stream');const reader=response.body.getReader();await reader.read();
  const other=h.browser();await other.login();await other.status();assert.equal((await other.request('/auth/logout',{method:'POST',body:{}})).status,200);assert.equal((await other.request('/api/debug')).status,401);
+ assert.equal((await b.request('/auth/logout',{method:'POST',body:{}})).status,200);assert.equal((await reader.read()).done,true);
 });
 test('revocation closes approved browser SSE independently, and regenerating a pair code invalidates the old one',async t=>{
  const h=await harness(t);const admin=h.browser();await admin.login();await admin.status();const tv=h.browser();await tv.status();

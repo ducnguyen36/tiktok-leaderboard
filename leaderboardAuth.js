@@ -4,7 +4,7 @@ const express = require('express');
 const { OAuth2Client } = require('google-auth-library');
 const QRCode = require('qrcode');
 const { createAuthStore } = require('./authStore');
-const TEN_MINUTES = 600000, ADMIN_LIFETIME = 12 * 3600000, DEVICE_LIFETIME = 180 * 86400000;
+const TEN_MINUTES = 600000, DEVICE_LIFETIME = 180 * 86400000;
 const COOKIE = 'helios_access', FLOW_COOKIE = 'helios_oauth';
 const DEFAULT_ADMIN_EMAILS = 'ducnguyen36@gmail.com,heliostalentofficial@gmail.com,kimlinh727@gmail.com';
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -41,7 +41,11 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
   const provider = googleClient || new OAuth2Client(config.googleClientId, config.googleClientSecret, callback);
   const router = express.Router({ strict: true, caseSensitive: true });
   const fail = (res, code, error) => res.status(code).json({ authorized: false, error });
-  function setCookie(res, name, value, age) { res.cookie(name, value, { httpOnly: true, sameSite: 'lax', secure, path: '/', maxAge: age }); }
+  function setCookie(res, name, value, age) {
+    const options = { httpOnly: true, sameSite: 'lax', secure, path: '/' };
+    if (Number.isFinite(age)) options.maxAge = age;
+    res.cookie(name, value, options);
+  }
   function secureHeaders(req, res, next) {
     // Enforce after sendFile/route handlers, which may replace caching headers.
     const original = res.writeHead;
@@ -59,7 +63,14 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     const secret = cookies(req)[COOKIE];
     if (!validSecret(secret)) return null;
     const record = await store.get(`session:${hash(secret)}`);
-    if (!record || +record.expiresAt <= +now()) return null;
+    if (!record || (record.expiresAt && +record.expiresAt <= +now())) return null;
+    // Migrate administrator sessions created before the no-expiry policy.
+    // This keeps a still-valid admin signed in across the rollout and removes
+    // its old MongoDB TTL deadline.
+    if (record.kind === 'admin' && record.expiresAt) {
+      delete record.expiresAt;
+      await store.put(record);
+    }
     if (record.kind === 'admin' && !emails.has(record.email)) return null;
     return record;
   }
@@ -95,6 +106,7 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
       secret = random(); record = { _id: `session:${hash(secret)}`, kind: 'pending', expiresAt: new Date(+now() + TEN_MINUTES) };
       await store.put(record); setCookie(res, COOKIE, secret, DEVICE_LIFETIME);
     }
+    if (record.kind === 'admin') setCookie(res, COOKIE, secret);
     res.json({ authorized: Boolean(authorized(record)), admin: record.kind === 'admin', email: record.kind === 'admin' ? record.email : undefined,
       setupRequired: false, csrf: csrfFor(secret), expiresAt: record.expiresAt });
   }));
@@ -123,8 +135,10 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     if (claims?.email_verified !== true || !emails.has(email) || typeof claims.nonce !== 'string' || hash(claims.nonce) !== transaction.nonce || !claims.sub) return fail(res, 403, 'identity_denied');
     const old = cookies(req)[COOKIE]; if (validSecret(old)) await store.remove(`session:${hash(old)}`);
     const session = random();
-    await store.put({ _id: `session:${hash(session)}`, kind: 'admin', email, subject: claims.sub, expiresAt: new Date(+now() + ADMIN_LIFETIME) });
-    setCookie(res, COOKIE, session, ADMIN_LIFETIME); res.redirect(transaction.pair ? `/auth?pair=${encodeURIComponent(transaction.pair)}` : '/auth');
+    // Administrator access is revoked explicitly from the device manager; it is not a 12-hour lease.
+    // Omitting expiresAt also prevents MongoDB's TTL index from deleting the admin session.
+    await store.put({ _id: `session:${hash(session)}`, kind: 'admin', email, subject: claims.sub });
+    setCookie(res, COOKIE, session); res.redirect(transaction.pair ? `/auth?pair=${encodeURIComponent(transaction.pair)}` : '/auth');
   }));
   router.use(['/auth/pair', '/auth/approve', '/auth/revoke', '/auth/logout'], express.json({ limit: '4kb' }));
   router.post('/auth/pair', endpoint(async (req, res) => {

@@ -3,7 +3,14 @@
   function clearPrivateView() {
     if (denied) return; denied = true;
     document.documentElement.style.visibility = 'hidden';
-    try { for (const key of Object.keys(localStorage)) if (key.startsWith('helios_leaderboard') || key === 'leaderboard_config') localStorage.removeItem(key); } catch {}
+    // A lost/expired browser session must not erase the operator's chosen layout,
+    // language, visibility and other defaults. Only historical ranking data and
+    // the retired legacy config key are private cache, so those are safe to purge.
+    try {
+      for (const key of Object.keys(localStorage)) {
+        if (/^helios_leaderboard_v2_history_/.test(key) || key === 'leaderboard_config') localStorage.removeItem(key);
+      }
+    } catch {}
     document.body?.replaceChildren();
     location.replace('/auth');
   }
