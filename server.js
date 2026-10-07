@@ -4,6 +4,8 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '1';
 process.env.TZ = 'Asia/Ho_Chi_Minh';
 const express = require('express');
 const { createLeaderboardAuth } = require('./leaderboardAuth');
+const { createNextRanking } = require('./rankingNext');
+const { createSheetReconciliation } = require('./sheetReconciliation');
 const { privateHtmlName, safeAvatarPath } = require('./privateAssets');
 const path = require('path');
 const fs = require('fs');
@@ -63,7 +65,7 @@ app.use(express.json({ limit: '16kb' }));
 function computeAssetVersion() {
     try {
         const h = crypto.createHash('sha1');
-        for (const file of ['app.js', 'style.css', 'leaderboard-core.js', 'keep-awake.js', 'i18n.js', 'access-guard.js', 'ui-version.js', 'v1.html', 'v1-app.js', 'v1-style.css']) {
+        for (const file of ['app.js', 'style.css', 'leaderboard-core.js', 'keep-awake.js', 'i18n.js', 'access-guard.js', 'ui-version.js', 'v1.html', 'v1-app.js', 'v1-style.css','next-app.js','next-style.css','next-core.js','new.html']) {
             const filePath = path.join(__dirname, 'public', file);
             if (fs.existsSync(filePath)) h.update(fs.readFileSync(filePath));
         }
@@ -91,12 +93,13 @@ function servePrivateHtml(req, res) {
             .replace('/ui-version.js', `/ui-version.js?v=${ASSET_VERSION}`)
             .replace('/v1-app.js', `/v1-app.js?v=${ASSET_VERSION}`)
             .replace('/v1-style.css', `/v1-style.css?v=${ASSET_VERSION}`);
-        res.type('html').send(html);
+        const versioned=html.replace('/next-style.css',`/next-style.css?v=${ASSET_VERSION}`).replace('/next-app.js',`/next-app.js?v=${ASSET_VERSION}`).replace('/next-core.js',`/next-core.js?v=${ASSET_VERSION}`);
+        res.type('html').send(versioned);
     } catch (e) {
         res.status(503).send('Private page unavailable');
     }
 }
-app.get(['/', '/index.html', '/overlay.html'], servePrivateHtml);
+app.get(['/', '/index.html', '/overlay.html','/new','/new.html'], servePrivateHtml);
 // Canonicalize encoded/Windows aliases before static serving so all private HTML has the guard.
 app.use((req, res, next) => {
     if (['GET', 'HEAD'].includes(req.method) && privateHtmlName(req.path)) return servePrivateHtml(req, res);
@@ -979,13 +982,16 @@ let activeGiftsStream = null;
 let activeProfilesStream = null;
 let activeSessionsStream = null;
 let activeLocationsStream = null;
+let activeLiveStream = null;
 
 function invalidateLeaderboard() {
+    nextRanking.invalidate();
     giftBucketStore.invalidate();
     leaderboardCache.invalidate();
 }
 
 function stopChangeStreams() {
+    if(activeLiveStream){try{activeLiveStream.close()}catch{}activeLiveStream=null}
     if (activeGiftsStream) {
         try { activeGiftsStream.close(); } catch (e) { /* ignore */ }
         activeGiftsStream = null;
@@ -1018,6 +1024,7 @@ function startChangeStreams() {
             console.log(`[ChangeStream] Gift ${change.operationType}`);
             giftBucketStore.change(change);
             leaderboardCache.invalidate();
+            nextRanking.invalidate();
             debouncedBroadcast();
         });
         activeGiftsStream.on('error', (err) => {
@@ -1064,6 +1071,11 @@ function startChangeStreams() {
         }
         activeSessionsStream = watchDependency('sessions');
         activeLocationsStream = watchDependency('locations');
+        activeLiveStream=db.collection('leaderboard_live').watch([],{fullDocument:'updateLookup'});
+        const liveStream=activeLiveStream;
+        observeStreamCompletion(liveStream,()=>activeLiveStream===liveStream,()=>{activeLiveStream=null;nextRanking.invalidate();debouncedBroadcast()});
+        liveStream.on('change',()=>{nextRanking.invalidate();debouncedBroadcast()});
+        liveStream.on('error',()=>{activeLiveStream=null;nextRanking.invalidate();debouncedBroadcast()});
 
         console.log('[ChangeStream] Watching gifts, profiles, sessions and locations');
     } catch (err) {
@@ -1099,6 +1111,12 @@ function debouncedBroadcast() {
 // ==========================================
 // API: LEADERBOARD (polling fallback)
 // ==========================================
+const sheetReconciliation=createSheetReconciliation({getDb:()=>db,sheets:leaderboardAuth.sheets});
+const nextRanking=createNextRanking({getDb:()=>db,current:getLeaderboardResult,readProfiles:readProfilesFromDb,readLocations:readLocationsFromDb,avatar:resolveAvatarFast,reconcile:sheetReconciliation});
+app.get('/api/leaderboard/next',async(req,res)=>{
+    try {const result=await nextRanking.get(req.query.fresh==='true');res.set('Cache-Control','no-store').json(result)}
+    catch {res.status(db?500:503).json({status:'error',message:'New leaderboard temporarily unavailable'})}
+});
 app.get('/api/leaderboard/fresh', async (req, res) => {
     let context;
     try {
@@ -1223,7 +1241,7 @@ setInterval(async () => {
 
 // Recover standalone stream failures too (not every stream error closes MongoClient).
 setInterval(() => {
-    if (db && (!activeGiftsStream || !activeProfilesStream || !activeSessionsStream || !activeLocationsStream)) startChangeStreams();
+    if (db && (!activeGiftsStream || !activeProfilesStream || !activeSessionsStream || !activeLocationsStream || !activeLiveStream)) startChangeStreams();
 }, 30000);
 
 // Ensure the latest closed calendar month exists even when no browser is open.

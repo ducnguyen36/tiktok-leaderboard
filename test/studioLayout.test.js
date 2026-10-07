@@ -76,7 +76,7 @@ test('Studio rearranges every ranking without losing rows, points or viewport fi
  assert.equal(await page.locator('.board:nth-child(-n+2) .identity').evaluateAll(es=>es.every(e=>{const a=e.getBoundingClientRect(),b=e.closest('.row').getBoundingClientRect();return a.top>=b.top&&a.bottom<=b.bottom})),true,'comparison labels fit at the smallest Studio size');
  await page.setViewportSize({width:800,height:600});assert.equal(await page.locator('.board:visible').count(),5);
  assert.equal(await page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight),true);
- await page.setViewportSize({width:390,height:844});assert.equal(await page.locator('.board:visible').count(),1);assert.equal(await page.locator('.mobile-board-tabs button').count(),5);
+ await page.setViewportSize({width:390,height:844});await page.waitForFunction(()=>[...document.querySelectorAll('.board')].filter(e=>e.offsetParent!==null).length===1);assert.equal(await page.locator('.board:visible').count(),1);assert.equal(await page.locator('.mobile-board-tabs button').count(),5);
  await page.setViewportSize({width:1920,height:1080});await choose(page,'classic');
  const heights=await page.locator('.board:visible').evaluateAll(es=>es.map(e=>e.getBoundingClientRect().height));assert.ok(Math.max(...heights)-Math.min(...heights)<2);
 });

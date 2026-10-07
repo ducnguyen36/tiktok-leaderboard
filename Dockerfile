@@ -20,6 +20,7 @@ COPY monthlyWindows.js ./
 COPY leaderboardHistory.js ./
 COPY leaderboardAggregation.js ./
 COPY leaderboardPerformance.js ./
+COPY rankingNext.js sheetReconciliation.js ./
 COPY public/ ./public/
 
 # Create local avatars cache directory

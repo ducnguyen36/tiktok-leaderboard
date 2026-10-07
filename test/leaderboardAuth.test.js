@@ -78,7 +78,7 @@ test('Sheets callback cannot upgrade a logged-out browser or accept missing cons
 });
 test('unknown browsers cannot obtain any private route, including static assets and SSE', async t=>{
   const h=await harness(t);const b=h.browser();
-  for(const route of ['/', '/index.html','/overlay.html','/userdata/avatars/x.jpg','/api/debug','/api/leaderboard/current','/api/leaderboard/history','/api/leaderboard/stream','/app.js','/auth/../api/debug','/auth/not-public']){
+  for(const route of ['/', '/index.html','/overlay.html','/new','/new.html','/next-app.js','/next-core.js','/next-style.css','/api/leaderboard/next','/userdata/avatars/x.jpg','/api/debug','/api/leaderboard/current','/api/leaderboard/history','/api/leaderboard/stream','/app.js','/auth/../api/debug','/auth/not-public']){
     const r=await b.request(route);assert.equal(r.status,401,route);assert.match(r.headers.get('cache-control'),/private.*no-store/);assert.equal(r.headers.get('access-control-allow-origin'),null);
   }
   assert.equal((await b.request('/auth')).status,200);

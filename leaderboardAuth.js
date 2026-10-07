@@ -239,7 +239,7 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     try {
       const record = await identity(req);
       if (!authorized(record)) {
-        if (req.method === 'GET' && ['/', '/index.html', '/overlay.html'].includes(req.path.toLowerCase())) return res.status(401).sendFile('access.html', { root: path.join(__dirname, 'public') });
+        if (req.method === 'GET' && ['/', '/index.html', '/overlay.html','/new','/new.html'].includes(req.path.toLowerCase())) return res.status(401).sendFile('access.html', { root: path.join(__dirname, 'public') });
         return fail(res, 401, 'access_required');
       }
       if (record.kind === 'device' && (!record.lastSeen || +now() - +record.lastSeen >= 60000)) await store.touch(record._id, now());
