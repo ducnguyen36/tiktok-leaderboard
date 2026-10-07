@@ -35,6 +35,8 @@ test('Sheets controls report partial coverage, disconnect and stay within phone 
  await page.waitForFunction(()=>document.querySelector('#sheets-test-result').textContent.includes('7/8'));
  assert.match(await page.locator('#sheets-results-list').textContent(),/NEXARSheet missing/);
  assert.equal(await page.locator('#sheets-badge').getAttribute('data-state'),'connected');
+ assert.equal(await page.locator('#sheets-results-list').evaluate(el=>getComputedStyle(el).display),'flex');
+ assert.equal(await page.locator('#sheets-results-list').evaluate(el=>getComputedStyle(el).flexWrap),'wrap');
  await page.reload();await page.waitForFunction(()=>document.querySelector('#sheets-test-result').textContent.includes('7/8'));
  await page.locator('#access-language').selectOption('vi');assert.match(await page.locator('#sheets-results-list').textContent(),/Thiếu sheet/);
  await page.locator('#sheets-disconnect').click();await page.waitForFunction(()=>document.querySelector('#sheets-test').disabled);
