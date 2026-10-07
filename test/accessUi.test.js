@@ -5,27 +5,39 @@ const path=require('node:path');
 const {chromium}=require('playwright');
 
 async function fixture(t,admin=false){
- const state={admin,authorized:admin,setupRequired:false,pairs:0,approved:[],revoked:[],devices:[],qrFails:false};
+ const state={admin,authorized:admin,setupRequired:false,pairs:0,approved:[],revoked:[],devices:[],qrFails:false,sheets:{configured:true,connected:false}};
  const app=express();app.use(express.json());
  app.get('/auth/status',(req,res)=>res.json({...state,csrf:'test-csrf',email:admin?'ducnguyen36@gmail.com':undefined}));
  app.post('/auth/pair',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.pairs++;res.json({code:'ABCD-EF12-34',pairingUrl:'http://example.test/auth?pair=ABCDEF1234',expiresAt:new Date(Date.now()+600000).toISOString()})});
  app.get('/auth/pair-qr',(req,res)=>state.qrFails?res.sendStatus(503):res.type('image/svg+xml').send('<svg xmlns="http://www.w3.org/2000/svg"/>'));
  app.get('/auth/devices',(req,res)=>res.json({devices:state.devices}));
+ app.post('/auth/sheets/test',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');res.json({ok:false,readable:7,total:8,results:[{group:'LEVEL X',ok:true},{group:'NEXAR',ok:false,error:'source_missing'}]})});
+ app.post('/auth/sheets/disconnect',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.sheets.connected=false;res.json({ok:true})});
  app.post('/auth/approve',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.approved.push(req.body);res.json({ok:true})});
  app.post('/auth/revoke',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.revoked.push(req.body.id);state.devices=state.devices.filter(d=>d.id!==req.body.id);res.json({ok:true})});
  app.post('/auth/logout',(req,res)=>{state.admin=false;state.authorized=false;res.json({ok:true})});
- app.get('/auth',(req,res)=>res.sendFile(path.resolve(__dirname,'../public/access.html')));
+ app.get('/auth',(req,res)=>res.sendFile('access.html',{root:path.resolve(__dirname,'../public')}));
  app.get('/',(req,res)=>res.type('html').send('<h1>Approved fixture leaderboard</h1>'));
- app.get('/auth/access.js',(req,res)=>res.sendFile(path.resolve(__dirname,'../public/access.js')));
- app.get('/auth/access.css',(req,res)=>res.sendFile(path.resolve(__dirname,'../public/access.css')));
+ app.get('/auth/access.js',(req,res)=>res.sendFile('access.js',{root:path.resolve(__dirname,'../public')}));
+ app.get('/auth/access.css',(req,res)=>res.sendFile('access.css',{root:path.resolve(__dirname,'../public')}));
  app.use(express.static(path.resolve(__dirname,'../public')));
  const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
- const browser=await chromium.launch({channel:'chrome',headless:true});
+ const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']});
  t.after(async()=>{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r))});
  const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(4000);
  return{page,state,url:'http://127.0.0.1:'+server.address().port+'/auth'};
 }
 
+test('Sheets controls report partial coverage, disconnect and stay within phone viewport',async t=>{
+ const {page,state,url}=await fixture(t,true);state.sheets={configured:true,connected:true,email:'ducnguyen36@gmail.com'};
+ const errors=[];page.on('pageerror',error=>errors.push(error.message));
+ await page.goto(url);await page.locator('#sheets-test').click();
+ await page.waitForFunction(()=>document.querySelector('#sheets-test-result').textContent.includes('7/8'));
+ assert.match(await page.locator('#sheets-test-result').textContent(),/NEXAR: sheet missing/);
+ await page.locator('#access-language').selectOption('vi');assert.match(await page.locator('#sheets-test-result').textContent(),/thiếu sheet/);
+ await page.locator('#sheets-disconnect').click();await page.waitForFunction(()=>document.querySelector('#sheets-test').disabled);
+ assert.equal(state.sheets.connected,false);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);assert.deepEqual(errors,[]);
+});
 test('access shell requests a TV pairing code, switches language and fits phone',async t=>{
  const {page,state,url}=await fixture(t);await page.goto(url);
  await page.locator('#request-pair').click();

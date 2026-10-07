@@ -4,6 +4,9 @@ const express = require('express');
 const { OAuth2Client } = require('google-auth-library');
 const QRCode = require('qrcode');
 const { createAuthStore } = require('./authStore');
+const { createSheetsConnection, SHEETS_SCOPE } = require('./sheetsConnection');
+const { GROUP_SHEETS, findMonthTab } = require('./groupSheets');
+const { persistentSheetsKey } = require('./sheetsKeyStore');
 const TEN_MINUTES = 600000, DEVICE_LIFETIME = 180 * 86400000;
 const COOKIE = 'helios_access', FLOW_COOKIE = 'helios_oauth';
 const DEFAULT_ADMIN_EMAILS = 'ducnguyen36@gmail.com,heliostalentofficial@gmail.com,kimlinh727@gmail.com';
@@ -26,10 +29,17 @@ function cookies(req) {
 }
 function validSecret(value) { return typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value); }
 function configFromEnv() {
+  let sheetsKey = process.env.SHEETS_TOKEN_ENCRYPTION_KEY;
+  // Docker's avatar volume is persistent; its private subdirectory is NOT an HTTP route.
+  // Never generate a transient key, and never overwrite an invalid/lost key automatically.
+  if (!sheetsKey && process.env.NODE_ENV === 'production' && __dirname === '/app') {
+    try { sheetsKey = persistentSheetsKey('/app/avatars/.private'); } catch { /* fail closed; status reports setup required */ }
+  }
   return { publicOrigin: process.env.PUBLIC_ORIGIN, googleClientId: process.env.GOOGLE_CLIENT_ID,
-    googleClientSecret: process.env.GOOGLE_CLIENT_SECRET, adminEmails: (process.env.ADMIN_EMAILS ?? DEFAULT_ADMIN_EMAILS).split(',') };
+    googleClientSecret: process.env.GOOGLE_CLIENT_SECRET, sheetsTokenEncryptionKey: sheetsKey,
+    adminEmails: (process.env.ADMIN_EMAILS ?? DEFAULT_ADMIN_EMAILS).split(',') };
 }
-function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, store = createAuthStore(getDb), now = () => new Date(), streamCheckMs = 5000 }) {
+function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, sheetsClientFactory, store = createAuthStore(getDb), now = () => new Date(), streamCheckMs = 5000 }) {
   let origin;
   try {
     const parsed = new URL(config.publicOrigin);
@@ -39,6 +49,7 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
   const configured = Boolean(origin && config.googleClientId && config.googleClientSecret && emails.size);
   const secure = Boolean(origin?.startsWith('https:')), callback = `${origin}/auth/google/callback`;
   const provider = googleClient || new OAuth2Client(config.googleClientId, config.googleClientSecret, callback);
+  const sheets = createSheetsConnection({ store, config, now, clientFactory: sheetsClientFactory });
   const router = express.Router({ strict: true, caseSensitive: true });
   const fail = (res, code, error) => res.status(code).json({ authorized: false, error });
   function setCookie(res, name, value, age) {
@@ -94,9 +105,9 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
   router.use(secureHeaders);
   router.get(['/auth', '/auth/'], (req, res) => {
     res.set('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
-    res.sendFile(path.join(__dirname, 'public/access.html'));
+    res.sendFile('access.html', { root: path.join(__dirname, 'public') });
   });
-  for (const file of ['access.js', 'access.css']) router.get(`/auth/${file}`, (req, res) => res.sendFile(path.join(__dirname, 'public', file)));
+  for (const file of ['access.js', 'access.css']) router.get(`/auth/${file}`, (req, res) => res.sendFile(file, { root: path.join(__dirname, 'public') }));
   router.get('/api/health', (req, res) => res.json({ status: 'ok' }));
   router.get('/auth/status', endpoint(async (req, res) => {
     if (!configured) return res.json({ authorized: false, admin: false, setupRequired: true });
@@ -108,7 +119,8 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     }
     if (record.kind === 'admin') setCookie(res, COOKIE, secret);
     res.json({ authorized: Boolean(authorized(record)), admin: record.kind === 'admin', email: record.kind === 'admin' ? record.email : undefined,
-      setupRequired: false, csrf: csrfFor(secret), expiresAt: record.expiresAt });
+      setupRequired: false, csrf: csrfFor(secret), expiresAt: record.expiresAt,
+      sheets: record.kind === 'admin' ? await sheets.status() : undefined });
   }));
   router.get('/auth/google', endpoint(async (req, res) => {
     if (!configured) return fail(res, 503, 'setup_required');
@@ -126,13 +138,19 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     if (!validSecret(secret) || !validSecret(req.query.state) || typeof req.query.code !== 'string' || req.query.code.length > 4096) return fail(res, 400, 'invalid_callback');
     const transaction = await store.consume(`oauth:${hash(req.query.state)}`, now()); setCookie(res, FLOW_COOKIE, '', 0);
     if (!transaction || transaction.binding !== hash(secret)) return fail(res, 400, 'invalid_callback');
-    let claims;
+    let claims, tokens;
     try {
-      const { tokens } = await provider.getToken({ code: req.query.code, codeVerifier: verifierFor(secret), redirect_uri: callback });
+      ({ tokens } = await provider.getToken({ code: req.query.code, codeVerifier: verifierFor(secret), redirect_uri: callback }));
       const ticket = await provider.verifyIdToken({ idToken: tokens.id_token, audience: config.googleClientId }); claims = ticket.getPayload();
     } catch { return fail(res, 403, 'identity_denied'); }
     const email = typeof claims?.email === 'string' ? claims.email.toLowerCase() : '';
     if (claims?.email_verified !== true || !emails.has(email) || typeof claims.nonce !== 'string' || hash(claims.nonce) !== transaction.nonce || !claims.sub) return fail(res, 403, 'identity_denied');
+    if (transaction.purpose === 'sheets') {
+      const admin = await identity(req);
+      if (admin?.kind !== 'admin' || admin._id !== transaction.adminId || admin.subject !== transaction.subject || claims.sub !== transaction.subject) return fail(res, 403, 'identity_denied');
+      try { await sheets.save(tokens, claims); } catch { return fail(res, 400, 'sheets_permission_required'); }
+      return res.redirect('/auth?sheets=connected');
+    }
     const old = cookies(req)[COOKIE]; if (validSecret(old)) await store.remove(`session:${hash(old)}`);
     const session = random();
     // Administrator access is revoked explicitly from the device manager; it is not a 12-hour lease.
@@ -140,7 +158,38 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     await store.put({ _id: `session:${hash(session)}`, kind: 'admin', email, subject: claims.sub });
     setCookie(res, COOKIE, session); res.redirect(transaction.pair ? `/auth?pair=${encodeURIComponent(transaction.pair)}` : '/auth');
   }));
-  router.use(['/auth/pair', '/auth/approve', '/auth/revoke', '/auth/logout'], express.json({ limit: '4kb' }));
+  router.use(['/auth/pair', '/auth/approve', '/auth/revoke', '/auth/logout', '/auth/sheets/connect', '/auth/sheets/disconnect', '/auth/sheets/test'], express.json({ limit: '4kb' }));
+  router.post('/auth/sheets/connect', endpoint(async (req, res) => {
+    const admin = await mutation(req, res, true); if (!admin) return;
+    if (!sheets.configured) return fail(res, 503, 'sheets_setup_required');
+    const secret = random(), state = random(), nonce = random();
+    await store.put({ _id: `oauth:${hash(state)}`, binding: hash(secret), nonce: hash(nonce), purpose: 'sheets',
+      adminId: admin._id, subject: admin.subject, expiresAt: new Date(+now() + TEN_MINUTES) });
+    setCookie(res, FLOW_COOKIE, secret, TEN_MINUTES);
+    res.json({ url: provider.generateAuthUrl({ scope: ['openid', 'email', SHEETS_SCOPE], state, nonce,
+      code_challenge_method: 'S256', code_challenge: crypto.createHash('sha256').update(verifierFor(secret)).digest('base64url'),
+      redirect_uri: callback, access_type: 'offline', prompt: 'consent', login_hint: admin.email }) });
+  }));
+  router.post('/auth/sheets/disconnect', endpoint(async (req, res) => {
+    if (!await mutation(req, res, true)) return;
+    await sheets.disconnect(); res.json({ ok: true });
+  }));
+  router.post('/auth/sheets/test', endpoint(async (req, res) => {
+    if (!await mutation(req, res, true)) return;
+    if (!await bounded(req, 'sheets-test', 10)) return fail(res, 429, 'rate_limited');
+    // Fixed group allowlist; never expose an arbitrary spreadsheet proxy to viewers.
+    const results = await Promise.all(GROUP_SHEETS.map(async source => {
+      if (!source.spreadsheetId) return { group: source.group, ok: false, error: 'source_missing' };
+      try {
+        const metadata = await sheets.read({ spreadsheetId: source.spreadsheetId, metadata: true });
+        const tab = findMonthTab(metadata, now());
+        if (!tab || !Number.isInteger(tab.gridProperties?.rowCount) || !Number.isInteger(tab.gridProperties?.columnCount) || tab.gridProperties.rowCount < 3 || tab.gridProperties.columnCount < 12) return { group: source.group, ok: false, error: 'month_tab_missing' };
+        const data = await sheets.read({ spreadsheetId: source.spreadsheetId, range: `'${tab.title.replace(/'/g, "''")}'!A1:L3` });
+        return { group: source.group, ok: Boolean(data.values?.length), title: metadata.properties?.title, tab: tab.title, rowsRead: data.values?.length || 0 };
+      } catch { return { group: source.group, ok: false, error: 'read_failed' }; }
+    }));
+    res.json({ ok: results.every(item => item.ok), readable: results.filter(item => item.ok).length, total: results.length, results });
+  }));
   router.post('/auth/pair', endpoint(async (req, res) => {
     const record = await mutation(req, res); if (!record) return;
     if (record.kind !== 'pending') return fail(res, 400, 'already_authorized');
@@ -187,7 +236,7 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     try {
       const record = await identity(req);
       if (!authorized(record)) {
-        if (req.method === 'GET' && ['/', '/index.html', '/overlay.html'].includes(req.path.toLowerCase())) return res.status(401).sendFile(path.join(__dirname, 'public/access.html'));
+        if (req.method === 'GET' && ['/', '/index.html', '/overlay.html'].includes(req.path.toLowerCase())) return res.status(401).sendFile('access.html', { root: path.join(__dirname, 'public') });
         return fail(res, 401, 'access_required');
       }
       if (record.kind === 'device' && (!record.lastSeen || +now() - +record.lastSeen >= 60000)) await store.touch(record._id, now());
@@ -205,6 +254,6 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     res.on('close', () => { closed = true; clearInterval(timer); });
     return { async send(message) { if (await check()) res.write(message); }, close };
   }
-  return { middleware: router, guardStream };
+  return { middleware: router, guardStream, sheets };
 }
 module.exports = { createLeaderboardAuth };

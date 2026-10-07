@@ -25,17 +25,17 @@ class MemoryStore {
 
 async function harness(t, options = {}) {
   const store = new MemoryStore();
-  let now = Date.now(); let authParams; let claims = {};
+  let now = options.now || Date.now(); let authParams; let claims = {};
   const provider = {
     generateAuthUrl(params) { authParams = params; return 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams(params); },
-    async getToken({code, codeVerifier}) { assert.equal(code, 'good'); assert.equal(crypto.createHash('sha256').update(codeVerifier).digest('base64url'), authParams.code_challenge); return {tokens:{id_token:'verified-by-injected-provider'}}; },
+    async getToken({code, codeVerifier}) { assert.equal(code, 'good'); assert.equal(crypto.createHash('sha256').update(codeVerifier).digest('base64url'), authParams.code_challenge); return {tokens:{id_token:'verified-by-injected-provider',...options.tokenOverrides}}; },
     async verifyIdToken({audience}) { assert.equal(audience, 'test-client'); return {getPayload:()=>({email:'ducnguyen36@gmail.com',email_verified:true,nonce:authParams.nonce,sub:'google-user',...claims})}; }
   };
   const config = {publicOrigin:'http://localhost', googleClientId:'test-client', googleClientSecret:'test-secret', adminEmails:['ducnguyen36@gmail.com'], ...options};
-  const auth = createLeaderboardAuth({getDb:()=>null, config:options.fromEnvironment?undefined:config, googleClient:provider, store, now:()=>new Date(now), streamCheckMs:20});
+  const auth = createLeaderboardAuth({getDb:()=>null, config:options.fromEnvironment?undefined:config, googleClient:provider, sheetsClientFactory:options.sheetsClientFactory, store, now:()=>new Date(now), streamCheckMs:20});
   const app = express(); app.use(auth.middleware);
   app.get('/api/leaderboard/stream', (req,res) => { res.set('Content-Type','text/event-stream'); res.flushHeaders(); const stream=auth.guardStream(req,res); stream.send('data: private\n\n'); });
-  app.get('/index.html', (req,res)=>res.sendFile(path.join(__dirname,'../public/index.html')));
+  app.get('/index.html', (req,res)=>res.sendFile('index.html', {root:path.join(__dirname,'../public')}));
   app.use((req,res)=>res.json({private:true}));
   const server = app.listen(0,'127.0.0.1'); await new Promise(r=>server.once('listening',r));
   t.after(()=>{server.closeAllConnections();server.close();});
@@ -51,6 +51,30 @@ async function harness(t, options = {}) {
   return {store,browser,advance:ms=>now+=ms,params:()=>authParams};
 }
 
+test('Sheets connection is admin/CSRF bound, offline, encrypted, testable, and removable', async t=>{
+ const scope='https://www.googleapis.com/auth/spreadsheets.readonly'; let reads=0;
+ const h=await harness(t,{now:Date.UTC(2026,9,7),sheetsTokenEncryptionKey:'ab'.repeat(32),tokenOverrides:{scope,refresh_token:'do-not-expose'},sheetsClientFactory:()=>({setCredentials(value){assert.equal(value.refresh_token,'do-not-expose')},async request(options){assert.equal(options.method,'GET');reads++;return{data:options.params.fields?{properties:{title:'2026.DATA LEVEL X'},sheets:[{properties:{title:'THÁNG 10.2026',gridProperties:{rowCount:100,columnCount:20}}}]}:{values:[['header'],[10],[20]]}}}})});
+ const visitor=h.browser();await visitor.status();assert.equal((await visitor.request('/auth/sheets/connect',{method:'POST',body:{}})).status,403);assert.equal((await visitor.status()).sheets,undefined);
+ const admin=h.browser();await admin.login();await admin.status();
+ assert.equal((await admin.request('/auth/sheets/connect',{method:'POST',body:{},headers:{'X-CSRF-Token':'wrong'}})).status,403);
+ const start=await admin.request('/auth/sheets/connect',{method:'POST',body:{}});assert.equal(start.status,200);
+ assert.equal(h.params().access_type,'offline');assert.equal(h.params().prompt,'consent');assert.ok(h.params().scope.includes(scope));
+ const callback='/auth/google/callback?code=good&state='+h.params().state;
+ assert.equal((await admin.request(callback)).status,302);assert.equal((await admin.status()).sheets.connected,true);
+ assert.ok(!JSON.stringify([...h.store.records.values()]).includes('do-not-expose'));
+ const result=await(await admin.request('/auth/sheets/test',{method:'POST',body:{}})).json();assert.equal(result.readable,7);assert.equal(result.total,8);assert.equal(result.ok,false);assert.equal(result.results[0].rowsRead,3);assert.equal(result.results.find(row=>row.group==='NEXAR').error,'source_missing');assert.equal(reads,14);
+ assert.equal((await admin.request(callback)).status,400);
+ await admin.request('/auth/sheets/disconnect',{method:'POST',body:{}});assert.equal((await admin.status()).sheets.connected,false);
+});
+test('Sheets callback cannot upgrade a logged-out browser or accept missing consent',async t=>{
+ const h=await harness(t,{sheetsTokenEncryptionKey:'ab'.repeat(32)});const admin=h.browser();await admin.login();await admin.status();
+ await admin.request('/auth/sheets/connect',{method:'POST',body:{}});
+ assert.equal((await admin.request('/auth/google/callback?code=good&state='+h.params().state)).status,400);
+ assert.equal((await admin.status()).sheets.connected,false);
+ await admin.request('/auth/sheets/connect',{method:'POST',body:{}});const callback='/auth/google/callback?code=good&state='+h.params().state;
+ await admin.request('/auth/logout',{method:'POST',body:{}});assert.equal((await admin.request(callback)).status,403);
+ assert.equal(h.store.records.has('integration:google-sheets'),false);
+});
 test('unknown browsers cannot obtain any private route, including static assets and SSE', async t=>{
   const h=await harness(t);const b=h.browser();
   for(const route of ['/', '/index.html','/overlay.html','/userdata/avatars/x.jpg','/api/debug','/api/leaderboard/current','/api/leaderboard/history','/api/leaderboard/stream','/app.js','/auth/../api/debug','/auth/not-public']){
