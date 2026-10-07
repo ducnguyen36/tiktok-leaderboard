@@ -11,7 +11,7 @@ async function fixture(t,admin=false){
  app.post('/auth/pair',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.pairs++;res.json({code:'ABCD-EF12-34',pairingUrl:'http://example.test/auth?pair=ABCDEF1234',expiresAt:new Date(Date.now()+600000).toISOString()})});
  app.get('/auth/pair-qr',(req,res)=>state.qrFails?res.sendStatus(503):res.type('image/svg+xml').send('<svg xmlns="http://www.w3.org/2000/svg"/>'));
  app.get('/auth/devices',(req,res)=>res.json({devices:state.devices}));
- app.post('/auth/sheets/test',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');res.json({ok:false,readable:7,total:8,results:[{group:'LEVEL X',ok:true},{group:'NEXAR',ok:false,error:'source_missing'}]})});
+ app.post('/auth/sheets/test',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.sheets.lastCheck={ok:false,readable:7,total:8,checkedAt:new Date().toISOString(),results:[{group:'LEVEL X',ok:true},{group:'NEXAR',ok:false,error:'source_missing'}]};res.json(state.sheets.lastCheck)});
  app.post('/auth/sheets/disconnect',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.sheets.connected=false;res.json({ok:true})});
  app.post('/auth/approve',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.approved.push(req.body);res.json({ok:true})});
  app.post('/auth/revoke',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.revoked.push(req.body.id);state.devices=state.devices.filter(d=>d.id!==req.body.id);res.json({ok:true})});
@@ -33,10 +33,18 @@ test('Sheets controls report partial coverage, disconnect and stay within phone 
  const errors=[];page.on('pageerror',error=>errors.push(error.message));
  await page.goto(url);await page.locator('#sheets-test').click();
  await page.waitForFunction(()=>document.querySelector('#sheets-test-result').textContent.includes('7/8'));
- assert.match(await page.locator('#sheets-test-result').textContent(),/NEXAR: sheet missing/);
- await page.locator('#access-language').selectOption('vi');assert.match(await page.locator('#sheets-test-result').textContent(),/thiếu sheet/);
+ assert.match(await page.locator('#sheets-results-list').textContent(),/NEXARSheet missing/);
+ assert.equal(await page.locator('#sheets-badge').getAttribute('data-state'),'connected');
+ await page.reload();await page.waitForFunction(()=>document.querySelector('#sheets-test-result').textContent.includes('7/8'));
+ await page.locator('#access-language').selectOption('vi');assert.match(await page.locator('#sheets-results-list').textContent(),/Thiếu sheet/);
  await page.locator('#sheets-disconnect').click();await page.waitForFunction(()=>document.querySelector('#sheets-test').disabled);
  assert.equal(state.sheets.connected,false);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);assert.deepEqual(errors,[]);
+});
+test('a callback URL alone never indicates a connected account',async t=>{
+ const {page,url}=await fixture(t,true);await page.goto(url+'?sheets=connected');
+ await page.waitForFunction(()=>!document.querySelector('#sheets-connect').disabled);
+ assert.equal(await page.locator('#sheets-badge').getAttribute('data-state'),'disconnected');
+ assert.equal(await page.locator('#sheets-test').isDisabled(),true);
 });
 test('access shell requests a TV pairing code, switches language and fits phone',async t=>{
  const {page,state,url}=await fixture(t);await page.goto(url);

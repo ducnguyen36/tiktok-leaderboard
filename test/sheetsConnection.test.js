@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { createSheetsConnection, SHEETS_SCOPE } = require('../sheetsConnection');
 const { GROUP_SHEETS, findMonthTab } = require('../groupSheets');
 test('eight groups remain explicit; month tab matching handles accents and Vietnam boundary', () => {
-  assert.equal(GROUP_SHEETS.length,8);assert.equal(GROUP_SHEETS.filter(source=>source.spreadsheetId).length,7);
+  assert.equal(GROUP_SHEETS.length,8);assert.equal(GROUP_SHEETS.filter(source=>source.spreadsheetId).length,8);
   const metadata={sheets:[{properties:{title:'THANG 10.2026'}},{properties:{title:'THÁNG 09.2026'}}]};
   assert.equal(findMonthTab(metadata,new Date('2026-09-30T17:00:00Z')).title,'THANG 10.2026');
   assert.equal(findMonthTab(metadata,new Date('2026-09-30T16:59:59Z')).title,'THÁNG 09.2026');
@@ -20,10 +20,25 @@ test('refresh token is encrypted; status does not disclose credential; reader us
   const h = setup();
   await h.sheets.save({scope:SHEETS_SCOPE,refresh_token:'private-refresh'}, {email:'ADMIN@example.com',sub:'owner'});
   assert.ok(!JSON.stringify([...h.records.values()]).includes('private-refresh'));
-  assert.deepEqual(Object.keys(await h.sheets.status()).sort(), ['configured','connected','connectedAt','email']);
+  assert.deepEqual(Object.keys(await h.sheets.status()).sort(), ['configured','connected','connectedAt','email','lastCheck']);
   const data = await h.sheets.read({spreadsheetId:'valid_spreadsheet_identifier',range:"'THÁNG 10.2026'!A1:L3"});
   assert.equal(data.values.length,1); assert.equal(h.calls[0].method,'GET'); assert.equal(h.calls[0].params.valueRenderOption,'UNFORMATTED_VALUE');
   await h.sheets.disconnect(); assert.equal((await h.sheets.status()).connected,false);
+});
+test('last check persists only for the current connection and cannot resurrect a disconnect', async () => {
+  const h=setup();await h.sheets.save({scope:SHEETS_SCOPE,refresh_token:'private-refresh'},{email:'a',sub:'b'});
+  const version=await h.sheets.version();await h.sheets.recordCheck({ok:true,readable:8,total:8},version);
+  assert.equal((await h.sheets.status()).lastCheck.readable,8);
+  await h.sheets.save({scope:SHEETS_SCOPE,refresh_token:'private-refresh'},{email:'a',sub:'b'});
+  assert.equal((await h.sheets.status()).lastCheck,undefined);
+  await h.sheets.disconnect();await h.sheets.recordCheck({ok:true},version);
+  assert.equal((await h.sheets.status()).connected,false);
+  assert.equal((await h.sheets.status()).lastCheck,undefined);
+});
+test('read errors expose safe categories only', () => {
+  const {sheetsReadError}=require('../sheetsConnection');
+  for(const [status,expected] of [[401,'reconnect_required'],[403,'permission_denied'],[404,'sheet_not_found'],[400,'invalid_range'],[429,'rate_limited'],[500,'read_failed']])assert.equal(sheetsReadError({response:{status,data:{private:'secret'}}}),expected);
+  assert.equal(sheetsReadError({response:{status:400,data:{error:'invalid_grant'}}}),'reconnect_required');
 });
 test('setup, missing consent, bad ID, wrong encryption key and ciphertext tampering fail closed', async () => {
   const disabled = setup({sheetsTokenEncryptionKey:''}); assert.equal(disabled.sheets.configured,false);

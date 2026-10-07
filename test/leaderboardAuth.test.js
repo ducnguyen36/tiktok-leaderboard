@@ -62,7 +62,8 @@ test('Sheets connection is admin/CSRF bound, offline, encrypted, testable, and r
  const callback='/auth/google/callback?code=good&state='+h.params().state;
  assert.equal((await admin.request(callback)).status,302);assert.equal((await admin.status()).sheets.connected,true);
  assert.ok(!JSON.stringify([...h.store.records.values()]).includes('do-not-expose'));
- const result=await(await admin.request('/auth/sheets/test',{method:'POST',body:{}})).json();assert.equal(result.readable,7);assert.equal(result.total,8);assert.equal(result.ok,false);assert.equal(result.results[0].rowsRead,3);assert.equal(result.results.find(row=>row.group==='NEXAR').error,'source_missing');assert.equal(reads,14);
+ const result=await(await admin.request('/auth/sheets/test',{method:'POST',body:{}})).json();assert.equal(result.readable,8);assert.equal(result.total,8);assert.equal(result.ok,true);assert.equal(result.results[0].rowsRead,3);assert.equal(result.results.find(row=>row.group==='NEXAR').ok,true);assert.equal(reads,16);
+ const checked=await(await admin.request('/auth/status')).json();assert.equal(checked.sheets.lastCheck.readable,8);assert.ok(checked.sheets.lastCheck.checkedAt);
  assert.equal((await admin.request(callback)).status,400);
  await admin.request('/auth/sheets/disconnect',{method:'POST',body:{}});assert.equal((await admin.status()).sheets.connected,false);
 });

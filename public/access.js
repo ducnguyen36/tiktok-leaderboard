@@ -7,7 +7,10 @@
  };
  Object.assign(words.en,{sheetsTitle:'Google Sheets · read only',sheetsHint:'Connect to read scores for reconciliation. Google grants read access to spreadsheets available to your account; the server will use the configured group sheets. No editing or deleting.',sheetsConnect:'Connect / reconnect Google Sheets',sheetsTest:'Test reading',sheetsDisconnect:'Disconnect',sheetsSetup:'Server setup required: configure the Sheets token encryption key.',sheetsConnected:'Connected:',sheetsNotConnected:'Not connected',sheetsReadOk:'Read successful',sheetsReadError:'Read failed. Check account permissions and reconnect if necessary.'});
  Object.assign(words.vi,{sheetsTitle:'Google Sheets · chỉ đọc',sheetsHint:'Kết nối để đọc điểm đối soát. Google cấp quyền đọc các sheet tài khoản truy cập được; máy chủ chỉ sử dụng sheet nhóm đã cấu hình. Không sửa hay xóa.',sheetsConnect:'Kết nối / kết nối lại Google Sheets',sheetsTest:'Kiểm tra đọc',sheetsDisconnect:'Ngắt kết nối',sheetsSetup:'Cần cấu hình khóa mã hóa token Sheets trên máy chủ.',sheetsConnected:'Đã kết nối:',sheetsNotConnected:'Chưa kết nối',sheetsReadOk:'Đọc thành công',sheetsReadError:'Đọc thất bại. Kiểm tra quyền tài khoản và kết nối lại nếu cần.'});
- let language='en',status=null,csrf='',pair=null,devices=[],deviceSignature='',busy=false,polling=false,notice='',sheetsResult=null;
+ Object.assign(words.en,{sheetsBadgeConnected:'Connected',sheetsChecking:'Checking sheets…',sheetsPartial:'Some sheets could not be read',sheetsUnchecked:'Connected. Reading has not been verified yet.',sheetsCheckedAt:'Last checked',sheetsSavedAt:'Connected at',source_missing:'Sheet missing',reconnect_required:'Reconnect required',permission_denied:'Account cannot read this sheet',sheet_not_found:'Sheet not found or inaccessible',invalid_range:'Invalid sheet range',rate_limited:'Google rate limit; try again later',read_failed:'Read failed'});
+ Object.assign(words.vi,{sheetsBadgeConnected:'Đã kết nối',sheetsChecking:'Đang kiểm tra các sheet…',sheetsPartial:'Một số sheet chưa đọc được',sheetsUnchecked:'Đã kết nối. Chưa kiểm tra quyền đọc sheet.',sheetsCheckedAt:'Kiểm tra gần nhất',sheetsSavedAt:'Kết nối lúc',source_missing:'Thiếu sheet',reconnect_required:'Cần kết nối lại',permission_denied:'Tài khoản không đọc được sheet này',sheet_not_found:'Không tìm thấy hoặc không có quyền đọc sheet',invalid_range:'Vùng dữ liệu không hợp lệ',rate_limited:'Google giới hạn lượt đọc; thử lại sau',read_failed:'Đọc thất bại'});
+ words.en.month_tab_missing='Current month tab missing';words.vi.month_tab_missing='Thiếu tab tháng hiện tại';
+ let language='en',status=null,csrf='',pair=null,devices=[],deviceSignature='',busy=false,polling=false,notice='',sheetsResult=null,sheetsChecking=false;
  const normalizePair=value=>{if(typeof value!=='string'||!/^[A-Fa-f0-9\s-]{10,14}$/.test(value))return'';const normalized=value.replace(/[-\s]/g,'').toUpperCase();return/^[A-F0-9]{10}$/.test(normalized)?normalized:''};
  let scannedPair=normalizePair(new URLSearchParams(location.search).get('pair'));
  try{language=localStorage.getItem('helios_access_language')==='vi'?'vi':'en'}catch{}
@@ -44,11 +47,15 @@
   $('admin-email').textContent=admin?(status.email||''):'';
   $('approve-device').disabled=!admin||busy;$('reload-devices').disabled=!admin||busy;
   const sheet=status?.sheets;
-  $('sheets-status').textContent=!sheet?.configured?t('sheetsSetup'):sheet.connected?t('sheetsConnected')+' '+sheet.email:t('sheetsNotConnected');
+  $('sheets-badge').dataset.state=sheet?.connected?'connected':'disconnected';
+  $('sheets-badge').textContent=sheet?.connected?'✓ '+t('sheetsBadgeConnected'):t('sheetsNotConnected');
+  $('sheets-status').textContent=!sheet?.configured?t('sheetsSetup'):sheet.connected?t('sheetsConnected')+' '+sheet.email+' · '+t('sheetsSavedAt')+' '+date(sheet.connectedAt):t('sheetsNotConnected');
   $('sheets-connect').disabled=!admin||!sheet?.configured||busy;
   $('sheets-test').disabled=!admin||!sheet?.connected||busy;
   $('sheets-disconnect').disabled=!admin||!sheet?.connected||busy;
-  $('sheets-test-result').textContent=sheetsResult?.results?t('sheetsReadOk')+': '+sheetsResult.readable+'/'+sheetsResult.total+' · '+sheetsResult.results.map(item=>item.group+': '+(item.ok?'✓':item.error==='source_missing'?(language==='vi'?'thiếu sheet':'sheet missing'):'✕')).join(' · '):sheetsResult?t('sheetsReadError'):'';
+  $('sheets-test-result').textContent=sheetsChecking?t('sheetsChecking'):sheetsResult?.results?(sheetsResult.ok?t('sheetsReadOk'):t('sheetsPartial'))+': '+sheetsResult.readable+'/'+sheetsResult.total+(sheetsResult.checkedAt?' · '+t('sheetsCheckedAt')+' '+date(sheetsResult.checkedAt):''):sheetsResult?t('sheetsReadError'):sheet?.connected?t('sheetsUnchecked'):'';
+  const checks=$('sheets-results-list');checks.replaceChildren();
+  if(sheet?.connected&&sheetsResult?.results)for(const item of sheetsResult.results){const row=document.createElement('div');row.className='sheet-check';row.dataset.ok=String(Boolean(item.ok));const name=document.createElement('span'),result=document.createElement('span');name.textContent=item.group;result.textContent=item.ok?'✓':t(item.error||'read_failed');row.append(name,result);checks.append(row)}
   if(admin&&scannedPair){if(!$('approval-code').value)$('approval-code').value=scannedPair.match(/.{1,4}/g).join('-');if(!$('device-name').value)$('device-name').value='TV '+scannedPair.slice(0,4)}
   $('access-message').textContent=notice?t(notice):'';renderPair();renderDevices();
  }
@@ -72,6 +79,7 @@
   if(polling||busy)return;polling=true;
   try{
    status=await request('/auth/status');csrf=status.csrf||'';
+   sheetsResult=status.sheets?.connected?(status.sheets.lastCheck||sheetsResult):null;
    if(!status.admin){devices=[];deviceSignature=''}
    if(notice==='offline')message('');render();
    if(pair&&status.authorized&&!status.admin){location.replace('/');return}
@@ -86,7 +94,7 @@
  $('approval-form').onsubmit=event=>{event.preventDefault();run(async()=>{await request('/auth/approve',{code:$('approval-code').value.trim().toUpperCase(),name:$('device-name').value.trim()});$('approval-code').value='';$('device-name').value='';scannedPair='';history.replaceState(null,'','/auth');message('approved');await refreshDevices()})};
  $('reload-devices').onclick=()=>run(refreshDevices);
  $('sheets-connect').onclick=()=>run(async()=>{const result=await request('/auth/sheets/connect',{});const url=new URL(result.url);if(url.protocol!=='https:'||url.hostname!=='accounts.google.com')throw Error('Invalid OAuth destination');location.assign(url.href)});
- $('sheets-test').onclick=()=>run(async()=>{try{sheetsResult=await request('/auth/sheets/test',{})}catch{sheetsResult={ok:false}}});
+ $('sheets-test').onclick=()=>run(async()=>{sheetsChecking=true;render();try{sheetsResult=await request('/auth/sheets/test',{});status=await request('/auth/status');csrf=status.csrf||'';sheetsResult=status.sheets?.lastCheck||sheetsResult}catch{sheetsResult={ok:false}}finally{sheetsChecking=false}});
  $('sheets-disconnect').onclick=()=>run(async()=>{await request('/auth/sheets/disconnect',{});sheetsResult=null;status=await request('/auth/status');csrf=status.csrf||''});
  $('access-logout').onclick=()=>run(async()=>{
   await request('/auth/logout',{});

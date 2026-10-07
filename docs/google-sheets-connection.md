@@ -10,7 +10,9 @@ No token or cell values are returned by the test endpoint.
 
 The test checks all eight configured group entries, reads metadata first, locates
 the current Vietnam-calendar month tab, and reads only `A1:L3`. It reports each
-failure separately; NEXAR is explicitly missing rather than counted as connected.
+failure separately. All eight sheet IDs are configured, including the owner-supplied
+AURA and 2026 DATA NEXAR links. The connection badge reflects saved credentials;
+the separate per-group reading result persists across reloads for that connection.
 This is a connectivity test, not score reconciliation or evidence of live score accuracy.
 
 ## Existing cloud configuration
@@ -45,8 +47,8 @@ Do not copy credentials from HeliosControl or another project.
 
 After deploying the connection code, sign in to `/auth`,
 click **Connect Google Sheets**, and personally review Google's consent screen.
-Then click **Test reading**. Expected maximum coverage is currently **7/8** until
-the NEXAR DATA spreadsheet is supplied/located. Account access can further reduce
+Then click **Test reading**. Expected maximum coverage is **8/8**.
+Account access can further reduce
 that number; the Google Drive chat connector has independent credentials.
 
 The cloud app was in External Testing during inspection. Resolve the Branding /

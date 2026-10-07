@@ -4,7 +4,7 @@ const express = require('express');
 const { OAuth2Client } = require('google-auth-library');
 const QRCode = require('qrcode');
 const { createAuthStore } = require('./authStore');
-const { createSheetsConnection, SHEETS_SCOPE } = require('./sheetsConnection');
+const { createSheetsConnection, SHEETS_SCOPE, sheetsReadError } = require('./sheetsConnection');
 const { GROUP_SHEETS, findMonthTab } = require('./groupSheets');
 const { persistentSheetsKey } = require('./sheetsKeyStore');
 const TEN_MINUTES = 600000, DEVICE_LIFETIME = 180 * 86400000;
@@ -177,6 +177,7 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
   router.post('/auth/sheets/test', endpoint(async (req, res) => {
     if (!await mutation(req, res, true)) return;
     if (!await bounded(req, 'sheets-test', 10)) return fail(res, 429, 'rate_limited');
+    const version = await sheets.version();
     // Fixed group allowlist; never expose an arbitrary spreadsheet proxy to viewers.
     const results = await Promise.all(GROUP_SHEETS.map(async source => {
       if (!source.spreadsheetId) return { group: source.group, ok: false, error: 'source_missing' };
@@ -186,9 +187,11 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
         if (!tab || !Number.isInteger(tab.gridProperties?.rowCount) || !Number.isInteger(tab.gridProperties?.columnCount) || tab.gridProperties.rowCount < 3 || tab.gridProperties.columnCount < 12) return { group: source.group, ok: false, error: 'month_tab_missing' };
         const data = await sheets.read({ spreadsheetId: source.spreadsheetId, range: `'${tab.title.replace(/'/g, "''")}'!A1:L3` });
         return { group: source.group, ok: Boolean(data.values?.length), title: metadata.properties?.title, tab: tab.title, rowsRead: data.values?.length || 0 };
-      } catch { return { group: source.group, ok: false, error: 'read_failed' }; }
+      } catch (error) { return { group: source.group, ok: false, error: sheetsReadError(error) }; }
     }));
-    res.json({ ok: results.every(item => item.ok), readable: results.filter(item => item.ok).length, total: results.length, results });
+    const result = { ok: results.every(item => item.ok), readable: results.filter(item => item.ok).length, total: results.length, results };
+    await sheets.recordCheck(result, version);
+    res.json(result);
   }));
   router.post('/auth/pair', endpoint(async (req, res) => {
     const record = await mutation(req, res); if (!record) return;
