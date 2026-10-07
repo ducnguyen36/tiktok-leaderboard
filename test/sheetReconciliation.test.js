@@ -1,5 +1,12 @@
 const test=require('node:test'),assert=require('node:assert/strict');
-const {sheetDate,parseSheet,discrepancy,matchingProfile}=require('../sheetReconciliation');
+const {sheetDate,parseSheet,discrepancy,matchingProfile,comparableDay}=require('../sheetReconciliation');
+test('only closed publisher-verified sessions are comparable, not reused legacy sessions',()=>{
+ const sessions=[{_id:'s',profileId:'g',createdAt:new Date('2026-10-01T10:00:00+07:00')}];
+ assert.equal(comparableDay('2026-10-01','g',sessions,new Set(),new Set()),false);
+ assert.equal(comparableDay('2026-10-01','g',sessions,new Set(['s']),new Set(['s'])),false);
+ assert.equal(comparableDay('2026-10-01','g',sessions,new Set(['s']),new Set()),true);
+ assert.equal(comparableDay('2026-10-02','g',sessions,new Set(['s']),new Set()),false);
+});
 const headers=['Date','Alice','Bob','Chung','TỔNG','TOTAL'];
 test('group-only reconciliation uses explicit totals without inventing talent mapping',()=>{
  const parsed=parseSheet([headers,[],[46296,100,200,20,320,300],[46297,null,null,0,0,0]],'2026-10',[]);

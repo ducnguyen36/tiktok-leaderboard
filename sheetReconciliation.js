@@ -40,13 +40,20 @@ function matchingProfile(profiles,group){
   const matches=profiles.filter(p=>allowed.includes(canonical(p.name)));return matches.length===1?matches[0]:null;
 }
 function discrepancy(backend,sheet,details){const delta=backend-sheet;return Number.isFinite(delta)&&Math.abs(delta)>1000?{...details,backend,sheet,delta,threshold:1000}:null}
+function comparableDay(date,profileId,sessions,known,active){
+  const entries=sessions.filter(s=>String(s.profileId)===String(profileId)&&dayKey(sessionStart(s))===date);
+  // Legacy controllers can reuse a session for multiple days. Only compare days
+  // whose sessions have been observed by the new, day-aware controller publisher.
+  return entries.length>0&&entries.every(s=>known.has(String(s._id))&&!active.has(String(s._id)));
+}
 function createSheetReconciliation({getDb,sheets,clock=Date.now}){
   let result={state:'pending',warnings:[],sources:[]},pending,checked=0,version='';
   async function build(profiles,currentVersion){
     const now=clock(),today=dayKey(now),month=today.slice(0,7),db=getDb();
     const sessions=await db.collection('sessions').find({createdAt:{$gte:new Date(dayStart(month+'-01')-86400000)}},{projection:{createdAt:1,sessionStartedAt:1,profileId:1,sessionName:1}}).toArray();
     const gifts=sessions.length?decodeGiftBuckets(await db.collection('gifts').aggregate(sessionGiftPipeline(sessions.map(s=>s._id)),{allowDiskUse:true,maxTimeMS:60000}).toArray()):[];
-    const live=await db.collection('leaderboard_live').find({live:true,heartbeatAt:{$gt:new Date(now-90000)}}).toArray();
+    const live=await db.collection('leaderboard_live').find({source:'helioscontrol',liveSince:{$gte:new Date(dayStart(month+'-01')-86400000)}}).toArray();
+    const knownSessionIds=new Set(live.map(s=>String(s.sessionId)));
     const liveSessionIds=new Set(live.filter(s=>liveGroups([s],now).size).map(s=>String(s.sessionId)));
     const warnings=[],sources=[];
     // Serial reads avoid burst quota/network pressure on the NAS. No cell values in logs.
@@ -61,10 +68,10 @@ function createSheetReconciliation({getDb,sheets,clock=Date.now}){
         // Group totals are explicit in the sheet and do not need guessed talent aliases.
         if(parsed.error==='talent_names_unmatched'){names=[];parsed=parseSheet(data.values||[],month,names);groupOnly=true}
         if(parsed.error){sources.push({group:source.group,state:parsed.error});continue}
-        const complete=parsed.days.filter(day=>day.date<today&&!sessions.some(s=>dayKey(sessionStart(s))===day.date&&String(s.profileId)===String(profile._id)&&liveSessionIds.has(String(s._id))));
+        const complete=parsed.days.filter(day=>day.date<today&&comparableDay(day.date,profile._id,sessions,knownSessionIds,liveSessionIds));
         const dates=new Set(complete.map(d=>d.date));
         const ids=new Set(sessions.filter(s=>String(s.profileId)===String(profile._id)&&dates.has(dayKey(sessionStart(s)))).map(s=>String(s._id)));
-        if(!dates.size){sources.push({group:source.group,state:'awaiting_closed_data'});continue}
+        if(!dates.size){sources.push({group:source.group,state:'awaiting_verified_closed_sessions'});continue}
         const scored=scoreRows(profiles,gifts.filter(g=>ids.has(String(g.sessionId))),sessions);
         const context={period:'monthly',groupId:String(profile._id),group:source.group,dates:[...dates].sort(),checkedAt:new Date(now).toISOString(),basis:'closed-filled-session-days',sheetUrl:`https://docs.google.com/spreadsheets/d/${source.spreadsheetId}/edit#gid=${tab.sheetId}`};
         const group=scored.group.find(g=>g.groupId===String(profile._id));
@@ -88,4 +95,4 @@ function createSheetReconciliation({getDb,sheets,clock=Date.now}){
     pending=build(profiles,currentVersion).catch(()=>{result={state:'unavailable',warnings:[],sources:[]};checked=clock();version=currentVersion}).finally(()=>pending=null);return pending;
   }};
 }
-module.exports={normalize,sheetDate,parseSheet,matchingProfile,discrepancy,createSheetReconciliation};
+module.exports={normalize,sheetDate,parseSheet,matchingProfile,discrepancy,comparableDay,createSheetReconciliation};
