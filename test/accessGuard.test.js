@@ -9,6 +9,7 @@ function fixture() {
   let allowed = true, statusFailure = '', navigation, lateResolve;
   const intervals = [], events = new Map();
   const localStorage = {
+    helios_leaderboard_next_history_2026_08: 'private history', helios_leaderboard_next_current: 'settings', helios_leaderboard_next_default: 'settings',
     helios_leaderboard_v2_history_2026_08: 'private history', helios_leaderboard_v2_current: 'private names',
     helios_leaderboard_v2_default: 'private names', leaderboard_config: 'old private data', unrelated: 'keep',
     removeItem(key) { delete this[key]; }
@@ -36,7 +37,7 @@ test('access-loss guard clears private history but preserves saved UI settings a
   f.deny(); await f.intervals[0]();
   assert.equal(f.context.document.body.textContent, ''); assert.equal(f.context.document.documentElement.style.visibility, 'hidden');
   assert.equal(f.navigation(), '/auth');
-  assert.deepEqual(Object.keys(f.context.localStorage).filter(key => typeof f.context.localStorage[key] === 'string').sort(), ['helios_leaderboard_v2_current', 'helios_leaderboard_v2_default', 'unrelated']);
+  assert.deepEqual(Object.keys(f.context.localStorage).filter(key => typeof f.context.localStorage[key] === 'string').sort(), ['helios_leaderboard_next_current', 'helios_leaderboard_next_default', 'helios_leaderboard_v2_current', 'helios_leaderboard_v2_default', 'unrelated']);
 });
 
 test('access-loss guard blocks late JSON completion and future requests from restoring history', async () => {

@@ -8,7 +8,7 @@
     // the retired legacy config key are private cache, so those are safe to purge.
     try {
       for (const key of Object.keys(localStorage)) {
-        if (/^helios_leaderboard_v2_history_/.test(key) || key === 'leaderboard_config') localStorage.removeItem(key);
+        if (/^helios_leaderboard_(?:v2|next)_history_/.test(key) || key === 'leaderboard_config') localStorage.removeItem(key);
       }
     } catch {}
     document.body?.replaceChildren();
