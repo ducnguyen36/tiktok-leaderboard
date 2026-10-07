@@ -1,6 +1,10 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const {sheetDate,parseSheet,discrepancy,matchingProfile}=require('../sheetReconciliation');
 const headers=['Date','Alice','Bob','Chung','TỔNG','TOTAL'];
+test('group-only reconciliation uses explicit totals without inventing talent mapping',()=>{
+ const parsed=parseSheet([headers,[],[46296,100,200,20,320,300],[46297,null,null,0,0,0]],'2026-10',[]);
+ assert.equal(parsed.days.length,1);assert.equal(parsed.days[0].group,320);assert.deepEqual(parsed.days[0].individual,{});
+});
 test('strict discrepancy threshold is greater than 1000, including negative differences',()=>{
  assert.equal(discrepancy(2000,1000,{}),null);assert.equal(discrepancy(2001,1000,{}).delta,1001);assert.equal(discrepancy(0,1001,{}).delta,-1001);assert.equal(discrepancy(NaN,0,{}),null);
 });

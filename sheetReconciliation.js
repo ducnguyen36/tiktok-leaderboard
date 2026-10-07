@@ -18,7 +18,7 @@ function parseSheet(values,month,talentNames){
   for(const row of values.slice(2)){
     if(row[0]!==undefined&&row[0]!==null&&String(row[0]).trim()!=='')date=sheetDate(row[0]);
     if(!date)continue;
-    const filled=columns.some(c=>typeof row[c.index]==='number'||normalize(row[c.index])==='OFF')||(typeof row[common]==='number'&&row[common]!==0);
+    const filled=(columns.length?columns.map(c=>row[c.index]):row.slice(1,common)).some(v=>typeof v==='number'||normalize(v)==='OFF')||(typeof row[common]==='number'&&row[common]!==0);
     if(!filled)continue;
     if(!date.startsWith(month+'-'))return{error:'date_month_mismatch',days:[]};
     if(columns.some(c=>row[c.index]!=null&&row[c.index]!==''&&typeof row[c.index]!=='number'&&normalize(row[c.index])!=='OFF'))return{error:'invalid_score',days:[]};
@@ -57,7 +57,9 @@ function createSheetReconciliation({getDb,sheets,clock=Date.now}){
         const metadata=await sheets.read({spreadsheetId:source.spreadsheetId,metadata:true});const tab=findMonthTab(metadata,new Date(dayStart(today)));
         if(!tab){sources.push({group:source.group,state:'month_tab_missing'});continue}
         const data=await sheets.read({spreadsheetId:source.spreadsheetId,range:`'${tab.title.replace(/'/g,"''")}'!A1:U${Math.min(100,tab.gridProperties.rowCount)}`});
-        const names=Object.keys(profile.talents||{}),parsed=parseSheet(data.values||[],month,names);
+        let names=Object.keys(profile.talents||{}),parsed=parseSheet(data.values||[],month,names),groupOnly=false;
+        // Group totals are explicit in the sheet and do not need guessed talent aliases.
+        if(parsed.error==='talent_names_unmatched'){names=[];parsed=parseSheet(data.values||[],month,names);groupOnly=true}
         if(parsed.error){sources.push({group:source.group,state:parsed.error});continue}
         const complete=parsed.days.filter(day=>day.date<today&&!sessions.some(s=>dayKey(sessionStart(s))===day.date&&String(s.profileId)===String(profile._id)&&liveSessionIds.has(String(s._id))));
         const dates=new Set(complete.map(d=>d.date));
@@ -73,7 +75,7 @@ function createSheetReconciliation({getDb,sheets,clock=Date.now}){
           const subset=talentDates.size===dates.size?scored:scoreRows(profiles,gifts.filter(g=>talentIds.has(String(g.sessionId))),sessions);
           const row=subset.individual.find(e=>e.name===name&&e.groupId===String(profile._id));const warning=discrepancy(row?.value||0,entered.reduce((n,d)=>n+d.individual[name],0),{...context,dates:[...talentDates].sort(),kind:'individual',name});if(warning)warnings.push(warning);
         }
-        sources.push({group:source.group,state:'checked',dates:[...dates].sort()});
+        sources.push({group:source.group,state:groupOnly?'checked_group_only':'checked',dates:[...dates].sort()});
       }catch{sources.push({group:source.group,state:'read_failed'})}
     }
     if(await sheets.version()!==currentVersion)return;
