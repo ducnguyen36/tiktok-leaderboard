@@ -32,7 +32,13 @@ function parseSheet(values,month,talentNames){
   }
   return{days:[...days.values()]};
 }
-function matchingProfile(profiles,group){const canonical=name=>normalize(name).replace(/^HT\s*[-_]\s*/,'');const target=normalize(group);const matches=profiles.filter(p=>canonical(p.name)===target||(target==='DPM'&&['DOPAMINE','DPM'].includes(canonical(p.name))));return matches.length===1?matches[0]:null}
+function matchingProfile(profiles,group){
+  const canonical=name=>normalize(name).replace(/^HT\s*[-_]\s*/,'');
+  // Exact aliases verified on the production board; never fuzzy-match a group.
+  const aliases={'LEVEL X':['LEVEL X','LEVELX'],DPM:['DPM','DOPAMINE','DPM ( TUYEN THANH VIEN )'],VELIX:['VELIX','VELIX🏖️ [TUYEN THANH VIEN]']};
+  const target=normalize(group),allowed=aliases[target]||[target];
+  const matches=profiles.filter(p=>allowed.includes(canonical(p.name)));return matches.length===1?matches[0]:null;
+}
 function discrepancy(backend,sheet,details){const delta=backend-sheet;return Number.isFinite(delta)&&Math.abs(delta)>1000?{...details,backend,sheet,delta,threshold:1000}:null}
 function createSheetReconciliation({getDb,sheets,clock=Date.now}){
   let result={state:'pending',warnings:[],sources:[]},pending,checked=0,version='';

@@ -20,3 +20,9 @@ test('unfilled formula zeros are not treated as entered scores; explicit zero/of
 test('profiles match explicit group names and DPM alias, not arbitrary partial strings',()=>{
  const profiles=[{_id:'g',name:'HT - DPM'},{_id:'a',name:'HT - AURA'}];assert.equal(matchingProfile(profiles,'DPM')._id,'g');assert.equal(matchingProfile(profiles,'AURA')._id,'a');assert.equal(matchingProfile(profiles,'AU'),null);
 });
+test('verified production group display aliases map without fuzzy matching',()=>{
+ const profiles=[{_id:'x',name:'HT - LEVELX'},{_id:'d',name:'HT - DPM ( tuyen thanh vien )'},{_id:'v',name:'HT-VELIX🏖️ [TUYỂN THÀNH VIÊN]'}];
+ assert.equal(matchingProfile(profiles,'LEVEL X')._id,'x');assert.equal(matchingProfile(profiles,'DPM')._id,'d');assert.equal(matchingProfile(profiles,'VELIX')._id,'v');
+ assert.equal(matchingProfile([...profiles,{_id:'duplicate',name:'HT - LEVEL X'}],'LEVEL X'),null);
+ assert.equal(matchingProfile([{name:'HT - LEVELX fake'}],'LEVEL X'),null);
+});
