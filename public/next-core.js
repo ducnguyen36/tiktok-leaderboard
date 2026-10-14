@@ -1,7 +1,8 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./leaderboard-core'));else{const previous=root.HeliosCore;root.HeliosNext=factory(previous);root.HeliosCore={...previous,defaults:root.HeliosNext.normalize({}),normalize:root.HeliosNext.normalize,migrate:x=>root.HeliosNext.migrate(null,previous.migrate(x)),selectRows:root.HeliosNext.selectRows}}})(typeof globalThis==='object'?globalThis:this,function(C){
  'use strict';
- function normalize(raw={}){return{...C.normalize({resetHour:6,freezeUntil:'',...raw}),layout:['classic','studio','podium'].includes(raw.layout)?raw.layout:'podium',appearanceVersion:1,showDaily:typeof raw.showDaily==='boolean'?raw.showDaily:true,dailyMode:raw.dailyMode==='yesterday'?'yesterday':'daily'}}
- function migrate(saved,legacy){return normalize(saved?{...saved,layout:saved.appearanceVersion===1?saved.layout:'podium'}:{...(legacy||{language:'vi'}),layout:'podium',resetHour:6,freezeUntil:''})}
+ // dailyResetVersion 1: one-time move of saved new-board settings from the old 06:00 default to 00:00.
+ function normalize(raw={}){const reset=raw.dailyResetVersion===1?{}:{resetHour:0};return{...C.normalize({resetHour:0,freezeUntil:'',...raw,...reset}),dailyResetVersion:1,layout:['classic','studio','podium'].includes(raw.layout)?raw.layout:'podium',appearanceVersion:1,showDaily:typeof raw.showDaily==='boolean'?raw.showDaily:true,dailyMode:raw.dailyMode==='yesterday'?'yesterday':'daily'}}
+ function migrate(saved,legacy){return normalize(saved?{...saved,layout:saved.appearanceVersion===1?saved.layout:'podium'}:{...(legacy||{language:'vi'}),layout:'podium',resetHour:0,freezeUntil:''})}
  function warningFor(data,kind,period,row){return(data?.reconciliation?.warnings||[]).find(w=>w.kind===kind&&w.period===period&&String(w.groupId)===String(row.groupId)&&w.name===row.name)||null}
  function panels(raw,config,history){const selected=config.lastMonth?'history':config.dailyMode;return[
   {key:'top-daily-group',kind:'group',period:config.dailyMode,rows:raw?.group?.[config.dailyMode],limit:config.layout==='podium'?11:10},

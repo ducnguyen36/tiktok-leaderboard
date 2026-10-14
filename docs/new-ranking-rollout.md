@@ -3,8 +3,8 @@
 The existing `/` leaderboard, its API and settings are unchanged. `/auth` offers
 an explicit old link and `/new` link. No default switch or automatic promotion.
 The new frontend stores settings under `helios_leaderboard_next_current`, initially
-copying existing language/visibility/point preferences. Daily timing is fixed at
-06:00 Vietnam time with no freeze, separately from existing monthly 07:00 windows
+copying existing language/visibility/point preferences. Daily timing defaults to
+00:00 Vietnam time (selectable in Settings) with no freeze, separately from existing monthly 07:00 windows
 and first-day grace. Keep the four existing top boards; replace the wide monthly
 ranking area with one monthly talent column and one stacked Today talent/group
 column. Last Month replaces that side column; Today can be hidden in settings.
@@ -12,7 +12,7 @@ column. Last Month replaces that side column; Today can be hidden in settings.
 ## Daily attribution
 
 `rankingNext.js` queries session IDs and counts all gifts of sessions that started
-in today's/yesterday's 06:00 windows, not gift timestamps. A live crossing reset
+in today's/yesterday's daily windows (00:00 by default), not gift timestamps. A live crossing reset
 remains assigned to its start day. No session means no daily manual points.
 Existing monthly scores/history continue using the original scoring/window API.
 Monthly/today scores refresh through authenticated SSE invalidation plus 5-second

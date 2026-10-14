@@ -2,8 +2,8 @@
 const A=require('./leaderboardAggregation');
 const {decodeGiftBuckets}=require('./leaderboardPerformance');
 const DAY=86400000, OFFSET=7*3600000;
-function dayKey(value,resetHour=6){const n=+new Date(value);return Number.isFinite(n)?new Date(n+OFFSET-resetHour*3600000).toISOString().slice(0,10):null}
-function dayStart(key,resetHour=6){return Date.parse(key+'T'+String(resetHour).padStart(2,'0')+':00:00+07:00')}
+function dayKey(value,resetHour=0){const n=+new Date(value);return Number.isFinite(n)?new Date(n+OFFSET-resetHour*3600000).toISOString().slice(0,10):null}
+function dayStart(key,resetHour=0){return Date.parse(key+'T'+String(resetHour).padStart(2,'0')+':00:00+07:00')}
 function sessionStart(session){
   const explicit=session.sessionStartedAt||session.createdAt;
   if(explicit&&Number.isFinite(+new Date(explicit)))return +new Date(explicit);
@@ -21,7 +21,7 @@ function scoreRows(profiles,gifts,sessions,avatar=value=>value||''){
     group:A.aggregateGroup(gifts,tp,map,names,uids.uidToTalent,uids.uidToProfile,owners).map(e=>({name:e.name,value:e.totalDiamonds,groupId:String(e._id),locationId:map[e._id]?.locationId||'',avatar:avatar(map[e._id]?.avatar,map[e._id]?.username)}))
   };
 }
-function partitionSessions(sessions,now=Date.now(),resetHour=6){
+function partitionSessions(sessions,now=Date.now(),resetHour=0){
   const today=dayKey(now,resetHour),yesterday=dayKey(dayStart(today,resetHour)-DAY,resetHour);
   const keys=new Map(sessions.map(s=>[String(s._id),dayKey(sessionStart(s),resetHour)]));
   return{today,yesterday,keys};
@@ -31,7 +31,7 @@ function sessionGiftPipeline(ids){
   return[{$match:{sessionId:{$in:ids}}},{$group:{_id:Object.fromEntries(fields.map(f=>[f,'$'+f])),count:{$sum:1}}},{$project:{_id:0,gift:'$_id',count:1}}];
 }
 function decorateLive(rows,states,now){const groups=liveGroups(states,now);return rows.map(row=>({...row,...(groups.get(String(row.groupId))||{live:false})}))}
-function createNextRankingForHour({getDb,current,readProfiles,readLocations,avatar,reconcile,clock=Date.now,resetHour=6}){
+function createNextRankingForHour({getDb,current,readProfiles,readLocations,avatar,reconcile,clock=Date.now,resetHour=0}){
   let cached,pending,generation=0;
   async function build(force=false){
     const revision=generation,started=clock(),db=getDb();if(!db)throw Error('Database unavailable');
@@ -56,13 +56,13 @@ function createNextRankingForHour({getDb,current,readProfiles,readLocations,avat
     result.data.reconciliation=reconcile?.status()||{state:'unavailable',warnings:[]};return result;
   }};
 }
-// Keep all original timing settings functional while 06:00 remains the new default.
+// Keep all original timing settings functional while 00:00 is the new default.
 function createNextRanking(options){
  const services=new Map(),clock=options.clock||Date.now;
  return{
   invalidate(){services.forEach(service=>service.invalidate())},
   async get(force=false,context={}){
-   const hour=context.resetHour===undefined?6:Number(context.resetHour);
+   const hour=context.resetHour===undefined?0:Number(context.resetHour);
    if(!Number.isInteger(hour)||hour<0||hour>23)throw new RangeError('Invalid reset hour');
    const freeze=context.freezeUntil||'';
    if(typeof freeze!=='string'||(freeze&&!/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(freeze)))throw new RangeError('Invalid freeze time');

@@ -1114,7 +1114,7 @@ function debouncedBroadcast() {
 const sheetReconciliation=createSheetReconciliation({getDb:()=>db,sheets:leaderboardAuth.sheets});
 const nextRanking=createNextRanking({getDb:()=>db,current:getLeaderboardResult,readProfiles:readProfilesFromDb,readLocations:readLocationsFromDb,avatar:resolveAvatarFast,reconcile:sheetReconciliation});
 app.get('/api/leaderboard/next',async(req,res)=>{
-    try {const context=parseFreshContext({...req.query,resetHour:req.query.resetHour??'6'});const result=await nextRanking.get(req.query.fresh==='true',context);res.set('Cache-Control','no-store').json(result)}
+    try {const context=parseFreshContext({...req.query,resetHour:req.query.resetHour??'0'});const result=await nextRanking.get(req.query.fresh==='true',context);res.set('Cache-Control','no-store').json(result)}
     catch(error) {res.status(error instanceof RangeError?400:db?500:503).json({status:'error',message:'New leaderboard temporarily unavailable'})}
 });
 app.get('/api/leaderboard/fresh', async (req, res) => {

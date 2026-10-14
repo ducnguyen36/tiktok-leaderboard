@@ -2,11 +2,16 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {dayKey,dayStart,sessionStart,partitionSessions,liveGroups,scoreRows,sessionGiftPipeline,createNextRanking}=require('../rankingNext');
 const N=require('../public/next-core');
 const profiles=[{_id:'g',name:'HT - AURA',locationId:'loc_hcm',talents:{Alice:{},Bob:{}}}];
-test('daily 06:00 is Vietnam session-start time, independent from monthly 07:00',()=>{
- assert.equal(dayKey('2026-10-07T05:59:59+07:00'),'2026-10-06');assert.equal(dayKey('2026-10-07T06:00:00+07:00'),'2026-10-07');
- assert.equal(dayStart('2026-10-07'),Date.parse('2026-10-06T23:00:00Z'));
+test('daily reset defaults to 00:00 Vietnam session-start time; 06:00 stays selectable',()=>{
+ assert.equal(dayKey('2026-10-06T23:59:59+07:00'),'2026-10-06');assert.equal(dayKey('2026-10-07T00:00:00+07:00'),'2026-10-07');
+ assert.equal(dayStart('2026-10-07'),Date.parse('2026-10-06T17:00:00Z'));
+ const night=partitionSessions([{_id:'night',createdAt:'2026-10-07T01:00:00+07:00'},{_id:'late',createdAt:'2026-10-06T23:00:00+07:00'}],Date.parse('2026-10-07T09:00:00+07:00'));
+ assert.equal(night.keys.get('night'),'2026-10-07');assert.equal(night.keys.get('late'),'2026-10-06');
+ assert.equal(dayKey('2026-10-07T05:59:59+07:00',6),'2026-10-06');assert.equal(dayKey('2026-10-07T06:00:00+07:00',6),'2026-10-07');
+ assert.equal(dayStart('2026-10-07',6),Date.parse('2026-10-06T23:00:00Z'));
  assert.equal(sessionStart({sessionName:'20261007_055959'}),Date.parse('2026-10-07T05:59:59+07:00'));
- assert.equal(partitionSessions([{_id:'s',createdAt:'2026-10-07T05:00:00+07:00'}],Date.parse('2026-10-07T07:00:00+07:00')).keys.get('s'),'2026-10-06');
+ assert.equal(partitionSessions([{_id:'s',createdAt:'2026-10-07T05:00:00+07:00'}],Date.parse('2026-10-07T07:00:00+07:00')).keys.get('s'),'2026-10-07');
+ assert.equal(partitionSessions([{_id:'s',createdAt:'2026-10-07T05:00:00+07:00'}],Date.parse('2026-10-07T07:00:00+07:00'),6).keys.get('s'),'2026-10-06');
 });
 test('live requires an explicit connected lease; silence/crash expires after 90 seconds',()=>{
  const now=Date.now();assert.equal(liveGroups([{profileId:'g',heartbeatAt:now,live:true}],now).size,1);
@@ -20,8 +25,8 @@ test('session query is not constrained by gift timestamp; group points are count
 });
 test('new settings preserve visibility but isolate daily defaults and Today/Last Month source',()=>{
  const c=N.normalize({groups:{g:false},resetHour:0,freezeUntil:'09:00',showDaily:false});assert.equal(c.resetHour,0);assert.equal(c.freezeUntil,'09:00');assert.equal(c.groups.g,false);assert.equal(c.showDaily,false);
- assert.equal(N.normalize({}).resetHour,6);assert.equal(N.normalize({}).freezeUntil,'');assert.equal(N.normalize({}).layout,'podium');
- const migrated=N.migrate(null,{layout:'classic',resetHour:0,freezeUntil:'09:00',pause:5,tickerSpeed:100,celebrationSound:false});assert.equal(migrated.layout,'podium');assert.equal(migrated.resetHour,6);assert.equal(migrated.pause,5);assert.equal(migrated.tickerSpeed,100);assert.equal(migrated.celebrationSound,false);
+ assert.equal(N.normalize({}).resetHour,0);assert.equal(N.normalize({resetHour:6}).resetHour,0,'saved old 06:00 default moves to 00:00 once');assert.equal(N.normalize({resetHour:7,dailyResetVersion:1}).resetHour,7,'later choices are kept');assert.equal(N.normalize(N.normalize({resetHour:6})).resetHour,0);assert.equal(N.normalize({}).freezeUntil,'');assert.equal(N.normalize({}).layout,'podium');
+ const migrated=N.migrate(null,{layout:'classic',resetHour:0,freezeUntil:'09:00',pause:5,tickerSpeed:100,celebrationSound:false});assert.equal(migrated.layout,'podium');assert.equal(migrated.resetHour,0);assert.equal(migrated.pause,5);assert.equal(migrated.tickerSpeed,100);assert.equal(migrated.celebrationSound,false);
  assert.equal(N.migrate({...c,layout:'classic',appearanceVersion:1},null).layout,'classic');
  const raw={individual:{monthly:[{name:'Monthly',value:1,locationId:'loc_hcm'}],daily:[{name:'Today',value:2,locationId:'loc_hcm'}]},group:{daily:[{name:'Group',value:1,locationId:'loc_hcm'}]}};
  const cfg=N.normalize({});assert.equal(N.panels(raw,cfg,null)[4].rows[0].name,'Monthly');assert.equal(N.panels(raw,cfg,null)[5].rows[0].name,'Today');
@@ -32,7 +37,8 @@ test('new service attributes a session spanning reset to yesterday and excludes 
  let pipeline;const db={collection(name){return{find(){return{toArray:async()=>name==='sessions'?sessions:[]}},aggregate(p){pipeline=p;return{toArray:async()=>[{gift:{sessionId:'before',cost:200,receivedTalent:'Alice'},count:1},{gift:{sessionId:'after',cost:100,receivedTalent:'Bob'},count:1}]}}}}};
  const monthly={status:'ok',meta:{computedAt:new Date(now).toISOString()},data:{individual:{monthly:[{name:'Alice',value:999,groupId:'g'}]},group:{monthly:[]},locations:[],groups:[]}};
  const service=createNextRanking({getDb:()=>db,current:async()=>monthly,readProfiles:async()=>profiles,readLocations:async()=>[],clock:()=>now});
- const result=await service.get();assert.equal(result.data.group.daily[0].value,100);assert.equal(result.data.group.yesterday[0].value,200);assert.equal(result.data.individual.monthly[0].value,999);assert.deepEqual(pipeline[0].$match.sessionId.$in,['before','after']);
+ const result=await service.get(false,{resetHour:6});assert.equal(result.data.group.daily[0].value,100);assert.equal(result.data.group.yesterday[0].value,200);
+ const byDefault=await service.get();assert.equal(byDefault.data.dailyPeriod.resetHour,0);assert.equal(byDefault.data.group.daily[0].value,300);assert.equal(result.data.individual.monthly[0].value,999);assert.deepEqual(pipeline[0].$match.sessionId.$in,['before','after']);
  assert.equal(result.data.individual.daily.find(e=>e.name==='Alice').yesterday.value,200);
  const frozen=await service.get(false,{resetHour:6,freezeUntil:'09:00'});assert.equal(frozen.data.frozen,true);assert.equal(frozen.data.group.daily[0].value,200);
  const live=await service.get(false,{resetHour:6,freezeUntil:''});assert.equal(live.data.frozen,false);assert.equal(live.data.group.daily[0].value,100);
