@@ -54,3 +54,13 @@ test('smart TV browsers get the simple live mark; phones and computers keep the 
  assert.equal(N.isTvDevice('Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36'),false);
  assert.equal(N.isTvDevice('Mozilla/5.0 (Windows NT 10.0)', '1'),true);assert.equal(N.isTvDevice('Mozilla/5.0 (SMART-TV; Tizen)', '0'),false);
 });
+test('celebrations name the group or talent that crossed a daily milestone',()=>{
+ const visible=new Set(['g1','Alice']);
+ const first=N.milestoneHits({},[{name:'G',groupId:'g1',kind:'group',value:120000}],{step:50000,minStep:2,visible,ready:false});
+ assert.deepEqual(first.hits,[],'nothing on first load');assert.equal(first.next.g1,2);
+ const group=N.milestoneHits(first.next,[{name:'G',groupId:'g1',kind:'group',value:151000}],{step:50000,minStep:2,visible,ready:true});
+ assert.equal(group.hits[0].entry.name,'G');assert.equal(group.hits[0].points,150000);
+ const talent=N.milestoneHits({Alice:0,Bob:0},[{name:'Alice',value:52000,avatar:'/a.png'},{name:'Bob',value:60000}],{step:50000,minStep:1,visible,ready:true});
+ assert.deepEqual(talent.hits.map(h=>[h.entry.name,h.points,h.entry.avatar]),[['Alice',50000,'/a.png']],'only visible talents');
+ assert.deepEqual(N.milestoneHits({Alice:1},[{name:'Alice',value:90000}],{step:50000,minStep:1,visible,ready:true}).hits,[],'same milestone once');
+});

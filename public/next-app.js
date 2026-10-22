@@ -151,18 +151,37 @@ function updateCelebrations(result){
  const timestamp=new Date(result.meta?.computedAt||Date.now()).getTime();if(!Number.isFinite(timestamp))return;
  const day=new Date(timestamp+(7-config.resetHour)*3600000).toISOString().slice(0,10),key=storageKey+'_celebrations';
  let ledger=celebrationLedger;try{ledger=JSON.parse(localStorage.getItem(key)||'null')||ledger}catch{}
- if(!ledger||ledger.day!==day||ledger.reset!==config.resetHour)ledger={day,reset:config.resetHour,groups:{}};
- const visible=new Set(C.filtered(result.data.group?.daily,config,allLocations).filter(e=>e.value>=100000).slice(0,5).map(e=>String(e.groupId||e.id||e.name)));
- let celebrate=false;
- for(const entry of result.data.group?.daily||[]){
-  const id=String(entry.groupId||entry.id||entry.name),step=Math.floor(Number(entry.value)/50000),old=ledger.groups[id];
-  if(!Number.isFinite(step))continue;
-  if(celebrationSessionReady&&Number.isFinite(old)&&step>old&&step>=2&&visible.has(id))celebrate=true;
-  ledger.groups[id]=Math.max(Number.isFinite(old)?old:0,step);
- }
+ if(!ledger||ledger.day!==day||ledger.reset!==config.resetHour)ledger={day,reset:config.resetHour,groups:{},talents:{}};
+ ledger.talents??={};
+ // Groups: from 100K, every 50K, while in the visible top 5. Talents: every 50K in the top 10.
+ const groupRows=(result.data.group?.daily||[]).map(e=>({...e,kind:'group'})),talentRows=result.data.individual?.daily||[];
+ const groupVisible=new Set(C.filtered(result.data.group?.daily,config,allLocations).slice(0,5).map(e=>String(e.groupId||e.id||e.name)));
+ const talentVisible=new Set(C.filtered(talentRows,config,allLocations).filter(e=>config.talents?.[e.name]!==false).slice(0,10).map(e=>String(e.id||e.name)));
+ const groups=N.milestoneHits(ledger.groups,groupRows,{step:50000,minStep:2,visible:groupVisible,ready:celebrationSessionReady});
+ const talents=N.milestoneHits(ledger.talents,talentRows,{step:50000,minStep:1,visible:talentVisible,ready:celebrationSessionReady});
+ ledger.groups=groups.next;ledger.talents=talents.next;
  celebrationLedger=ledger;try{localStorage.setItem(key,JSON.stringify(ledger))}catch{}
  celebrationSessionReady=true;
- if(celebrate){bannerBurst(true);celebrationChime()}
+ const hits=[...groups.hits.map(h=>({...h,kind:'group'})),...talents.hits.map(h=>({...h,kind:'talent'}))];
+ // A newer milestone replaces a still-queued older one for the same name.
+ for(const hit of hits){const same=celebrationQueue.findIndex(q=>q.kind===hit.kind&&q.entry.name===hit.entry.name);if(same>=0)celebrationQueue.splice(same,1)}
+ if(hits.length){celebrationQueue.push(...hits);if(!celebrationShowing)showNextCelebration();celebrationChime()}
+}
+// Named celebration card over the ticker: avatar, name and milestone, one at a time.
+const celebrationQueue=[];let celebrationShowing=false;
+const celebrationCard=document.createElement('div');celebrationCard.className='celebration-card';celebrationCard.setAttribute('role','status');celebrationCard.hidden=true;ticker.parentElement.append(celebrationCard);
+function showNextCelebration(){
+ const hit=celebrationQueue.shift();if(!hit){celebrationShowing=false;celebrationCard.hidden=true;return}
+ celebrationShowing=true;const{entry,points,kind}=hit,vi=config.language==='vi';
+ const avatar=document.createElement('i');avatar.className='celebration-avatar';avatar.textContent=String(entry.name||'?').charAt(0).toUpperCase();
+ const src=safeAvatar(entry.avatar);if(src){const img=document.createElement('img');img.alt='';img.src=src;img.onerror=()=>img.remove();avatar.append(img)}
+ const text=document.createElement('span');text.className='celebration-text';
+ const label=document.createElement('small');label.textContent=vi?(kind==='group'?'🎉 Chúc mừng nhóm':'🎉 Chúc mừng idol'):(kind==='group'?'🎉 Congratulations, group':'🎉 Congratulations');
+ const name=document.createElement('b');name.textContent=entry.name;
+ const detail=document.createElement('em');detail.textContent=vi?'vượt '+C.formatPoints(points)+' điểm hôm nay!':'passed '+C.formatPoints(points)+' points today!';
+ text.append(label,name,detail);celebrationCard.replaceChildren(avatar,text);celebrationCard.hidden=false;
+ celebrationCard.classList.remove('celebration-in');void celebrationCard.offsetWidth;celebrationCard.classList.add('celebration-in');
+ bannerBurst(true);setTimeout(showNextCelebration,7000);
 }
 function tickerContent(){
  const content=document.createDocumentFragment();tickerMessage.split(tickerDivider).forEach((text,index)=>{

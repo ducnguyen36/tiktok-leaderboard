@@ -21,6 +21,18 @@
   const failed=(check.sources||[]).filter(s=>!['checked','checked_group_only','awaiting_verified_closed_sessions'].includes(s.state));
   return failed.length?{state:'partial',failed,all:false}:null;
  }
+ // Daily milestone crossings since the last check. previous maps id -> last
+ // step reached; first sight of an id only records it (no celebration on load).
+ function milestoneHits(previous,rows,{step,minStep,visible,ready}){
+  const next={...previous},hits=[];
+  for(const entry of rows||[]){
+   const id=String(entry.groupId&&entry.kind==='group'?entry.groupId:entry.id||entry.name),reached=Math.floor(Number(entry.value)/step),old=previous[id];
+   if(!Number.isFinite(reached))continue;
+   if(ready&&Number.isFinite(old)&&reached>old&&reached>=minStep&&visible.has(id))hits.push({entry,points:reached*step});
+   next[id]=Math.max(Number.isFinite(old)?old:0,reached);
+  }
+  return{next,hits};
+ }
  function isLive(row,now=Date.now()){return row?.live===true&&Number.isFinite(Date.parse(row.liveExpiresAt))&&Date.parse(row.liveExpiresAt)>now}
  function selectRows(raw,config,index,history,yesterday=false){
   if(index<5)return C.selectRows(raw,config,index,history,yesterday);
@@ -30,7 +42,7 @@
  // Smart TV browsers (Tizen, webOS, Android TV…) get simplified effects.
  const TV_AGENT=/SMART-?TV|SmartTV|Tizen|Web0S|webOS|NetCast|BRAVIA|HbbTV|Android TV|GoogleTV|AFT[A-Z]|CrKey|Roku|AppleTV|VIDAA|NETTV|Opera TV|TV Safari|; ?TV[;)]/i;
  function isTvDevice(userAgent,override){if(override==='1')return true;if(override==='0')return false;return TV_AGENT.test(userAgent||'')}
- return{normalize,migrate,panels,warningFor,sheetProblems,isLive,isTvDevice,selectRows};
+ return{normalize,migrate,panels,warningFor,sheetProblems,milestoneHits,isLive,isTvDevice,selectRows};
 });
 /* Original UI and Settings are reused, with only feature-specific row decorations. */
 if(typeof window==='object'){
