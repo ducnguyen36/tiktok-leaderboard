@@ -60,11 +60,25 @@ function buildProfileNameToIdMap(profiles) {
     return map;
 }
 
+// Extra TikTok accounts confirmed by the operator on 2026-10-22 to belong to an
+// existing talent. Keyed by account UID; target is the talent's profile UID.
+const CONFIRMED_EXTRA_TALENT_UIDS = Object.freeze({
+    '7292870510973862920': '7030251781209146395', // "AMI" account -> Eliana (Velvet Grace)
+});
+
+// Prefix for TikTok @uniqueId lookups stored in uidToTalent. UIDs are numeric,
+// so prefixed keys never collide with them.
+const UNIQUE_ID_KEY = '@';
+const uniqueIdKey = value => UNIQUE_ID_KEY + String(value || '').trim().toLowerCase();
+
 // Maps talent UID -> { talentName, profileId, profileName }
-// Used to resolve gifts by UID instead of nickname
+// Used to resolve gifts by UID instead of nickname. Also maps each talent's
+// TikTok @uniqueId, so gifts recorded under the account name (e.g. when the
+// profile has no UID saved) still reach the talent.
 function buildUidMaps(profiles) {
     const uidToTalent = {};   // uid -> talentName
     const uidToProfile = {};  // uid -> profileId
+    const uniqueIdOwners = {};
     for (const profile of profiles) {
         const pid = profile._id;
         const pName = profile.name || pid.toString();
@@ -74,10 +88,29 @@ function buildUidMaps(profiles) {
                     uidToTalent[info.id] = talentName;
                     uidToProfile[info.id] = { profileId: pid, profileName: pName };
                 }
+                if (info.uniqueId) {
+                    const key = uniqueIdKey(info.uniqueId);
+                    (uniqueIdOwners[key] ||= new Set()).add(talentName);
+                }
             }
         }
     }
+    // An @uniqueId shared by two talents is ambiguous: do not guess.
+    for (const [key, owners] of Object.entries(uniqueIdOwners)) {
+        if (owners.size === 1) uidToTalent[key] = [...owners][0];
+    }
+    for (const [uid, targetUid] of Object.entries(CONFIRMED_EXTRA_TALENT_UIDS)) {
+        if (uidToTalent[targetUid] && !uidToTalent[uid]) {
+            uidToTalent[uid] = uidToTalent[targetUid];
+            uidToProfile[uid] = uidToProfile[targetUid];
+        }
+    }
     return { uidToTalent, uidToProfile };
+}
+
+// Resolve a recorded talent name: UID first, then TikTok @uniqueId, else as recorded.
+function resolveTalentName(name, uid, uidToTalent) {
+    return (uid && uidToTalent[uid]) || uidToTalent[uniqueIdKey(name)] || name;
 }
 
 // ==========================================
@@ -96,11 +129,10 @@ function resolveGiftTalents(gift, uidToTalent) {
         for (const entry of gift.receivedTalents) {
             if (typeof entry === 'object' && entry.name) {
                 // {name, uid} format — resolve name by UID if possible
-                const resolvedName = (entry.uid && uidToTalent[entry.uid]) || entry.name;
-                results.push({ name: resolvedName, uid: entry.uid || '' });
+                results.push({ name: resolveTalentName(entry.name, entry.uid, uidToTalent), uid: entry.uid || '' });
             } else {
                 // Plain string
-                results.push({ name: String(entry), uid: '' });
+                results.push({ name: resolveTalentName(String(entry), '', uidToTalent), uid: '' });
             }
         }
         return results;
@@ -110,8 +142,7 @@ function resolveGiftTalents(gift, uidToTalent) {
     if (gift.receivedTalent) {
         // Try to resolve by UID if available
         const uid = gift.receivedTalentUid || gift.toMemberUid || '';
-        const resolvedName = (uid && uidToTalent[uid]) || gift.receivedTalent;
-        results.push({ name: resolvedName, uid });
+        results.push({ name: resolveTalentName(gift.receivedTalent, uid, uidToTalent), uid });
     }
 
     return results;
@@ -211,9 +242,10 @@ function aggregateIndividual(gifts, talentAvatarMap, profileNameToId, uidToTalen
 // AGGREGATION — GROUP
 // Accumulates total income per profile using the sessions collection to
 // map gifts to their owning profile. Includes ALL gifts (manual + auto).
-// Each gift's FULL cost goes to the owning profile — no splitting when
-// all talents belong to the same profile. Unmatched/unknown talents and
-// Group/Unassigned labels fall back to session-based profile lookup.
+// A talent alone in another group's live (e.g. after moving groups) counts for
+// that live's group. Each gift's FULL cost goes to the resolved profile — no splitting when all talents belong to the same
+// profile. Unmatched/unknown talents and Group/Unassigned labels fall back to
+// session-based profile lookup.
 // ==========================================
 function aggregateGroup(gifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap) {
     // Start with ALL profiles at 0
@@ -247,10 +279,39 @@ function aggregateGroup(gifts, talentToProfile, profileMap, profileNameToId, uid
         return sessionProfileMap[sid] || null;
     }
 
+    // A talent streaming alone inside another group's live (e.g. after moving
+    // groups) earns for that live's group: per session, find the strongest group
+    // with at least two talents present and send lone talents' points there.
+    const sessionGroups = {};
     for (const gift of gifts) {
+        const sid = gift.sessionId ? gift.sessionId.toString() : '';
+        if (!sid) continue;
+        const info = sessionGroups[sid] ||= { votes: {}, talents: {} };
         const talents = resolveGiftTalents(gift, uidToTalent);
+        for (const t of talents) {
+            if (t.name === 'Group' || t.name === 'Unassigned' || profileNameToId[t.name]) continue;
+            const pid = resolveToProfile(t);
+            if (!pid || !profileTotals[pid]) continue;
+            (info.talents[pid] ||= new Set()).add(t.name);
+            info.votes[pid] = (info.votes[pid] || 0) + Math.abs((gift.cost || 0) * (gift.count || 1)) / talents.length;
+        }
+    }
+    for (const info of Object.values(sessionGroups)) {
+        info.host = Object.keys(info.votes)
+            .filter(pid => info.talents[pid].size >= 2)
+            .sort((x, y) => info.votes[y] - info.votes[x])[0] || null;
+    }
+    function groupAtLive(gift, pid) {
+        const info = sessionGroups[gift.sessionId ? gift.sessionId.toString() : ''];
+        if (!info || !info.host || !pid || pid === info.host) return pid;
+        return info.talents[pid] && info.talents[pid].size === 1 ? info.host : pid;
+    }
+
+    for (const gift of gifts) {
         const cost = gift.cost || 0;
         const count = gift.count || 1;
+
+        const talents = resolveGiftTalents(gift, uidToTalent);
 
         // If no talent info at all, fall back to session
         if (talents.length === 0) {
@@ -274,7 +335,7 @@ function aggregateGroup(gifts, talentToProfile, profileMap, profileNameToId, uid
                 continue;
             }
 
-            const pid = resolveToProfile(t);
+            const pid = groupAtLive(gift, resolveToProfile(t));
             if (pid) {
                 resolvedPids.add(pid);
             }
