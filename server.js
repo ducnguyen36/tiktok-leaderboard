@@ -50,6 +50,11 @@ const PORT = process.env.PORT || 5000;
 const leaderboardAuth = createLeaderboardAuth({ getDb: () => db });
 // Staged rollout: enable only after OAuth and TV enrollment are prepared.
 const accessControlEnabled = process.env.LEADERBOARD_ACCESS_CONTROL === 'true';
+// Public privacy policy required by the Google OAuth consent screen; no sign-in.
+app.get(['/privacy', '/privacy.html'], (req, res) => {
+    res.set({ 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'", 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=3600' });
+    res.sendFile('privacy.html', { root: path.join(__dirname, 'public') });
+});
 if (accessControlEnabled) app.use(leaderboardAuth.middleware);
 else {
     app.get('/auth/status', (req, res) => res.set('Cache-Control', 'no-store').json({ authorized: true, admin: false, accessControlEnabled: false }));

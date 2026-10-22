@@ -237,4 +237,5 @@ test('actual server locks every private route and serves only a setup shell with
  }
  assert.equal((await fetch(base+'/auth')).status,200);assert.equal((await (await fetch(base+'/auth/status')).json()).setupRequired,true);
  assert.deepEqual(await (await fetch(base+'/api/health')).json(),{status:'ok'});
+ const privacy=await fetch(base+'/privacy');assert.equal(privacy.status,200,'privacy policy is public');assert.match(await privacy.text(),/Privacy Policy/);
 });
