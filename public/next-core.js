@@ -13,13 +13,21 @@
   {key:'side-talents',kind:'individual',period:selected,rows:config.lastMonth?history?.data?.individual:raw?.individual?.[selected],limit:Infinity},
   {key:'side-groups',kind:'group',period:selected,rows:config.lastMonth?history?.data?.group:raw?.group?.[selected],limit:Infinity}
  ].map(p=>({...p,rows:C.filtered(p.rows,config,raw?.locations||[]).filter(row=>p.kind!=='individual'||config.talents[row.name]!==false).slice(0,p.limit)}))}
+ // Sources that could not be compared at all (read errors, wrong layout); waiting
+ // for closed sessions or group-only checks are normal and not shown as problems.
+ function sheetProblems(check){
+  if(!check||check.state==='pending')return null;
+  if(check.state!=='checked')return{state:check.state,failed:[],all:true};
+  const failed=(check.sources||[]).filter(s=>!['checked','checked_group_only','awaiting_verified_closed_sessions'].includes(s.state));
+  return failed.length?{state:'partial',failed,all:false}:null;
+ }
  function isLive(row,now=Date.now()){return row?.live===true&&Number.isFinite(Date.parse(row.liveExpiresAt))&&Date.parse(row.liveExpiresAt)>now}
  function selectRows(raw,config,index,history,yesterday=false){
   if(index<5)return C.selectRows(raw,config,index,history,yesterday);
   const kind=index===5?'individual':'group',rows=config.lastMonth?history?.[kind]:raw?.[kind]?.[yesterday?'yesterday':'daily'];
   return C.filtered(rows,config,raw?.locations||[]).filter(e=>kind!=='individual'||config.talents[e.name]!==false);
  }
- return{normalize,migrate,panels,warningFor,isLive,selectRows};
+ return{normalize,migrate,panels,warningFor,sheetProblems,isLive,selectRows};
 });
 /* Original UI and Settings are reused, with only feature-specific row decorations. */
 if(typeof window==='object'){
@@ -49,6 +57,17 @@ if(typeof window==='object'){
   const status=document.getElementById('sheet-status');
   status.textContent=check?.state==='checked'?text(config,'Sheets: chỉ đối soát phiên hoàn tất và ngày đã điền điểm.','Sheets: only verified closed sessions and filled days.'):check?.state==='pending'?text(config,'Sheets: đang kiểm tra…','Sheets: checking…'):text(config,'Sheets: chưa kết nối hoặc tạm không đọc được.','Sheets: disconnected or temporarily unavailable.');
   status.title=issues.map(s=>s.group+' ('+s.state+')').join(' · ');
+  // Reading problems must be visible on the board, not only inside Settings.
+  let alert=document.getElementById('sheet-alert');
+  if(!alert){alert=document.createElement('div');alert.id='sheet-alert';alert.className='sheet-alert';alert.setAttribute('role','alert');document.body.append(alert)}
+  const problem=N.sheetProblems(check);alert.hidden=!problem;
+  if(problem){
+   const reconnect=problem.failed.some(s=>s.state==='reconnect_required');
+   alert.textContent=problem.all?text(config,'⚠ Sheets: chưa kết nối hoặc không đọc được, không có cảnh báo chênh lệch','⚠ Sheets disconnected or unreadable: no score warnings')
+    :reconnect?text(config,'⚠ Sheets: cần kết nối lại Google trong /auth','⚠ Sheets: reconnect Google in /auth')
+    :text(config,'⚠ Sheets: không đối soát được '+problem.failed.length+' nhóm','⚠ Sheets: '+problem.failed.length+' group(s) not checked');
+   alert.title=problem.failed.map(s=>s.group+' ('+s.state+')').join(' · ');
+  }
  };
 }
 

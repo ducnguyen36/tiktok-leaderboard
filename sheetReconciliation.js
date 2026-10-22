@@ -2,6 +2,24 @@
 const {GROUP_SHEETS,findMonthTab}=require('./groupSheets');
 const {dayKey,dayStart,sessionStart,scoreRows,sessionGiftPipeline,liveGroups}=require('./rankingNext');
 const {decodeGiftBuckets}=require('./leaderboardPerformance');
+const {sheetsReadError}=require('./sheetsConnection');
+// Sheets record a workday from 06:00: a night shift after midnight belongs to the
+// previous day, independent of the board's own daily reset hour.
+const WORKDAY_HOUR=6,workday=value=>dayKey(value,WORKDAY_HOUR);
+// Talent names compared by letters/digits only: "Lapin" matches "Lapin 🐰".
+const nameKey=value=>String(value||'').normalize('NFKC').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+function talentColumns(headers,talentNames){
+  const keys=headers.map(nameKey),found=talentNames.map(name=>{
+    const key=nameKey(name);if(!key)return{name,index:-1};
+    const exact=keys.flatMap((h,i)=>i>0&&h===key?[i]:[]);
+    // Sheets often shorten a nickname ("Wina" for "Wina here 🐱", "Katie" for
+    // "Hello Katie", "Zelzi" for "Lucky ZELzii").
+    const loose=exact.length?exact:keys.flatMap((h,i)=>i>0&&h.length>=3&&(key.startsWith(h)||key.endsWith(h)||(h.length>=4&&key.includes(h)))?[i]:[]);
+    return{name,index:loose.length===1?loose[0]:-1};
+  });
+  // A column claimed by two talents is ambiguous: compare neither.
+  return found.map(c=>c.index>0&&found.filter(o=>o.index===c.index).length===1?c:{...c,index:-1});
+}
 const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toUpperCase().replace(/\s+/g,' ');
 function sheetDate(value){
   if(typeof value==='number'&&Number.isFinite(value))return new Date(Date.UTC(1899,11,30)+Math.floor(value)*86400000).toISOString().slice(0,10);
@@ -12,25 +30,28 @@ function sheetDate(value){
 function parseSheet(values,month,talentNames){
   const headers=values[0]||[],common=headers.findIndex(h=>['CHUNG','KC CHUNG'].includes(normalize(h))),sum=headers.findIndex(h=>normalize(h)==='TONG'),total=headers.findIndex(h=>normalize(h)==='TOTAL');
   if(common<0||sum<0||total<0)return{error:'unsupported_headers',days:[]};
-  const columns=talentNames.map(name=>({name,index:headers.findIndex(h=>normalize(h)===normalize(name))}));
-  if(columns.some(c=>c.index<1)||new Set(columns.map(c=>c.index)).size!==columns.length)return{error:'talent_names_unmatched',days:[]};
-  const days=new Map();let date=null;
+  const columns=talentColumns(headers,talentNames).filter(c=>c.index>0),names=columns.map(c=>c.name);
+  const days=new Map();let date=null,outside=0;
   for(const row of values.slice(2)){
     if(row[0]!==undefined&&row[0]!==null&&String(row[0]).trim()!=='')date=sheetDate(row[0]);
     if(!date)continue;
     const filled=(columns.length?columns.map(c=>row[c.index]):row.slice(1,common)).some(v=>typeof v==='number'||normalize(v)==='OFF')||(typeof row[common]==='number'&&row[common]!==0);
     if(!filled)continue;
-    if(!date.startsWith(month+'-'))return{error:'date_month_mismatch',days:[]};
-    if(columns.some(c=>row[c.index]!=null&&row[c.index]!==''&&typeof row[c.index]!=='number'&&normalize(row[c.index])!=='OFF'))return{error:'invalid_score',days:[]};
+    // A stray row from another month (e.g. 30/09 copied into October) is skipped.
+    if(!date.startsWith(month+'-')){outside++;continue}
     const shared=typeof row[common]==='number'?row[common]:0;
-    const group=typeof row[sum]==='number'?row[sum]:typeof row[total]==='number'?row[total]+shared:null;
+    // Rows with talent scores but no total (e.g. a battle row) use the talent cells.
+    const cells=row.slice(1,common).filter(v=>typeof v==='number');
+    const group=typeof row[sum]==='number'?row[sum]:typeof row[total]==='number'?row[total]+shared:cells.length?cells.reduce((n,v)=>n+v,0)+shared:null;
     if(group===null||!Number.isFinite(group))continue;
-    const entry=days.get(date)||{date,group:0,individual:Object.fromEntries(talentNames.map(n=>[n,0])),provided:Object.fromEntries(talentNames.map(n=>[n,true]))};
+    const entry=days.get(date)||{date,group:0,individual:Object.fromEntries(names.map(n=>[n,0])),provided:Object.fromEntries(names.map(n=>[n,true]))};
     entry.group+=group;
+    // A text value in a score cell (not OFF) makes that talent's day unverifiable.
     for(const c of columns){entry.individual[c.name]+=(typeof row[c.index]==='number'?row[c.index]:0)+Math.floor(shared/talentNames.length);entry.provided[c.name]=entry.provided[c.name]&&(typeof row[c.index]==='number'||normalize(row[c.index])==='OFF')}
     days.set(date,entry);
   }
-  return{days:[...days.values()]};
+  if(!days.size&&outside)return{error:'date_month_mismatch',days:[]};
+  return{days:[...days.values()],names};
 }
 function matchingProfile(profiles,group){
   const canonical=name=>normalize(name).replace(/^HT\s*[-_]\s*/,'');
@@ -41,7 +62,7 @@ function matchingProfile(profiles,group){
 }
 function discrepancy(backend,sheet,details){const delta=backend-sheet;return Number.isFinite(delta)&&Math.abs(delta)>1000?{...details,backend,sheet,delta,threshold:1000}:null}
 function comparableDay(date,profileId,sessions,known,active){
-  const entries=sessions.filter(s=>String(s.profileId)===String(profileId)&&dayKey(sessionStart(s))===date);
+  const entries=sessions.filter(s=>String(s.profileId)===String(profileId)&&workday(sessionStart(s))===date);
   // Legacy controllers can reuse a session for multiple days. Only compare days
   // whose sessions have been observed by the new, day-aware controller publisher.
   return entries.length>0&&entries.every(s=>known.has(String(s._id))&&!active.has(String(s._id)));
@@ -49,10 +70,10 @@ function comparableDay(date,profileId,sessions,known,active){
 function createSheetReconciliation({getDb,sheets,clock=Date.now}){
   let result={state:'pending',warnings:[],sources:[]},pending,checked=0,version='';
   async function build(profiles,currentVersion){
-    const now=clock(),today=dayKey(now),month=today.slice(0,7),db=getDb();
-    const sessions=await db.collection('sessions').find({createdAt:{$gte:new Date(dayStart(month+'-01')-86400000)}},{projection:{createdAt:1,sessionStartedAt:1,profileId:1,sessionName:1}}).toArray();
+    const now=clock(),today=workday(now),month=today.slice(0,7),db=getDb();
+    const sessions=await db.collection('sessions').find({createdAt:{$gte:new Date(dayStart(month+'-01',WORKDAY_HOUR)-86400000)}},{projection:{createdAt:1,sessionStartedAt:1,profileId:1,sessionName:1}}).toArray();
     const gifts=sessions.length?decodeGiftBuckets(await db.collection('gifts').aggregate(sessionGiftPipeline(sessions.map(s=>s._id)),{allowDiskUse:true,maxTimeMS:60000}).toArray()):[];
-    const live=await db.collection('leaderboard_live').find({source:'helioscontrol',liveSince:{$gte:new Date(dayStart(month+'-01')-86400000)}}).toArray();
+    const live=await db.collection('leaderboard_live').find({source:'helioscontrol',liveSince:{$gte:new Date(dayStart(month+'-01',WORKDAY_HOUR)-86400000)}}).toArray();
     const knownSessionIds=new Set(live.map(s=>String(s.sessionId)));
     const liveSessionIds=new Set(live.filter(s=>liveGroups([s],now).size).map(s=>String(s.sessionId)));
     const warnings=[],sources=[];
@@ -61,16 +82,18 @@ function createSheetReconciliation({getDb,sheets,clock=Date.now}){
       const profile=matchingProfile(profiles,source.group);
       if(!profile){sources.push({group:source.group,state:'profile_unmatched'});continue}
       try{
-        const metadata=await sheets.read({spreadsheetId:source.spreadsheetId,metadata:true});const tab=findMonthTab(metadata,new Date(dayStart(today)));
+        const metadata=await sheets.read({spreadsheetId:source.spreadsheetId,metadata:true});const tab=findMonthTab(metadata,new Date(dayStart(today,WORKDAY_HOUR)));
         if(!tab){sources.push({group:source.group,state:'month_tab_missing'});continue}
         const data=await sheets.read({spreadsheetId:source.spreadsheetId,range:`'${tab.title.replace(/'/g,"''")}'!A1:U${Math.min(100,tab.gridProperties.rowCount)}`});
-        let names=Object.keys(profile.talents||{}),parsed=parseSheet(data.values||[],month,names),groupOnly=false;
-        // Group totals are explicit in the sheet and do not need guessed talent aliases.
-        if(parsed.error==='talent_names_unmatched'){names=[];parsed=parseSheet(data.values||[],month,names);groupOnly=true}
+        const parsed=parseSheet(data.values||[],month,Object.keys(profile.talents||{}));
         if(parsed.error){sources.push({group:source.group,state:parsed.error});continue}
+        // Talents without a recognisable sheet column are left out; group totals are explicit.
+        const names=parsed.names,groupOnly=!names.length;
         const complete=parsed.days.filter(day=>day.date<today&&comparableDay(day.date,profile._id,sessions,knownSessionIds,liveSessionIds));
         const dates=new Set(complete.map(d=>d.date));
-        const ids=new Set(sessions.filter(s=>String(s.profileId)===String(profile._id)&&dates.has(dayKey(sessionStart(s)))).map(s=>String(s._id)));
+        // Every session of those workdays counts: battles and lives on another
+        // group's account are split by member group exactly like the board.
+        const ids=new Set(sessions.filter(s=>dates.has(workday(sessionStart(s)))).map(s=>String(s._id)));
         if(!dates.size){sources.push({group:source.group,state:'awaiting_verified_closed_sessions'});continue}
         const scored=scoreRows(profiles,gifts.filter(g=>ids.has(String(g.sessionId))),sessions);
         const context={period:'monthly',groupId:String(profile._id),group:source.group,dates:[...dates].sort(),checkedAt:new Date(now).toISOString(),basis:'closed-filled-session-days',sheetUrl:`https://docs.google.com/spreadsheets/d/${source.spreadsheetId}/edit#gid=${tab.sheetId}`};
@@ -78,12 +101,12 @@ function createSheetReconciliation({getDb,sheets,clock=Date.now}){
         const groupWarning=discrepancy(group?.value||0,complete.reduce((n,d)=>n+d.group,0),{...context,kind:'group',name:profile.name});if(groupWarning)warnings.push(groupWarning);
         for(const name of names){
           const entered=complete.filter(d=>d.provided[name]);if(!entered.length)continue;
-          const talentDates=new Set(entered.map(d=>d.date));const talentIds=new Set(sessions.filter(s=>String(s.profileId)===String(profile._id)&&talentDates.has(dayKey(sessionStart(s)))).map(s=>String(s._id)));
+          const talentDates=new Set(entered.map(d=>d.date));const talentIds=new Set(sessions.filter(s=>talentDates.has(workday(sessionStart(s)))).map(s=>String(s._id)));
           const subset=talentDates.size===dates.size?scored:scoreRows(profiles,gifts.filter(g=>talentIds.has(String(g.sessionId))),sessions);
           const row=subset.individual.find(e=>e.name===name&&e.groupId===String(profile._id));const warning=discrepancy(row?.value||0,entered.reduce((n,d)=>n+d.individual[name],0),{...context,dates:[...talentDates].sort(),kind:'individual',name});if(warning)warnings.push(warning);
         }
         sources.push({group:source.group,state:groupOnly?'checked_group_only':'checked',dates:[...dates].sort()});
-      }catch{sources.push({group:source.group,state:'read_failed'})}
+      }catch(error){sources.push({group:source.group,state:sheetsReadError(error)})}
     }
     if(await sheets.version()!==currentVersion)return;
     result={state:'checked',warnings,sources,checkedAt:new Date(now).toISOString()};checked=clock();version=currentVersion;
@@ -95,4 +118,4 @@ function createSheetReconciliation({getDb,sheets,clock=Date.now}){
     pending=build(profiles,currentVersion).catch(()=>{result={state:'unavailable',warnings:[],sources:[]};checked=clock();version=currentVersion}).finally(()=>pending=null);return pending;
   }};
 }
-module.exports={normalize,sheetDate,parseSheet,matchingProfile,discrepancy,comparableDay,createSheetReconciliation};
+module.exports={normalize,nameKey,talentColumns,sheetDate,parseSheet,matchingProfile,discrepancy,comparableDay,createSheetReconciliation};
