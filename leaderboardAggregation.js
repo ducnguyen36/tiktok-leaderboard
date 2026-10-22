@@ -280,26 +280,27 @@ function aggregateGroup(gifts, talentToProfile, profileMap, profileNameToId, uid
     }
 
     // A talent streaming alone inside another group's live (e.g. after moving
-    // groups) earns for that live's group: per session, find the strongest group
-    // with at least two talents present and send lone talents' points there.
+    // groups) earns for that live's group: when exactly one group has two or
+    // more talents in a session, lone talents' points go to that host group.
+    // Competitions and lives with several groups always credit each member's
+    // own group.
     const sessionGroups = {};
     for (const gift of gifts) {
         const sid = gift.sessionId ? gift.sessionId.toString() : '';
         if (!sid) continue;
-        const info = sessionGroups[sid] ||= { votes: {}, talents: {} };
+        const info = sessionGroups[sid] ||= { talents: {}, competition: false };
+        if (gift.competitionId) info.competition = true;
         const talents = resolveGiftTalents(gift, uidToTalent);
         for (const t of talents) {
             if (t.name === 'Group' || t.name === 'Unassigned' || profileNameToId[t.name]) continue;
             const pid = resolveToProfile(t);
             if (!pid || !profileTotals[pid]) continue;
             (info.talents[pid] ||= new Set()).add(t.name);
-            info.votes[pid] = (info.votes[pid] || 0) + Math.abs((gift.cost || 0) * (gift.count || 1)) / talents.length;
         }
     }
     for (const info of Object.values(sessionGroups)) {
-        info.host = Object.keys(info.votes)
-            .filter(pid => info.talents[pid].size >= 2)
-            .sort((x, y) => info.votes[y] - info.votes[x])[0] || null;
+        const hosts = Object.keys(info.talents).filter(pid => info.talents[pid].size >= 2);
+        info.host = !info.competition && hosts.length === 1 ? hosts[0] : null;
     }
     function groupAtLive(gift, pid) {
         const info = sessionGroups[gift.sessionId ? gift.sessionId.toString() : ''];

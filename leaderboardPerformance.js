@@ -2,7 +2,7 @@
 
 const { computeMonthlyWindows, computeDailyWindows, MONTHLY_RESET_HOUR } = require('./monthlyWindows');
 const CACHE_VERSION = 2;
-const GIFT_FIELDS = ['receivedTalent', 'receivedTalents', 'receivedTalentUid', 'toMemberUid', 'cost', 'sessionId'];
+const GIFT_FIELDS = ['receivedTalent', 'receivedTalents', 'receivedTalentUid', 'toMemberUid', 'cost', 'sessionId', 'competitionId'];
 
 function createWindowContext(resetHour, freezeUntil, now = new Date()) {
     const { dailyStart, yesterdayStart } = computeDailyWindows(now, resetHour);

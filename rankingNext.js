@@ -27,7 +27,7 @@ function partitionSessions(sessions,now=Date.now(),resetHour=0){
   return{today,yesterday,keys};
 }
 function sessionGiftPipeline(ids){
-  const fields=['receivedTalent','receivedTalents','receivedTalentUid','toMemberUid','cost','sessionId'];
+  const fields=['receivedTalent','receivedTalents','receivedTalentUid','toMemberUid','cost','sessionId','competitionId'];
   return[{$match:{sessionId:{$in:ids}}},{$group:{_id:Object.fromEntries(fields.map(f=>[f,'$'+f])),count:{$sum:1}}},{$project:{_id:0,gift:'$_id',count:1}}];
 }
 function decorateLive(rows,states,now){const groups=liveGroups(states,now);return rows.map(row=>({...row,...(groups.get(String(row.groupId))||{live:false})}))}

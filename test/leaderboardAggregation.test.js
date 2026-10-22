@@ -48,6 +48,31 @@ test("a multi-group live (battle) or another group's profile does not move point
     assert.equal(group['HT - LEVELX'], 70, "LevelX streaming from AURA's profile keeps its live");
 });
 
+test("competition points always go to each member's own group", () => {
+    const m = maps();
+    const gifts = [
+        { sessionId: 'battle', competitionId: 'c1', receivedTalent: 'Wina', receivedTalentUid: '1', cost: 900 },
+        { sessionId: 'battle', competitionId: 'c1', receivedTalent: 'Dori', receivedTalentUid: '3', cost: 900 },
+        { sessionId: 'battle', competitionId: 'c1', receivedTalent: 'Lapin 🐰', cost: 50 },
+        { sessionId: 'battle', competitionId: 'c1', receivedTalent: 'SooAe', receivedTalentUid: '2', cost: 30 },
+    ];
+    const group = totals(A.aggregateGroup(gifts, m.talentToProfile, m.profileMap, m.names, m.uidToTalent, m.uidToProfile, { battle: 'aura' }));
+    assert.deepEqual([group['HT - AURA'], group['HT - LEVELX'], group['HT - VENYXIS']], [1800, 50, 30]);
+});
+
+test('a live with two groups of several talents does not move lone talents', () => {
+    const m = maps();
+    const profiles2 = [
+        { _id: 'aura', name: 'HT - AURA', talents: { Wina: { id: '1' }, Dori: { id: '3' } } },
+        { _id: 'venyxis', name: 'HT - VENYXIS', talents: { SooAe: { id: '2' }, Soya: { id: '4' } } },
+        { _id: 'levelx', name: 'HT - LEVELX', talents: { Lapin: { id: '5' } } },
+    ];
+    const { uidToTalent, uidToProfile } = A.buildUidMaps(profiles2);
+    const gifts = ['1', '3', '2', '4', '5'].map(uid => ({ sessionId: 'joint', receivedTalents: [{ name: 'x', uid }], cost: 10 }));
+    const group = totals(A.aggregateGroup(gifts, A.buildTalentToProfileMap(profiles2), A.buildProfileMap(profiles2), A.buildProfileNameToIdMap(profiles2), uidToTalent, uidToProfile, {}));
+    assert.deepEqual([group['HT - AURA'], group['HT - VENYXIS'], group['HT - LEVELX']], [20, 20, 10]);
+});
+
 test('sessions without a known owner keep talent-based attribution', () => {
     const m = maps();
     const gifts = [
