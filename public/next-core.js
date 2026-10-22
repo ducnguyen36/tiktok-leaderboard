@@ -27,11 +27,17 @@
   const kind=index===5?'individual':'group',rows=config.lastMonth?history?.[kind]:raw?.[kind]?.[yesterday?'yesterday':'daily'];
   return C.filtered(rows,config,raw?.locations||[]).filter(e=>kind!=='individual'||config.talents[e.name]!==false);
  }
- return{normalize,migrate,panels,warningFor,sheetProblems,isLive,selectRows};
+ // Smart TV browsers (Tizen, webOS, Android TV…) get simplified effects.
+ const TV_AGENT=/SMART-?TV|SmartTV|Tizen|Web0S|webOS|NetCast|BRAVIA|HbbTV|Android TV|GoogleTV|AFT[A-Z]|CrKey|Roku|AppleTV|VIDAA|NETTV|Opera TV|TV Safari|; ?TV[;)]/i;
+ function isTvDevice(userAgent,override){if(override==='1')return true;if(override==='0')return false;return TV_AGENT.test(userAgent||'')}
+ return{normalize,migrate,panels,warningFor,sheetProblems,isLive,isTvDevice,selectRows};
 });
 /* Original UI and Settings are reused, with only feature-specific row decorations. */
 if(typeof window==='object'){
  const N=window.HeliosNext,text=(config,vi,en)=>config.language==='vi'?vi:en;
+ // ?tv=1 / ?tv=0 forces the TV mode on a device and is remembered there.
+ let tvOverride=null;try{const forced=new URLSearchParams(location.search).get('tv');if(forced==='1'||forced==='0')localStorage.setItem('helios_tv_mode',forced);else if(forced==='auto')localStorage.removeItem('helios_tv_mode');tvOverride=localStorage.getItem('helios_tv_mode')}catch{}
+ document.documentElement.classList.toggle('tv-device',N.isTvDevice(navigator.userAgent,tvOverride));
  N.decorateRow=(row,avatar,name,entry,column,raw,config)=>{
   if(!(column>=5&&config.lastMonth)&&N.isLive(entry)){
    avatar.classList.add('live');avatar.title=text(config,'Đang live qua HeliosControl','Live through HeliosControl');

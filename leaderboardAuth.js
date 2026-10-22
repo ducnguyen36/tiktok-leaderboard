@@ -37,7 +37,8 @@ function configFromEnv() {
   }
   return { publicOrigin: process.env.PUBLIC_ORIGIN, googleClientId: process.env.GOOGLE_CLIENT_ID,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET, sheetsTokenEncryptionKey: sheetsKey,
-    adminEmails: (process.env.ADMIN_EMAILS ?? DEFAULT_ADMIN_EMAILS).split(',') };
+    // The owner accounts are always administrators; ADMIN_EMAILS can add more.
+    adminEmails: [...DEFAULT_ADMIN_EMAILS.split(','), ...(process.env.ADMIN_EMAILS || '').split(',')] };
 }
 function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, sheetsClientFactory, store = createAuthStore(getDb), now = () => new Date(), streamCheckMs = 5000 }) {
   let origin;

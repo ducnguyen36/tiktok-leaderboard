@@ -45,3 +45,12 @@ test('new service attributes a session spanning reset to yesterday and excludes 
  const midnight=await service.get(false,{resetHour:0});assert.equal(midnight.data.group.daily[0].value,300);assert.equal(midnight.data.dailyPeriod.resetHour,0);assert.equal(midnight.data.individual.monthly[0].value,999);
  await assert.rejects(service.get(false,{resetHour:24}),RangeError);await assert.rejects(service.get(false,{freezeUntil:'24:00'}),RangeError);
 });
+test('smart TV browsers get the simple live mark; phones and computers keep the animation',()=>{
+ assert.equal(N.isTvDevice('Mozilla/5.0 (SMART-TV; Linux; Tizen 6.0) AppleWebKit/537.36 SamsungBrowser/4.0 TV Safari/537.36'),true);
+ assert.equal(N.isTvDevice('Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 Chrome/79.0 Safari/537.36'),true);
+ assert.equal(N.isTvDevice('Mozilla/5.0 (Linux; Android 9; BRAVIA 4K VH2) AppleWebKit/537.36 Chrome/94.0 Safari/537.36'),true);
+ assert.equal(N.isTvDevice('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148'),false);
+ assert.equal(N.isTvDevice('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0 Safari/537.36'),false);
+ assert.equal(N.isTvDevice('Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36'),false);
+ assert.equal(N.isTvDevice('Mozilla/5.0 (Windows NT 10.0)', '1'),true);assert.equal(N.isTvDevice('Mozilla/5.0 (SMART-TV; Tizen)', '0'),false);
+});

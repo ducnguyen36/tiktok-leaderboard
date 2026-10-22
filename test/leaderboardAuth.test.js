@@ -218,6 +218,14 @@ test('configured OAuth defaults to the three confirmed administrators only',asyn
  for(const email of ['ducnguyen36@gmail.com','heliostalentofficial@gmail.com','kimlinh727@gmail.com']){const b=h.browser();assert.equal((await b.login({email})).response.status,302);assert.equal((await b.status()).admin,true);}
  assert.equal((await h.browser().login({email:'other@gmail.com'})).response.status,403);
 });
+test('ADMIN_EMAILS adds administrators without removing the owner accounts',async t=>{
+ const keys=['PUBLIC_ORIGIN','GOOGLE_CLIENT_ID','GOOGLE_CLIENT_SECRET','ADMIN_EMAILS'], previous=Object.fromEntries(keys.map(key=>[key,process.env[key]]));
+ t.after(()=>{for(const key of keys){if(previous[key]===undefined)delete process.env[key];else process.env[key]=previous[key];}});
+ Object.assign(process.env,{PUBLIC_ORIGIN:'http://localhost',GOOGLE_CLIENT_ID:'test-client',GOOGLE_CLIENT_SECRET:'test-secret',ADMIN_EMAILS:'ducnguyen36@gmail.com,extra@gmail.com'});
+ const h=await harness(t,{fromEnvironment:true});
+ for(const email of ['kimlinh727@gmail.com','heliostalentofficial@gmail.com','extra@gmail.com']){const b=h.browser();assert.equal((await b.login({email})).response.status,302);assert.equal((await b.status()).admin,true);}
+ assert.equal((await h.browser().login({email:'other@gmail.com'})).response.status,403);
+});
 test('actual server locks every private route and serves only a setup shell without credentials',async t=>{
  const reserve=net.createServer();await new Promise(resolve=>reserve.listen(0,'127.0.0.1',resolve));const port=reserve.address().port;await new Promise(resolve=>reserve.close(resolve));
  const child=spawn(process.execPath,['server.js'],{cwd:path.join(__dirname,'..'),env:{...process.env,LEADERBOARD_ACCESS_CONTROL:'true',PORT:String(port),MONGODB_URI:'mongodb://127.0.0.1:1',GOOGLE_CLIENT_ID:'',GOOGLE_CLIENT_SECRET:'',PUBLIC_ORIGIN:'',ADMIN_EMAILS:'',NODE_TLS_REJECT_UNAUTHORIZED:'1'},stdio:'ignore'});t.after(()=>child.kill());

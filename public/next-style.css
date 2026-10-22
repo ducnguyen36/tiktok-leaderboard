@@ -439,11 +439,16 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,.b
 @media (min-width:951px), (min-width:768px) and (min-height:501px){
  .tv[data-studio="true"] .next-side-column{grid-area:1/4/4/5}
 }
-/* TV browsers draw outline as a square and lack flex gap, so the live mark uses
-   only box-shadow rings and a solid colour blink, which every engine renders. */
-.avatar.live{position:relative;overflow:visible;border-color:white!important;box-shadow:0 0 0 2px #f536a2!important}
-.equalizer{position:absolute;bottom:0;right:0;width:30%;height:30%;min-width:9px;min-height:9px;border-radius:50%;background:#f536a2;box-shadow:0 0 0 2px white;-webkit-animation:next-live-blink 1.2s ease-in-out infinite;animation:next-live-blink 1.2s ease-in-out infinite}
-.equalizer i{display:none}
+.avatar.live{position:relative;overflow:visible;border:2px solid white!important;outline:2px solid #f536a2;outline-offset:1px}
+.equalizer{position:absolute;bottom:-4px;right:-5px;width:18px;height:16px;border:1px solid white;border-radius:4px;background:#f536a2;display:flex;align-items:flex-end;justify-content:center;gap:2px;padding:3px}
+.equalizer i{display:block;width:2px;height:100%;background:white;transform-origin:bottom;animation:next-equalize .8s ease-in-out infinite alternate}
+.equalizer i:nth-child(2){animation-delay:-.3s}.equalizer i:nth-child(3){animation-delay:-.6s}
+@keyframes next-equalize{from{transform:scaleY(.25)}to{transform:scaleY(1)}}
+/* TV browsers draw outline as a square and lack flex gap, so on TVs the live mark
+   uses only box-shadow rings and a solid colour blink, which every engine renders. */
+.tv-device .avatar.live{border-color:white!important;outline:0;box-shadow:0 0 0 2px #f536a2!important}
+.tv-device .equalizer{bottom:0;right:0;width:30%;height:30%;min-width:9px;min-height:9px;padding:0;border:0;border-radius:50%;display:block;box-shadow:0 0 0 2px white;-webkit-animation:next-live-blink 1.2s ease-in-out infinite;animation:next-live-blink 1.2s ease-in-out infinite}
+.tv-device .equalizer i{display:none}
 @-webkit-keyframes next-live-blink{50%{background:#ffb3d9}}@keyframes next-live-blink{50%{background:#ffb3d9}}
 .identity.has-warning{position:relative}.identity.has-warning .name{padding-right:20px}
 .warning{position:absolute;right:0;top:0;width:18px;height:18px;padding:0;border:1px solid #e5ba63;border-radius:50%;color:#ffce65;background:#49391a;font:900 12px Arial;cursor:pointer}
@@ -456,5 +461,5 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,.b
  .next-side-column .all-track .row{height:64px}.next-sheet-status{position:static;display:block;grid-column:1/-1;max-width:100%;padding:5px 10px}
  .tv[data-layout="podium"] .board:nth-child(-n+4) .avatar.live{overflow:visible}
 }
-@media(prefers-reduced-motion:reduce){.equalizer{-webkit-animation:none;animation:none}}
+@media(prefers-reduced-motion:reduce){.equalizer i{animation:none}.equalizer i:nth-child(2){transform:scaleY(.5)}.tv-device .equalizer{-webkit-animation:none;animation:none}}
 .sheet-alert{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:40;max-width:60vw;padding:6px 12px;border-radius:8px;background:#b3261e;color:#fff;font:600 13px/1.35 system-ui,sans-serif;box-shadow:0 2px 8px #0006;pointer-events:none}.sheet-alert[hidden]{display:none}
