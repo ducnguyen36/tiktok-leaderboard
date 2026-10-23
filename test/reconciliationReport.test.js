@@ -68,3 +68,15 @@ test('a resolved issue is reported once against the previous report', async () =
     assert.ok(second.changes.resolved.includes(id));
     assert.ok(!second.changes.newIssues.includes(id));
 });
+
+test('the 09:00 run replaces a report made earlier the same day, once', async () => {
+    const { createDailyReport } = require('../reconciliationReport');
+    const docs = new Map([['2026-10-24', { _id: '2026-10-24', createdAt: '2026-10-23T18:30:00.000Z' }]]); // 01:30 VN
+    let runs = 0, time = Date.parse('2026-10-24T08:59:00+07:00');
+    const fakeDb = { collection: () => ({ findOne: async q => docs.get(q._id) || null }) };
+    const daily = createDailyReport({ getDb: () => fakeDb, sheets: {}, readProfiles: async () => [], current: async () => ({}), clock: () => time });
+    daily.run = async () => { runs++; docs.set('2026-10-24', { _id: '2026-10-24', createdAt: new Date(time).toISOString() }); };
+    await daily.runIfDue(); assert.equal(runs, 0, 'not before 09:00');
+    time = Date.parse('2026-10-24T09:05:00+07:00'); await daily.runIfDue(); assert.equal(runs, 1);
+    time = Date.parse('2026-10-24T09:15:00+07:00'); await daily.runIfDue(); assert.equal(runs, 1, 'only once a day');
+});

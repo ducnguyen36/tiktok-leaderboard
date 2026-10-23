@@ -199,7 +199,11 @@ function createDailyReport({ getDb, sheets, readProfiles, current, clock = Date.
     async runIfDue() {
       const db = getDb(); if (!db) return null;
       const now = clock(), hour = new Date(now + VN_OFFSET).getUTCHours();
-      if (hour < runHour || await db.collection(COLLECTION).findOne({ _id: calendarDate(now) }, { projection: { _id: 1 } })) return null;
+      if (hour < runHour) return null;
+      // A report made earlier today before runHour (e.g. on demand at night) is
+      // replaced by the scheduled run.
+      const existing = await db.collection(COLLECTION).findOne({ _id: calendarDate(now) }, { projection: { createdAt: 1 } });
+      if (existing && new Date(Date.parse(existing.createdAt) + VN_OFFSET).getUTCHours() >= runHour) return null;
       return this.run();
     },
     async get(date) { const db = getDb(); if (!db) return null; return date ? db.collection(COLLECTION).findOne({ _id: date }) : db.collection(COLLECTION).find().sort({ _id: -1 }).limit(1).next(); },

@@ -1129,7 +1129,8 @@ app.get('/api/reconciliation/report',async(req,res)=>{
         const report=req.query.refresh==='1'?await dailyReport.run():await dailyReport.get(req.query.date);
         if (!report) return res.status(404).json({status:'error',message:'no_report'});
         res.set('Cache-Control','private, no-store');
-        if (req.query.format==='md') return res.type('text/markdown; charset=utf-8').send(renderMarkdown(report));
+        // text/plain so browsers show it instead of downloading; the content is Markdown.
+        if (req.query.format==='md') return res.type('text/plain; charset=utf-8').send(renderMarkdown(report));
         res.json({status:'ok',report});
     } catch (error) { res.status(503).json({status:'error',message:'report_unavailable'}); }
 });
