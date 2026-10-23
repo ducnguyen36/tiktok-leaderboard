@@ -15,7 +15,7 @@ const WORKDAY_HOUR = 6, DAY = 86400000, VN_OFFSET = 7 * 3600000;
 const workday = value => dayKey(value, WORKDAY_HOUR);
 const STATUS = Object.freeze({ exact: 'khop_chinh_xac', explained: 'lech_da_giai_thich', unexplained: 'lech_chua_giai_thich', pending: 'cho_du_lieu' });
 const STATUS_LABEL = { khop_chinh_xac: 'Khớp chính xác', lech_da_giai_thich: 'Lệch đã giải thích', lech_chua_giai_thich: 'Lệch chưa giải thích', cho_du_lieu: 'Chờ / thiếu dữ liệu' };
-const DEFAULT_GROUPS = ['LEVEL X', 'VENYXIS', 'DPM']; // pilot groups (plan, phase 2)
+const DEFAULT_GROUPS = GROUP_SHEETS.map(s => s.group); // all eight group sheets
 const SMALL_DIFF = 100; // markdown only: below this, unexplained rows go to a compact table
 const calendarDate = time => new Date(time + VN_OFFSET).toISOString().slice(0, 10);
 const round = value => Math.round(Number(value) || 0);

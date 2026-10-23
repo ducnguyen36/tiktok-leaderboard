@@ -1121,7 +1121,8 @@ const sheetReconciliation=createSheetReconciliation({getDb:()=>db,sheets:leaderb
 const nextRanking=createNextRanking({getDb:()=>db,current:getLeaderboardResult,readProfiles:readProfilesFromDb,readLocations:readLocationsFromDb,avatar:resolveAvatarFast,reconcile:sheetReconciliation});
 // Daily read-only reconciliation report (admin only). Built once a day from 09:00 Vietnam time.
 const dailyReport=createDailyReport({getDb:()=>db,sheets:leaderboardAuth.sheets,readProfiles:readProfilesFromDb,current:getLeaderboardResult,appVersion:process.env.APP_VERSION||'dev',
-    groups:(process.env.RECON_REPORT_GROUPS||'LEVEL X,VENYXIS,DPM').split(',').map(s=>s.trim()).filter(Boolean)});
+    // RECON_REPORT_GROUPS (comma list) limits the report; default: all eight groups.
+    groups:process.env.RECON_REPORT_GROUPS?process.env.RECON_REPORT_GROUPS.split(',').map(s=>s.trim()).filter(Boolean):undefined});
 app.get('/api/reconciliation/report',async(req,res)=>{
     try {
         if (accessControlEnabled && !await leaderboardAuth.isAdmin(req)) return res.status(403).json({status:'error',message:'admin_required'});
