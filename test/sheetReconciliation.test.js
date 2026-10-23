@@ -20,6 +20,16 @@ test('sheet dates handle serials and wrong-month copies are rejected',()=>{
  assert.equal(sheetDate(46296),'2026-10-01');assert.equal(sheetDate('1/10/2026'),'2026-10-01');
  assert.equal(parseSheet([headers,[],[46266,100,200,0,300,300]],'2026-10',['Alice','Bob']).error,'date_month_mismatch');
 });
+test('Chung already spread into the talent cells is not added a second time',()=>{
+ // DPM 03/10: cells include 1.222/3 each; TỔNG excludes Chung, TOTAL includes it.
+ const dpm=['Date','Moon','Lily','Chanee','MC','KC chung','Tổng','TOTAL'];
+ const a=parseSheet([dpm,[],[46298,26898.33,42131.33,22965.33,null,1222,90774,91995]],'2026-10',['Moon','Lily','Chanee']);
+ assert.equal(Math.round(a.days[0].individual.Moon),26898);
+ // VVG 04/10: a penalty in Chung already spread into the cells (TỔNG = cells).
+ const vvg=['Date','Yiin','Ariel','Chung','Total','TỔNG'];
+ const b=parseSheet([vvg,[],[46299,7147.6,-2742.4,-25497,0,4405.2]],'2026-10',['Yiin','Ariel']);
+ assert.equal(b.days[0].individual.Yiin,7147.6);
+});
 test('two shifts with merged date aggregate once; common points split without double counting',()=>{
  const parsed=parseSheet([headers,[],[46296,100,200,20,320,300],[null,50,60,10,120,110],[46297,null,null,0,null,0]],'2026-10',['Alice','Bob']);
  assert.equal(parsed.days.length,1);assert.equal(parsed.days[0].group,440);assert.equal(parsed.days[0].individual.Alice,165);assert.equal(parsed.days[0].individual.Bob,275);

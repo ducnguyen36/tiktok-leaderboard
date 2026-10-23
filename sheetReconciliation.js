@@ -44,10 +44,16 @@ function parseSheet(values,month,talentNames){
     const cells=row.slice(1,common).filter(v=>typeof v==='number');
     const group=typeof row[sum]==='number'?row[sum]:typeof row[total]==='number'?row[total]+shared:cells.length?cells.reduce((n,v)=>n+v,0)+shared:null;
     if(group===null||!Number.isFinite(group))continue;
+    // Most sheets already spread the shared (Chung) points into each talent's cell
+    // (e.g. DPM 26.898,33 = own + 1.222/3). Add a share only when the cells plus
+    // Chung make up the row total and the cells alone do not.
+    const cellSum=cells.reduce((n,v)=>n+v,0),tolerance=Math.max(2,cells.length);
+    const addShare=shared!==0&&Math.abs(cellSum+shared-group)<=tolerance&&Math.abs(cellSum-group)>tolerance;
+    const share=addShare?Math.floor(shared/talentNames.length):0;
     const entry=days.get(date)||{date,group:0,individual:Object.fromEntries(names.map(n=>[n,0])),provided:Object.fromEntries(names.map(n=>[n,true]))};
     entry.group+=group;
     // A text value in a score cell (not OFF) makes that talent's day unverifiable.
-    for(const c of columns){entry.individual[c.name]+=(typeof row[c.index]==='number'?row[c.index]:0)+Math.floor(shared/talentNames.length);entry.provided[c.name]=entry.provided[c.name]&&(typeof row[c.index]==='number'||normalize(row[c.index])==='OFF')}
+    for(const c of columns){entry.individual[c.name]+=(typeof row[c.index]==='number'?row[c.index]:0)+share;entry.provided[c.name]=entry.provided[c.name]&&(typeof row[c.index]==='number'||normalize(row[c.index])==='OFF')}
     days.set(date,entry);
   }
   if(!days.size&&outside)return{error:'date_month_mismatch',days:[]};
