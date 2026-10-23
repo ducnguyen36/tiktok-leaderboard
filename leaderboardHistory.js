@@ -38,7 +38,9 @@ function historyPeriodForMonth(month, now = new Date()) {
         month,
         start: start.toISOString(),
         end: end.toISOString(),
-        complete: now.getTime() >= end.getTime(),
+        // The month's last night shift may run until 14:00 on the 1st (06:00 workday
+        // edge + 8h, see leaderboardPerformance inMonth), so publish after that.
+        complete: now.getTime() >= end.getTime() + 7 * 3600000,
     };
 }
 

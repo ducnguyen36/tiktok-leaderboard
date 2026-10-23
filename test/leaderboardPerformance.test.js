@@ -154,7 +154,8 @@ test('window buckets keep exact exclusive month end and daily boundary membershi
     assert.equal(total('yesterday'), 4);
     assert.equal(total('monthly'), 4);
     const pipeline = perf.buildGiftBucketPipeline({ windows, sessionIds: ['s'] });
-    assert.deepEqual(pipeline[0].$match, { timeStamp: { $gte: 100 }, sessionId: { $in: ['s'] } });
+    // The month start reaches back one hour for sessions that start 06:00–07:00 on the 1st.
+    assert.deepEqual(pipeline[0].$match, { timeStamp: { $gte: 100 - 3600000 }, sessionId: { $in: ['s'] } });
     assert.deepEqual(perf.buildGiftBucketPipeline({ start: 100, end: 250 })[0].$match, { timeStamp: { $gte: 100, $lt: 250 } });
     assert.throws(() => perf.decodeGiftBuckets([{ gift: { cost: '5' }, count: 2 }]), /Non-numeric/);
 });
@@ -237,4 +238,31 @@ test('unexpected stream close invalidates once while intentional replaced-stream
     active = new EventEmitter();
     replaced.emit('close');
     assert.equal(gaps, 1);
+});
+
+test('month edges follow the 06:00 workday: night shifts stay with the month they started in', () => {
+    const at = s => Date.parse(s);
+    const start = at('2026-10-01T07:00:00+07:00'), end = at('2026-11-01T07:00:00+07:00');
+    const sid = time => Math.floor(at(time) / 1000).toString(16).padStart(8, '0') + '0000000000000000';
+    // Night shift that started 00:39 on 1 Oct belongs to September, even after 07:00.
+    assert.equal(perf.inMonth(at('2026-10-01T07:12:00+07:00'), perf.sessionStartOf(sid('2026-10-01T00:39:13+07:00')), start, end), false);
+    // A September 30 evening shift (22:30) too.
+    assert.equal(perf.inMonth(at('2026-10-01T07:30:00+07:00'), perf.sessionStartOf(sid('2026-09-30T22:30:00+07:00')), start, end), false);
+    // The 1 Oct day shift is October, including a session that started 06:45.
+    assert.equal(perf.inMonth(at('2026-10-01T08:00:00+07:00'), perf.sessionStartOf(sid('2026-10-01T07:04:00+07:00')), start, end), true);
+    assert.equal(perf.inMonth(at('2026-10-01T06:50:00+07:00'), perf.sessionStartOf(sid('2026-10-01T06:45:00+07:00')), start, end), true);
+    // The 31 Oct night shift (starts 01:00 on 1 Nov) is October, until 14:00.
+    assert.equal(perf.inMonth(at('2026-11-01T09:00:00+07:00'), perf.sessionStartOf(sid('2026-11-01T01:00:00+07:00')), start, end), true);
+    assert.equal(perf.inMonth(at('2026-11-01T06:30:00+07:00'), perf.sessionStartOf(sid('2026-11-01T06:10:00+07:00')), start, end), false);
+    // Mid-month and unknown sessions use the plain window.
+    assert.equal(perf.inMonth(at('2026-10-15T03:00:00+07:00'), perf.sessionStartOf(sid('2026-10-15T00:30:00+07:00')), start, end), true);
+    assert.equal(perf.inMonth(at('2026-10-01T07:12:00+07:00'), null, start, end), true);
+    // A reused session from the previous morning is not mistaken for a night shift.
+    assert.equal(perf.inMonth(at('2026-10-01T08:00:00+07:00'), perf.sessionStartOf(sid('2026-09-30T07:00:00+07:00')), start, end), true);
+});
+test('the MongoDB month expression reads the session start variable', () => {
+    const windows = { daily: 300, yesterday: 200, monthly: 100, monthlyEnd: null };
+    const text = JSON.stringify(perf.buildGiftBucketPipeline({ windows })[1].$group._id.monthly);
+    assert.match(text, /"\$\$sessionStart"/);
+    assert.doesNotMatch(text, /"\$sessionStart"/);
 });

@@ -52,7 +52,7 @@ function completedSnapshot(month, data = { individual: [], group: [] }) {
     };
 }
 
-test('history period stays provisional until exactly 07:00 Vietnam time on day 1', () => {
+test('history period stays provisional until 14:00 Vietnam time on day 1 (last night shift)', () => {
     const beforeClose = historyPeriodForMonth('2026-08', new Date('2026-08-31T23:59:59.999Z'));
     assert.deepEqual(beforeClose, {
         month: '2026-08',
@@ -61,7 +61,8 @@ test('history period stays provisional until exactly 07:00 Vietnam time on day 1
         complete: false,
     });
 
-    const atClose = historyPeriodForMonth('2026-08', new Date('2026-09-01T00:00:00.000Z'));
+    assert.equal(historyPeriodForMonth('2026-08', new Date('2026-09-01T06:59:59.999Z')).complete, false);
+    const atClose = historyPeriodForMonth('2026-08', new Date('2026-09-01T07:00:00.000Z'));
     assert.equal(atClose.complete, true);
 });
 
@@ -102,7 +103,8 @@ test('requested history month rejects malformed and later-than-previous-calendar
 
 test('latest closed month flips at the exact Vietnam closing boundary', () => {
     assert.equal(latestClosedHistoryMonth(new Date('2026-08-31T23:59:59.999Z')), '2026-07');
-    assert.equal(latestClosedHistoryMonth(new Date('2026-09-01T00:00:00.000Z')), '2026-08');
+    assert.equal(latestClosedHistoryMonth(new Date('2026-09-01T00:00:00.000Z')), '2026-07');
+    assert.equal(latestClosedHistoryMonth(new Date('2026-09-01T07:00:00.000Z')), '2026-08');
 });
 
 test('archive id deterministically includes version, month, timezone and exact boundaries', () => {
@@ -257,12 +259,12 @@ test('a closing-boundary request does not share an older provisional in-flight r
             }
             return { individual: [], group: [] };
         },
-        clock: () => new Date('2026-09-01T00:00:01.000Z'),
+        clock: () => new Date('2026-09-01T07:00:01.000Z'),
     });
 
-    const provisional = service.get('2026-08', new Date('2026-08-31T23:59:59.999Z'));
+    const provisional = service.get('2026-08', new Date('2026-09-01T06:59:59.999Z'));
     await new Promise(resolve => setImmediate(resolve));
-    const completedPromise = service.get('2026-08', new Date('2026-09-01T00:00:00.000Z'));
+    const completedPromise = service.get('2026-08', new Date('2026-09-01T07:00:00.000Z'));
     await new Promise(resolve => setImmediate(resolve));
 
     assert.equal(builds, 2);

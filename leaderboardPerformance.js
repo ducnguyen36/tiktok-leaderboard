@@ -20,10 +20,49 @@ function createWindowContext(resetHour, freezeUntil, now = new Date()) {
         key: JSON.stringify([CACHE_VERSION, resetHour, freezeUntil, frozen, windows]) };
 }
 
-function windowFlags(timeStamp, windows) {
+// Month edges follow the sheets' 06:00 workday. The month window starts at 07:00
+// on the 1st by gift time, but a night shift that began before 06:00 on the 1st
+// (from 22:00 the evening before) belongs to the previous month even when its
+// gifts arrive after 07:00, and a session that began 06:00–07:00 belongs to the
+// new month. The session start is read from the session's ObjectId time, so only
+// gifts near the edges are affected and nothing extra is queried.
+const HOUR = 3600000, NIGHT_SHIFT = 8 * HOUR;
+function monthEdges(start, end) {
+    return { s07: start, s06: start - HOUR, e07: end ?? null, e06: end == null ? null : end - HOUR };
+}
+function inMonth(timeStamp, sessionStart, start, end) {
+    const { s07, s06, e07, e06 } = monthEdges(start, end);
+    let inside = timeStamp >= s07 && (e07 === null || timeStamp < e07);
+    if (sessionStart === null || sessionStart === undefined || !Number.isFinite(sessionStart)) return inside;
+    if (inside && sessionStart >= s06 - NIGHT_SHIFT && sessionStart < s06 && timeStamp < s06 + NIGHT_SHIFT) inside = false;
+    if (inside && e06 !== null && sessionStart >= e06 && timeStamp >= e06) inside = false;
+    if (!inside && timeStamp >= s06 && timeStamp < s07 && sessionStart >= s06 && (e06 === null || sessionStart < e06)) inside = true;
+    if (!inside && e07 !== null && timeStamp >= e07 && timeStamp < e06 + NIGHT_SHIFT && sessionStart >= e06 - NIGHT_SHIFT && sessionStart < e06) inside = true;
+    return inside;
+}
+function inMonthExpr(start, end) {
+    const { s07, s06, e07, e06 } = monthEdges(start, end);
+    const ts = '$timeStamp', ss = '$$sessionStart';
+    const and = (...xs) => ({ $and: xs }), gte = (a, b) => ({ $gte: [a, b] }), lt = (a, b) => ({ $lt: [a, b] });
+    const window = and(gte(ts, s07), ...(e07 === null ? [] : [lt(ts, e07)]));
+    const known = { $ne: [ss, null] };
+    const prevTail = and(known, gte(ss, s06 - NIGHT_SHIFT), lt(ss, s06), lt(ts, s06 + NIGHT_SHIFT));
+    const nextHead = e06 === null ? false : and(known, gte(ss, e06), gte(ts, e06));
+    const ownHead = and(known, gte(ts, s06), lt(ts, s07), gte(ss, s06), ...(e06 === null ? [] : [lt(ss, e06)]));
+    const ownTail = e07 === null ? false : and(known, gte(ts, e07), lt(ts, e06 + NIGHT_SHIFT), gte(ss, e06 - NIGHT_SHIFT), lt(ss, e06));
+    return { $let: { vars: { sessionStart: { $convert: { input: { $convert: { input: '$sessionId', to: 'date', onError: null, onNull: null } }, to: 'long', onError: null, onNull: null } } },
+        in: { $or: [and(window, { $not: [prevTail] }, { $not: [nextHead] }), ownHead, ownTail] } } };
+}
+function sessionStartOf(sessionId) {
+    if (sessionId && typeof sessionId.getTimestamp === 'function') return +sessionId.getTimestamp();
+    const hex = typeof sessionId === 'string' && /^[0-9a-f]{24}$/i.test(sessionId) ? sessionId : null;
+    return hex ? parseInt(hex.slice(0, 8), 16) * 1000 : null;
+}
+
+function windowFlags(timeStamp, windows, sessionId) {
     if (!windows) return {};
     return { daily: timeStamp >= windows.daily, yesterday: timeStamp >= windows.yesterday && timeStamp < windows.daily,
-        monthly: timeStamp >= windows.monthly && (windows.monthlyEnd === null || timeStamp < windows.monthlyEnd) };
+        monthly: inMonth(timeStamp, sessionStartOf(sessionId), windows.monthly, windows.monthlyEnd) };
 }
 
 // In-memory equivalent for differential fixtures. Production groups in MongoDB.
@@ -32,7 +71,7 @@ function compactGifts(gifts, windows) {
     for (const gift of gifts) {
         const entry = Object.fromEntries(GIFT_FIELDS.filter(key => gift[key] !== undefined).map(key => [key, gift[key]]));
         entry.manual = gift.user?.userId === 'Manual';
-        Object.assign(entry, windowFlags(gift.timeStamp, windows));
+        Object.assign(entry, windowFlags(gift.timeStamp, windows, gift.sessionId));
         const key = JSON.stringify(entry);
         if (!buckets.has(key)) buckets.set(key, { ...entry, count: 0 });
         buckets.get(key).count++;
@@ -40,10 +79,11 @@ function compactGifts(gifts, windows) {
     return [...buckets.values()];
 }
 
-function buildGiftBucketPipeline({ windows, start, end, sessionIds } = {}) {
-    const minimum = start ?? Math.min(windows.daily, windows.yesterday, windows.monthly);
+// month: true treats start/end as a month (history) and applies the workday edges.
+function buildGiftBucketPipeline({ windows, start, end, sessionIds, month = false } = {}) {
+    const minimum = start !== undefined && start !== null ? start - (month ? HOUR : 0) : Math.min(windows.daily, windows.yesterday, windows.monthly - HOUR);
     const match = { timeStamp: { $gte: minimum } };
-    if (end !== undefined && end !== null) match.timeStamp.$lt = end;
+    if (end !== undefined && end !== null) match.timeStamp.$lt = month ? end - HOUR + NIGHT_SHIFT : end;
     if (sessionIds) match.sessionId = { $in: sessionIds };
     const identity = Object.fromEntries(GIFT_FIELDS.map(field => [field, `$${field}`]));
     identity.manual = { $eq: ['$user.userId', 'Manual'] };
@@ -51,9 +91,10 @@ function buildGiftBucketPipeline({ windows, start, end, sessionIds } = {}) {
     if (windows) {
         identity.daily = { $gte: ['$timeStamp', windows.daily] };
         identity.yesterday = { $and: [{ $gte: ['$timeStamp', windows.yesterday] }, { $lt: ['$timeStamp', windows.daily] }] };
-        identity.monthly = { $and: [{ $gte: ['$timeStamp', windows.monthly] }, ...(windows.monthlyEnd === null ? [] : [{ $lt: ['$timeStamp', windows.monthlyEnd] }])] };
+        identity.monthly = inMonthExpr(windows.monthly, windows.monthlyEnd);
     }
-    return [{ $match: match }, { $group: { _id: identity, count: { $sum: 1 } } }, { $project: { _id: 0, gift: '$_id', count: 1 } }];
+    const monthFilter = month ? [{ $match: { $expr: inMonthExpr(start, end ?? null) } }] : [];
+    return [{ $match: match }, ...monthFilter, { $group: { _id: identity, count: { $sum: 1 } } }, { $project: { _id: 0, gift: '$_id', count: 1 } }];
 }
 
 function decodeGiftBuckets(documents) {
@@ -193,4 +234,4 @@ function observeStreamCompletion(stream, isActive, onGap) {
     stream.on('end', completed);
 }
 
-module.exports = { CACHE_VERSION, createWindowContext, compactGifts, buildGiftBucketPipeline, decodeGiftBuckets, createLeaderboardCache, createSessionBucketStore, observeStreamCompletion };
+module.exports = { inMonth, sessionStartOf, CACHE_VERSION, createWindowContext, compactGifts, buildGiftBucketPipeline, decodeGiftBuckets, createLeaderboardCache, createSessionBucketStore, observeStreamCompletion };

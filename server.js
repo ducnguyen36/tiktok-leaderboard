@@ -845,7 +845,7 @@ async function buildHistoricalLeaderboardData(period) {
     const sessionProfileMap = await readSessionProfileMapFromDb();
 
     const allGifts = decodeGiftBuckets(await db.collection('gifts').aggregate(
-        buildGiftBucketPipeline({ start: Date.parse(period.start), end: Date.parse(period.end) }),
+        buildGiftBucketPipeline({ start: Date.parse(period.start), end: Date.parse(period.end), month: true }),
         { allowDiskUse: true, maxTimeMS: 60000 }
     ).toArray());
     const individualGifts = allGifts; // Manual adjustments count for individual rankings too.
