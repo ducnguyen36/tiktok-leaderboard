@@ -79,3 +79,14 @@ test('a restart mid-shift keeps the new session on the shift day',()=>{
  const keys=partitionSessions(sessions,Date.parse('2026-10-15T09:00:00+07:00'),6).keys;
  assert.deepEqual(['a','b','c','d'].map(k=>keys.get(k)),['2026-10-12','2026-10-12','2026-10-12','2026-10-13']);
 });
+test('sessions re-saved days later or far apart are never chained into one shift',()=>{
+ const{shiftStarts}=require('../rankingNext');
+ const s=[{_id:'a',profileId:'k',createdAt:'2026-10-05T07:00:00+07:00',updatedAt:'2026-10-09T10:00:00+07:00'},
+  {_id:'b',profileId:'k',createdAt:'2026-10-07T07:10:00+07:00',updatedAt:'2026-10-07T13:00:00+07:00'},
+  {_id:'c',profileId:'k',createdAt:'2026-10-07T13:20:00+07:00',updatedAt:'2026-10-07T23:00:00+07:00'},
+  {_id:'d',profileId:'k',createdAt:'2026-10-07T23:20:00+07:00',updatedAt:'2026-10-08T03:00:00+07:00'}];
+ const st=shiftStarts(s);
+ assert.equal(st.get('b'),Date.parse('2026-10-07T07:10:00+07:00'),'stale last-save of 05/10 does not swallow 07/10');
+ assert.equal(st.get('c'),Date.parse('2026-10-07T07:10:00+07:00'),'restart 20 minutes later is the same shift');
+ assert.equal(st.get('d'),Date.parse('2026-10-07T23:20:00+07:00'),'a shift is at most 14 hours');
+});

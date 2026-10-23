@@ -109,7 +109,7 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     res.sendFile('access.html', { root: path.join(__dirname, 'public') });
   });
   for (const file of ['access.js', 'access.css']) router.get(`/auth/${file}`, (req, res) => res.sendFile(file, { root: path.join(__dirname, 'public') }));
-  router.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+  router.get('/api/health', (req, res) => res.json({ status: 'ok', version: process.env.APP_VERSION || 'dev' }));
   router.get('/auth/status', endpoint(async (req, res) => {
     if (!configured) return res.json({ authorized: false, admin: false, setupRequired: true });
     if (!await bounded(req, 'status', 1200)) return fail(res, 429, 'rate_limited');
@@ -258,6 +258,7 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     res.on('close', () => { closed = true; clearInterval(timer); });
     return { async send(message) { if (await check()) res.write(message); }, close };
   }
-  return { middleware: router, guardStream, sheets };
+  async function isAdmin(req) { try { return (await identity(req))?.kind === 'admin'; } catch { return false; } }
+  return { middleware: router, guardStream, sheets, isAdmin };
 }
 module.exports = { createLeaderboardAuth };

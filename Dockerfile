@@ -9,6 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends tzdata && rm -r
 
 WORKDIR /app
 
+# Git commit of this build, reported by /api/health so we can verify what the NAS runs
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
+
 # Copy package files and install production deps only
 COPY package*.json ./
 RUN npm ci --omit=dev
@@ -21,6 +25,7 @@ COPY leaderboardHistory.js ./
 COPY leaderboardAggregation.js ./
 COPY leaderboardPerformance.js ./
 COPY rankingNext.js sheetReconciliation.js ./
+COPY reconciliationReport.js reconciliationKnownIssues.js ./
 COPY public/ ./public/
 
 # Create local avatars cache directory

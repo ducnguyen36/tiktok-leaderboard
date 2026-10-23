@@ -12,15 +12,17 @@ function sessionStart(session){
 }
 // HeliosControl opens a new session when it restarts mid-shift. A session of the
 // same group that starts within 30 minutes of the previous one's last activity is
-// the same shift, so it takes the shift's first start for its day.
-const CONTINUATION_GAP=30*60000;
+// the same shift, so it takes the shift's first start for its day. A shift never
+// spans more than 14 hours, and a last-save time far after a session's start (old
+// sessions re-saved days later) is ignored, so separate days are never chained.
+const CONTINUATION_GAP=30*60000,MAX_SHIFT=14*3600000;
 function shiftStarts(sessions){
   const starts=new Map(),byProfile=new Map();
   for(const s of sessions){const start=sessionStart(s);starts.set(String(s._id),start);if(s.profileId&&Number.isFinite(start))(byProfile.get(String(s.profileId))||byProfile.set(String(s.profileId),[]).get(String(s.profileId))).push(s)}
   for(const list of byProfile.values()){
     list.sort((a,b)=>sessionStart(a)-sessionStart(b));let head=null,end=-Infinity;
-    for(const s of list){const start=sessionStart(s),last=Math.max(start,+new Date(s.updatedAt)||start);
-      if(head!==null&&start-end<=CONTINUATION_GAP){starts.set(String(s._id),head);end=Math.max(end,last)}else{head=start;end=last}}
+    for(const s of list){const start=sessionStart(s),saved=+new Date(s.updatedAt)||start,last=saved>=start&&saved-start<=MAX_SHIFT?saved:start;
+      if(head!==null&&start-end<=CONTINUATION_GAP&&start-head<=MAX_SHIFT){starts.set(String(s._id),head);end=Math.max(end,last)}else{head=start;end=last}}
   }
   return starts;
 }

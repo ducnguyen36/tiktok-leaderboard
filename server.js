@@ -6,6 +6,7 @@ const express = require('express');
 const { createLeaderboardAuth } = require('./leaderboardAuth');
 const { createNextRanking } = require('./rankingNext');
 const { createSheetReconciliation } = require('./sheetReconciliation');
+const { createDailyReport, renderMarkdown } = require('./reconciliationReport');
 const { privateHtmlName, safeAvatarPath } = require('./privateAssets');
 const path = require('path');
 const fs = require('fs');
@@ -138,7 +139,7 @@ app.get('/userdata/avatars/:filename', (req, res) => {
 
 // --- Health Check (lightweight, no aggregation) ---
 app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok' });
+    res.json({ status: 'ok', version: process.env.APP_VERSION || 'dev' });
 });
 
 // --- Debug: compare time boundaries and gift counts ---
@@ -1118,6 +1119,21 @@ function debouncedBroadcast() {
 // ==========================================
 const sheetReconciliation=createSheetReconciliation({getDb:()=>db,sheets:leaderboardAuth.sheets});
 const nextRanking=createNextRanking({getDb:()=>db,current:getLeaderboardResult,readProfiles:readProfilesFromDb,readLocations:readLocationsFromDb,avatar:resolveAvatarFast,reconcile:sheetReconciliation});
+// Daily read-only reconciliation report (admin only). Built once a day from 09:00 Vietnam time.
+const dailyReport=createDailyReport({getDb:()=>db,sheets:leaderboardAuth.sheets,readProfiles:readProfilesFromDb,current:getLeaderboardResult,appVersion:process.env.APP_VERSION||'dev',
+    groups:(process.env.RECON_REPORT_GROUPS||'LEVEL X,VENYXIS,DPM').split(',').map(s=>s.trim()).filter(Boolean)});
+app.get('/api/reconciliation/report',async(req,res)=>{
+    try {
+        if (accessControlEnabled && !await leaderboardAuth.isAdmin(req)) return res.status(403).json({status:'error',message:'admin_required'});
+        if (req.query.date!==undefined && !/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date))) return res.status(400).json({status:'error',message:'invalid_date'});
+        const report=req.query.refresh==='1'?await dailyReport.run():await dailyReport.get(req.query.date);
+        if (!report) return res.status(404).json({status:'error',message:'no_report'});
+        res.set('Cache-Control','private, no-store');
+        if (req.query.format==='md') return res.type('text/markdown; charset=utf-8').send(renderMarkdown(report));
+        res.json({status:'ok',report});
+    } catch (error) { res.status(503).json({status:'error',message:'report_unavailable'}); }
+});
+setInterval(()=>{dailyReport.runIfDue().catch(error=>console.error('[Recon report]',error.message))},10*60000).unref?.();
 app.get('/api/leaderboard/next',async(req,res)=>{
     try {const context=parseFreshContext({...req.query,resetHour:req.query.resetHour??'0'});const result=await nextRanking.get(req.query.fresh==='true',context);res.set('Cache-Control','no-store').json(result)}
     catch(error) {res.status(error instanceof RangeError?400:db?500:503).json({status:'error',message:'New leaderboard temporarily unavailable'})}
