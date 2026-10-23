@@ -1,6 +1,6 @@
 'use strict';
 const {GROUP_SHEETS,findMonthTab}=require('./groupSheets');
-const {dayKey,dayStart,sessionStart,scoreRows,sessionGiftPipeline,liveGroups}=require('./rankingNext');
+const {dayKey,dayStart,shiftStarts,scoreRows,sessionGiftPipeline,liveGroups}=require('./rankingNext');
 const {decodeGiftBuckets}=require('./leaderboardPerformance');
 const {sheetsReadError}=require('./sheetsConnection');
 // Sheets record a workday from 06:00: a night shift after midnight belongs to the
@@ -61,8 +61,8 @@ function matchingProfile(profiles,group){
   const matches=profiles.filter(p=>allowed.includes(canonical(p.name)));return matches.length===1?matches[0]:null;
 }
 function discrepancy(backend,sheet,details){const delta=backend-sheet;return Number.isFinite(delta)&&Math.abs(delta)>1000?{...details,backend,sheet,delta,threshold:1000}:null}
-function comparableDay(date,profileId,sessions,known,active){
-  const entries=sessions.filter(s=>String(s.profileId)===String(profileId)&&workday(sessionStart(s))===date);
+function comparableDay(date,profileId,sessions,known,active,starts=shiftStarts(sessions)){
+  const entries=sessions.filter(s=>String(s.profileId)===String(profileId)&&workday(starts.get(String(s._id)))===date);
   // Legacy controllers can reuse a session for multiple days. Only compare days
   // whose sessions have been observed by the new, day-aware controller publisher.
   return entries.length>0&&entries.every(s=>known.has(String(s._id))&&!active.has(String(s._id)));
@@ -71,9 +71,11 @@ function createSheetReconciliation({getDb,sheets,clock=Date.now}){
   let result={state:'pending',warnings:[],sources:[]},pending,checked=0,version='';
   async function build(profiles,currentVersion){
     const now=clock(),today=workday(now),month=today.slice(0,7),db=getDb();
-    const sessions=await db.collection('sessions').find({createdAt:{$gte:new Date(dayStart(month+'-01',WORKDAY_HOUR)-86400000)}},{projection:{createdAt:1,sessionStartedAt:1,profileId:1,sessionName:1}}).toArray();
+    const sessions=await db.collection('sessions').find({createdAt:{$gte:new Date(dayStart(month+'-01',WORKDAY_HOUR)-86400000)}},{projection:{createdAt:1,sessionStartedAt:1,profileId:1,sessionName:1,updatedAt:1}}).toArray();
     const gifts=sessions.length?decodeGiftBuckets(await db.collection('gifts').aggregate(sessionGiftPipeline(sessions.map(s=>s._id)),{allowDiskUse:true,maxTimeMS:60000}).toArray()):[];
     const live=await db.collection('leaderboard_live').find({source:'helioscontrol',liveSince:{$gte:new Date(dayStart(month+'-01',WORKDAY_HOUR)-86400000)}}).toArray();
+    // Sessions opened by a mid-shift restart belong to the shift's workday.
+    const starts=shiftStarts(sessions),shiftDay=s=>workday(starts.get(String(s._id)));
     const knownSessionIds=new Set(live.map(s=>String(s.sessionId)));
     const liveSessionIds=new Set(live.filter(s=>liveGroups([s],now).size).map(s=>String(s.sessionId)));
     const warnings=[],sources=[];
@@ -89,11 +91,11 @@ function createSheetReconciliation({getDb,sheets,clock=Date.now}){
         if(parsed.error){sources.push({group:source.group,state:parsed.error});continue}
         // Talents without a recognisable sheet column are left out; group totals are explicit.
         const names=parsed.names,groupOnly=!names.length;
-        const complete=parsed.days.filter(day=>day.date<today&&comparableDay(day.date,profile._id,sessions,knownSessionIds,liveSessionIds));
+        const complete=parsed.days.filter(day=>day.date<today&&comparableDay(day.date,profile._id,sessions,knownSessionIds,liveSessionIds,starts));
         const dates=new Set(complete.map(d=>d.date));
         // Every session of those workdays counts: battles and lives on another
         // group's account are split by member group exactly like the board.
-        const ids=new Set(sessions.filter(s=>dates.has(workday(sessionStart(s)))).map(s=>String(s._id)));
+        const ids=new Set(sessions.filter(s=>dates.has(shiftDay(s))).map(s=>String(s._id)));
         if(!dates.size){sources.push({group:source.group,state:'awaiting_verified_closed_sessions'});continue}
         const scored=scoreRows(profiles,gifts.filter(g=>ids.has(String(g.sessionId))),sessions);
         const context={period:'monthly',groupId:String(profile._id),group:source.group,dates:[...dates].sort(),checkedAt:new Date(now).toISOString(),basis:'closed-filled-session-days',sheetUrl:`https://docs.google.com/spreadsheets/d/${source.spreadsheetId}/edit#gid=${tab.sheetId}`};
@@ -101,7 +103,7 @@ function createSheetReconciliation({getDb,sheets,clock=Date.now}){
         const groupWarning=discrepancy(group?.value||0,complete.reduce((n,d)=>n+d.group,0),{...context,kind:'group',name:profile.name});if(groupWarning)warnings.push(groupWarning);
         for(const name of names){
           const entered=complete.filter(d=>d.provided[name]);if(!entered.length)continue;
-          const talentDates=new Set(entered.map(d=>d.date));const talentIds=new Set(sessions.filter(s=>talentDates.has(workday(sessionStart(s)))).map(s=>String(s._id)));
+          const talentDates=new Set(entered.map(d=>d.date));const talentIds=new Set(sessions.filter(s=>talentDates.has(shiftDay(s))).map(s=>String(s._id)));
           const subset=talentDates.size===dates.size?scored:scoreRows(profiles,gifts.filter(g=>talentIds.has(String(g.sessionId))),sessions);
           const row=subset.individual.find(e=>e.name===name&&e.groupId===String(profile._id));const warning=discrepancy(row?.value||0,entered.reduce((n,d)=>n+d.individual[name],0),{...context,dates:[...talentDates].sort(),kind:'individual',name});if(warning)warnings.push(warning);
         }

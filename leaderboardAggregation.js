@@ -65,6 +65,14 @@ function buildProfileNameToIdMap(profiles) {
 const CONFIRMED_EXTRA_TALENT_UIDS = Object.freeze({
     '7292870510973862920': '7030251781209146395', // "AMI" account -> Eliana (Velvet Grace)
 });
+// Display names confirmed as an existing talent when the gift's UID is unknown
+// (e.g. a shared guest-seat UID). Target is the talent's profile UID.
+const CONFIRMED_TALENT_NAME_ALIASES = Object.freeze({
+    'Yunii🐝🦄✨': '7692300337487774740', // Yuni (Velvet Grace) debut-day name, confirmed 2026-10-23
+    // By name only: its UID is the ICONZ host account, which also carries the group's gifts.
+    'TOMMY 🍦': '7659364795258536981', // TOMMY (ICONZ), confirmed 2026-10-23
+});
+const nameAliasKey = value => '#' + String(value || '').trim();
 
 // Prefix for TikTok @uniqueId lookups stored in uidToTalent. UIDs are numeric,
 // so prefixed keys never collide with them.
@@ -99,6 +107,9 @@ function buildUidMaps(profiles) {
     for (const [key, owners] of Object.entries(uniqueIdOwners)) {
         if (owners.size === 1) uidToTalent[key] = [...owners][0];
     }
+    for (const [name, targetUid] of Object.entries(CONFIRMED_TALENT_NAME_ALIASES)) {
+        if (uidToTalent[targetUid]) uidToTalent[nameAliasKey(name)] = uidToTalent[targetUid];
+    }
     for (const [uid, targetUid] of Object.entries(CONFIRMED_EXTRA_TALENT_UIDS)) {
         if (uidToTalent[targetUid] && !uidToTalent[uid]) {
             uidToTalent[uid] = uidToTalent[targetUid];
@@ -110,7 +121,9 @@ function buildUidMaps(profiles) {
 
 // Resolve a recorded talent name: UID first, then TikTok @uniqueId, else as recorded.
 function resolveTalentName(name, uid, uidToTalent) {
-    return (uid && uidToTalent[uid]) || uidToTalent[uniqueIdKey(name)] || name;
+    // A confirmed display-name alias wins over the UID: shared host/guest-seat
+    // UIDs show different people under different names.
+    return uidToTalent[nameAliasKey(name)] || (uid && uidToTalent[uid]) || uidToTalent[uniqueIdKey(name)] || name;
 }
 
 // ==========================================
@@ -158,8 +171,18 @@ function aggregateIndividual(gifts, talentAvatarMap, profileNameToId, uidToTalen
 
     // Accumulate diamonds per talent (individual gifts)
     const talentTotals = {};
-    // Accumulate group/profile gifts per profileId for later splitting
+    // Accumulate group/profile gifts per profileId and session for later splitting
     const profileGroupTotals = {};
+    // Talents of each profile who received their own gifts in a session: a
+    // group gift is shared among the members who were live, not the whole roster.
+    const activeTalents = {};
+    for (const gift of gifts) {
+        const sid = gift.sessionId ? gift.sessionId.toString() : '';
+        for (const t of resolveGiftTalents(gift, uidToTalent)) {
+            const pid = talentToProfile[t.name]?.profileId;
+            if (pid !== undefined && !allProfileNames.includes(t.name)) ((activeTalents[sid + '|' + pid] ||= new Set())).add(t.name);
+        }
+    }
 
     for (const gift of gifts) {
         const talents = resolveGiftTalents(gift, uidToTalent);
@@ -210,19 +233,26 @@ function aggregateIndividual(gifts, talentAvatarMap, profileNameToId, uidToTalen
                 }
 
                 if (pid) {
-                    profileGroupTotals[pid] = (profileGroupTotals[pid] || 0) + perEntryCost;
+                    const key = (gift.sessionId ? gift.sessionId.toString() : '') + '|' + pid;
+                    profileGroupTotals[key] = (profileGroupTotals[key] || 0) + perEntryCost;
                 }
             }
         }
     }
 
-    // Split accumulated group gifts evenly among each profile's talent members
-    for (const [pid, groupTotal] of Object.entries(profileGroupTotals)) {
+    // Split accumulated group gifts evenly among the members live in that session
+    // (falling back to the whole roster when no member received a gift there or
+    // the gift has no session).
+    for (const [key, groupTotal] of Object.entries(profileGroupTotals)) {
+        const pid = key.slice(key.lastIndexOf('|') + 1);
         const pInfo = profileMap[pid];
         if (!pInfo || !pInfo.talentNames || pInfo.talentNames.length === 0) continue;
+        // Gifts without a session (legacy data) have no live context: whole roster.
+        const active = key.startsWith('|') ? [] : [...(activeTalents[key] || [])].filter(name => pInfo.talentNames.includes(name));
+        const members = active.length ? active : pInfo.talentNames;
 
-        const perMember = Math.floor(groupTotal / pInfo.talentNames.length);
-        for (const talentName of pInfo.talentNames) {
+        const perMember = Math.floor(groupTotal / members.length);
+        for (const talentName of members) {
             talentTotals[talentName] = (talentTotals[talentName] || 0) + perMember;
         }
     }

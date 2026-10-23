@@ -111,3 +111,27 @@ test('an @uniqueId shared by two talents is not guessed', () => {
     const { uidToTalent } = A.buildUidMaps(shared);
     assert.deepEqual(A.resolveGiftTalents({ receivedTalent: 'same', cost: 1 }, uidToTalent), [{ name: 'same', uid: '' }]);
 });
+test('a group gift is shared among the members live in that session, not the whole roster', () => {
+    const team = [{ _id: 'v', name: 'HT - VELIX', talents: { Hana: { id: 'h' }, Hani: { id: 'i' }, Kem: { id: 'k' }, Luna: { id: 'l' } } }];
+    const { uidToTalent, uidToProfile } = A.buildUidMaps(team);
+    const gifts = [
+        { sessionId: 's1', receivedTalent: 'Hana', receivedTalentUid: 'h', cost: 10 },
+        { sessionId: 's1', receivedTalent: 'Hani', receivedTalentUid: 'i', cost: 10 },
+        { sessionId: 's1', receivedTalent: 'HT - VELIX', cost: 100 },
+        { sessionId: 's2', receivedTalent: 'HT - VELIX', cost: 40 },
+    ];
+    const rows = Object.fromEntries(A.aggregateIndividual(gifts, A.buildTalentAvatars(team), A.buildProfileNameToIdMap(team), uidToTalent, A.buildTalentToProfileMap(team), A.buildProfileMap(team), uidToProfile).map(e => [e._id, e.totalDiamonds]));
+    assert.deepEqual(rows, { Hana: 70, Hani: 70, Kem: 10, Luna: 10 }, 's1 splits between the two live members; s2 had no member gifts, so the whole roster');
+});
+
+test('confirmed alternate accounts and display names resolve to the talent', () => {
+    const team = [
+        { _id: 'i', name: 'HT - ICONZ', talents: { TOMMY: { id: '7659364795258536981' } } },
+        { _id: 'g', name: 'HT - VELVET GRACE', talents: { 'Yunii🦄': { id: '7692300337487774740' } } },
+    ];
+    const { uidToTalent } = A.buildUidMaps(team);
+    assert.equal(A.resolveGiftTalents({ receivedTalents: [{ name: 'TOMMY 🍦', uid: '7668576062439392272' }], cost: 1 }, uidToTalent)[0].name, 'TOMMY');
+    // The same host UID on a group gift stays a group gift, not Tommy's.
+    assert.equal(A.resolveGiftTalents({ receivedTalents: [{ name: 'HT - ICONZ', uid: '7668576062439392272' }], cost: 1 }, uidToTalent)[0].name, 'HT - ICONZ');
+    assert.equal(A.resolveGiftTalents({ receivedTalents: [{ name: 'Yunii🐝🦄✨', uid: '7611078269802267668' }], cost: 1 }, uidToTalent)[0].name, 'Yunii🦄');
+});

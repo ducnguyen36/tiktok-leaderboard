@@ -64,3 +64,18 @@ test('celebrations name the group or talent that crossed a daily milestone',()=>
  assert.deepEqual(talent.hits.map(h=>[h.entry.name,h.points,h.entry.avatar]),[['Alice',50000,'/a.png']],'only visible talents');
  assert.deepEqual(N.milestoneHits({Alice:1},[{name:'Alice',value:90000}],{step:50000,minStep:1,visible,ready:true}).hits,[],'same milestone once');
 });
+test('a restart mid-shift keeps the new session on the shift day',()=>{
+ const{shiftStarts,partitionSessions}=require('../rankingNext');
+ const sessions=[
+  {_id:'a',profileId:'dpm',createdAt:'2026-10-13T01:49:52+07:00',updatedAt:'2026-10-13T07:36:05+07:00'},
+  {_id:'b',profileId:'dpm',createdAt:'2026-10-13T06:14:51+07:00',updatedAt:'2026-10-13T07:03:59+07:00'},
+  {_id:'c',profileId:'dpm',createdAt:'2026-10-13T07:44:32+07:00',updatedAt:'2026-10-13T11:45:32+07:00'},
+  {_id:'d',profileId:'dpm',createdAt:'2026-10-14T01:28:40+07:00',updatedAt:'2026-10-14T07:29:13+07:00'},
+  {_id:'e',profileId:'other',createdAt:'2026-10-13T07:50:00+07:00',updatedAt:'2026-10-13T12:00:00+07:00'}];
+ const starts=shiftStarts(sessions);
+ assert.equal(starts.get('c'),Date.parse('2026-10-13T01:49:52+07:00'),'8 minutes after the shift\'s last activity');
+ assert.equal(starts.get('d'),Date.parse('2026-10-14T01:28:40+07:00'),'next night is a new shift');
+ assert.equal(starts.get('e'),Date.parse('2026-10-13T07:50:00+07:00'),'another group is independent');
+ const keys=partitionSessions(sessions,Date.parse('2026-10-15T09:00:00+07:00'),6).keys;
+ assert.deepEqual(['a','b','c','d'].map(k=>keys.get(k)),['2026-10-12','2026-10-12','2026-10-12','2026-10-13']);
+});

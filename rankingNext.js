@@ -10,6 +10,20 @@ function sessionStart(session){
   const m=/^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})$/.exec(session.sessionName||'');
   return m?Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}+07:00`):NaN;
 }
+// HeliosControl opens a new session when it restarts mid-shift. A session of the
+// same group that starts within 30 minutes of the previous one's last activity is
+// the same shift, so it takes the shift's first start for its day.
+const CONTINUATION_GAP=30*60000;
+function shiftStarts(sessions){
+  const starts=new Map(),byProfile=new Map();
+  for(const s of sessions){const start=sessionStart(s);starts.set(String(s._id),start);if(s.profileId&&Number.isFinite(start))(byProfile.get(String(s.profileId))||byProfile.set(String(s.profileId),[]).get(String(s.profileId))).push(s)}
+  for(const list of byProfile.values()){
+    list.sort((a,b)=>sessionStart(a)-sessionStart(b));let head=null,end=-Infinity;
+    for(const s of list){const start=sessionStart(s),last=Math.max(start,+new Date(s.updatedAt)||start);
+      if(head!==null&&start-end<=CONTINUATION_GAP){starts.set(String(s._id),head);end=Math.max(end,last)}else{head=start;end=last}}
+  }
+  return starts;
+}
 function liveGroups(states,now=Date.now()){
   const result=new Map();for(const state of states){const beat=+new Date(state.heartbeatAt);if(state.live===true&&state.profileId&&Number.isFinite(beat)&&beat<=now+5000&&now-beat<90000)result.set(String(state.profileId),{live:true,liveSince:state.liveSince,liveExpiresAt:new Date(beat+90000).toISOString()})}return result;
 }
@@ -23,7 +37,7 @@ function scoreRows(profiles,gifts,sessions,avatar=value=>value||''){
 }
 function partitionSessions(sessions,now=Date.now(),resetHour=0){
   const today=dayKey(now,resetHour),yesterday=dayKey(dayStart(today,resetHour)-DAY,resetHour);
-  const keys=new Map(sessions.map(s=>[String(s._id),dayKey(sessionStart(s),resetHour)]));
+  const starts=shiftStarts(sessions),keys=new Map(sessions.map(s=>[String(s._id),dayKey(starts.get(String(s._id)),resetHour)]));
   return{today,yesterday,keys};
 }
 function sessionGiftPipeline(ids){
@@ -36,7 +50,7 @@ function createNextRankingForHour({getDb,current,readProfiles,readLocations,avat
   async function build(force=false){
     const revision=generation,started=clock(),db=getDb();if(!db)throw Error('Database unavailable');
     const today=dayKey(started,resetHour),yesterday=dayKey(dayStart(today,resetHour)-DAY,resetHour);
-    const [monthly,profiles,locations,sessions,states]=await Promise.all([current(resetHour,'',{force}),readProfiles(),readLocations(),db.collection('sessions').find({$or:[{createdAt:{$gte:new Date(dayStart(yesterday,resetHour))}},{sessionStartedAt:{$gte:new Date(dayStart(yesterday,resetHour))}}]},{projection:{profileId:1,createdAt:1,sessionStartedAt:1,sessionName:1}}).toArray(),db.collection('leaderboard_live').find({live:true,heartbeatAt:{$gt:new Date(started-90000)}}).toArray()]);
+    const [monthly,profiles,locations,sessions,states]=await Promise.all([current(resetHour,'',{force}),readProfiles(),readLocations(),db.collection('sessions').find({$or:[{createdAt:{$gte:new Date(dayStart(yesterday,resetHour))}},{sessionStartedAt:{$gte:new Date(dayStart(yesterday,resetHour))}}]},{projection:{profileId:1,createdAt:1,sessionStartedAt:1,sessionName:1,updatedAt:1}}).toArray(),db.collection('leaderboard_live').find({live:true,heartbeatAt:{$gt:new Date(started-90000)}}).toArray()]);
     const buckets=sessions.length?decodeGiftBuckets(await db.collection('gifts').aggregate(sessionGiftPipeline(sessions.map(s=>s._id)),{allowDiskUse:true,maxTimeMS:60000}).toArray()):[];
     const days=partitionSessions(sessions,started,resetHour);
     const scores=key=>scoreRows(profiles,buckets.filter(g=>days.keys.get(String(g.sessionId))===key),sessions,avatar);
@@ -76,5 +90,5 @@ function createNextRanking(options){
   }
  };
 }
-module.exports={dayKey,dayStart,sessionStart,partitionSessions,liveGroups,scoreRows,sessionGiftPipeline,decorateLive,createNextRanking};
+module.exports={dayKey,dayStart,sessionStart,shiftStarts,partitionSessions,liveGroups,scoreRows,sessionGiftPipeline,decorateLive,createNextRanking};
 
