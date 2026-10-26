@@ -11,7 +11,9 @@ test('broadcast settings are versioned, validated and kept per administrator sav
  const second=await store.save({groupResetHours:{}},'ducnguyen36@gmail.com');assert.equal(second.version,2);assert.equal(second.config.layout,'classic','config kept when only rules change');assert.deepEqual(store.groupRules(),{});
  await assert.rejects(store.save({groupResetHours:{g:24}}),RangeError);await assert.rejects(store.save({config:[1]}),RangeError);await assert.rejects(store.save({config:{big:'x'.repeat(30000)}}),RangeError);
  assert.equal(validRules({'a b':6}),null);assert.deepEqual(validRules({g:0}),{g:0});
- const reloaded=createBoardSettings({getDb:()=>db});assert.equal((await reloaded.current()).version,2);
+ assert.equal(store.holdUntil(),'');const held=await store.save({holdUntil:'22:30'},'ducnguyen36@gmail.com');assert.equal(held.holdUntil,'22:30');assert.equal(store.holdUntil(),'22:30');assert.deepEqual(store.groupRules(),{},'rules kept');
+ await assert.rejects(store.save({holdUntil:'25:00'}),RangeError);
+ const reloaded=createBoardSettings({getDb:()=>db});assert.equal((await reloaded.current()).version,3);assert.equal(reloaded.holdUntil(),'22:30');
 });
 test('group reset rules replace the DPM default; an empty rule set means every group resets at 06:00',()=>{
  const profiles=[{_id:'dpm',name:'HT - DPM ( tuyen thanh vien )'},{_id:'aura',name:'HT - AURA'}];

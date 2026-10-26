@@ -74,8 +74,9 @@ test('admin edits group reset exceptions and saves settings for all TVs',async t
  const{page,state}=await fixture(t);state.admin=true;state.settings={...state.settings,groupResetHours:{g:18}};await page.reload();await page.locator('[data-key="monthly-ranking"] .row').first().waitFor({state:'attached'});
  await page.keyboard.press('7');await page.locator('[data-page="1"]').click();await page.locator('#group-reset .group-reset-row').first().waitFor();
  const hour=page.locator('#group-reset .group-reset-row input');await hour.fill('17');await hour.press('Tab');
+ await page.locator('#shared-hold').fill('22:30');await page.locator('#shared-hold').press('Tab');
  await page.locator('[data-page="4"]').click();await page.locator('#broadcast-settings').click();
  await page.waitForFunction(()=>/1/.test(document.getElementById('broadcast-status').textContent));
- assert.equal(state.settings.version,1);assert.deepEqual(state.settings.groupResetHours,{g:17});assert.equal(state.settings.config.layout,'podium');
+ assert.equal(state.settings.version,1);assert.deepEqual(state.settings.groupResetHours,{g:17});assert.equal(state.settings.holdUntil,'22:30');assert.equal(state.settings.config.layout,'podium');
  assert.equal(await page.evaluate(()=>localStorage.getItem('helios_leaderboard_next_broadcast')),'1');
 });

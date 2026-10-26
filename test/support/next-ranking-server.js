@@ -12,7 +12,7 @@ function createNextFixture(){
  app.get('/auth/status',(req,res)=>res.json({authorized:true,admin:state.admin,csrf:state.admin?'test-csrf':undefined,email:state.admin?'admin@example.test':undefined}));
  app.get('/api/board-settings',(req,res)=>res.json({status:'ok',...state.settings}));
  app.post('/api/board-settings',(req,res)=>{if(!state.admin||req.get('x-csrf-token')!=='test-csrf')return res.status(403).json({status:'error',error:'admin_required'});
-  state.settings={version:state.settings.version+1,config:req.body.config,groupResetHours:req.body.groupResetHours,updatedAt:new Date().toISOString(),updatedBy:'admin@example.test'};state.broadcast();res.json({status:'ok',version:state.settings.version,updatedAt:state.settings.updatedAt,updatedBy:state.settings.updatedBy})});
+  state.settings={version:state.settings.version+1,config:req.body.config,groupResetHours:req.body.groupResetHours,holdUntil:req.body.holdUntil,updatedAt:new Date().toISOString(),updatedBy:'admin@example.test'};state.broadcast();res.json({status:'ok',version:state.settings.version,updatedAt:state.settings.updatedAt,updatedBy:state.settings.updatedBy})});
  app.get('/api/leaderboard/history',(req,res)=>{state.historyRequests++;res.json({status:'ok',period:{month:req.query.month,complete:true},data:{individual:[row('TEST PRIOR TALENT',100)],group:[row('TEST PRIOR GROUP',100)]}})});
  app.get('/api/leaderboard/stream',(req,res)=>{res.set('Content-Type','text/event-stream');res.flushHeaders();streams.add(res);req.on('close',()=>streams.delete(res))});
  app.get('/new',(req,res)=>res.sendFile('new.html',{root:path.join(__dirname,'../../public')}));
