@@ -17,13 +17,13 @@ test('V1 tab frontend and current frontend switch immediately and remember selec
  await page.waitForFunction(()=>document.body.textContent.includes('TEST GROUP 1'));
  assert.equal(await page.locator('#app-wrapper').count(),1);
  assert.equal(await page.locator('.tv').count(),0);
- await page.goto(url);await page.waitForURL('**/v1.html');
+ await page.goto(url+'/old');await page.waitForURL('**/v1.html');
  await page.waitForFunction(()=>document.body.textContent.includes('TEST GROUP 1'));
  const requests=state.requests.length;state.invalidate();
  await page.waitForTimeout(300);assert.ok(state.requests.length>requests,'V1 refetches on current SSE invalidation');
  await page.keyboard.press('7');
  await page.locator('#ui-version-choice').selectOption('current');
- await page.waitForURL(url+'/');await page.waitForSelector('.row');
+ await page.waitForURL(url+'/old');await page.waitForSelector('.row');
  await page.reload();await page.waitForSelector('.row');
  assert.equal(await page.evaluate(()=>localStorage.getItem('helios_leaderboard_ui_version')),'current');
  assert.deepEqual(errors,[]);

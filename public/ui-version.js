@@ -5,7 +5,7 @@
   let selected = 'current';
   try { selected = localStorage.getItem(key) || 'current'; } catch {}
   function go(version) {
-    location.replace(version === 'v1' ? '/v1.html' : '/');
+    location.replace(version === 'v1' ? '/v1.html' : '/old');
   }
   window.HeliosVersion = {
     choose(version) {

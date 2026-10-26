@@ -2,10 +2,14 @@ const path = require('node:path');
 function privateHtmlName(requestPath) {
   let decoded;
   try { decoded = decodeURIComponent(requestPath).replace(/\\/g, '/'); } catch { return null; }
-  if (/^\/+$/u.test(decoded)) return 'index.html';
+  // The new board is the official page at /; the original board lives at /old only.
+  if (/^\/+$/u.test(decoded)) return 'new.html';
   if (/^\/new\/?$/i.test(decoded)) return 'new.html';
+  if (/^\/+old\/?$/i.test(decoded)) return 'index.html';
   const match = decoded.match(/(?:^|\/)(index|overlay|v1|new)\.html[. ]*\/*$/i);
-  return match ? `${match[1].toLowerCase()}.html` : null;
+  if (!match) return null;
+  const name = match[1].toLowerCase();
+  return name === 'index' ? 'new.html' : `${name}.html`;
 }
 function safeAvatarPath(root, filename) {
   if (typeof filename !== 'string' || !filename || /[\\/\0:]/.test(filename) || !/\.(jpe?g|png|gif|webp|avif)$/i.test(filename)) return null;

@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const { privateHtmlName, safeAvatarPath } = require('../privateAssets');
 test('all encoded and platform HTML aliases select a guarded page', () => {
-  for(const url of ['/','/index.html','/%69ndex.html','//index.html','/index.html.','/index.html%20','/%2findex.html']) assert.equal(privateHtmlName(url),'index.html',url);
+  for(const url of ['/','/index.html','/%69ndex.html','//index.html','/index.html.','/index.html%20','/%2findex.html']) assert.equal(privateHtmlName(url),'new.html',url);
+  for(const url of ['/old','/old/','/OLD','/%6fld'])assert.equal(privateHtmlName(url),'index.html',url);assert.equal(privateHtmlName('/older'),null);
   for(const url of ['/overlay.html','/%6fverlay.html','/OVERLAY.HTML','/overlay.html/']) assert.equal(privateHtmlName(url),'overlay.html',url);
   assert.equal(privateHtmlName('/app.js'),null);assert.equal(privateHtmlName('/access.html'),null);
   for(const url of ['/new','/new/','/new.html','/%6eew.html','/NEW.HTML'])assert.equal(privateHtmlName(url),'new.html');

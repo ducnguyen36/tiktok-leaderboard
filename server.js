@@ -106,7 +106,9 @@ function servePrivateHtml(req, res) {
         res.status(503).send('Private page unavailable');
     }
 }
-app.get(['/', '/index.html', '/overlay.html','/new','/new.html'], servePrivateHtml);
+// /new was the preview address of the board that is now the official page at /.
+app.get(['/new','/new/'],(req,res)=>{const query=req.originalUrl.indexOf('?');res.redirect(302,'/'+(query>=0?req.originalUrl.slice(query):''))});
+app.get(['/', '/index.html', '/overlay.html','/old','/old/','/new.html'], servePrivateHtml);
 // Canonicalize encoded/Windows aliases before static serving so all private HTML has the guard.
 app.use((req, res, next) => {
     if (['GET', 'HEAD'].includes(req.method) && privateHtmlName(req.path)) return servePrivateHtml(req, res);
