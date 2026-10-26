@@ -4,7 +4,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '1';
 process.env.TZ = 'Asia/Ho_Chi_Minh';
 const express = require('express');
 const { createLeaderboardAuth } = require('./leaderboardAuth');
-const { createNextRanking } = require('./rankingNext');
+const { createNextRanking, DEFAULT_CONTEXT: nextRankingDefaults } = require('./rankingNext');
 const { createSheetReconciliation } = require('./sheetReconciliation');
 const { createDailyReport, renderMarkdown } = require('./reconciliationReport');
 const { privateHtmlName, safeAvatarPath } = require('./privateAssets');
@@ -1137,7 +1137,7 @@ app.get('/api/reconciliation/report',async(req,res)=>{
 });
 setInterval(()=>{dailyReport.runIfDue().catch(error=>console.error('[Recon report]',error.message))},10*60000).unref?.();
 app.get('/api/leaderboard/next',async(req,res)=>{
-    try {const context=parseFreshContext({...req.query,resetHour:req.query.resetHour??'0'});const result=await nextRanking.get(req.query.fresh==='true',context);res.set('Cache-Control','no-store').json(result)}
+    try {const context=parseFreshContext({resetHour:String(nextRankingDefaults.resetHour),freezeUntil:nextRankingDefaults.freezeUntil,...req.query});const result=await nextRanking.get(req.query.fresh==='true',context);res.set('Cache-Control','no-store').json(result)}
     catch(error) {res.status(error instanceof RangeError?400:db?500:503).json({status:'error',message:'New leaderboard temporarily unavailable'})}
 });
 app.get('/api/leaderboard/fresh', async (req, res) => {

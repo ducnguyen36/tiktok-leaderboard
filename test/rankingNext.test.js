@@ -2,7 +2,7 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {dayKey,dayStart,sessionStart,partitionSessions,liveGroups,scoreRows,sessionGiftPipeline,createNextRanking}=require('../rankingNext');
 const N=require('../public/next-core');
 const profiles=[{_id:'g',name:'HT - AURA',locationId:'loc_hcm',talents:{Alice:{},Bob:{}}}];
-test('daily reset defaults to 00:00 Vietnam session-start time; 06:00 stays selectable',()=>{
+test('daily keys follow the reset hour in Vietnam session-start time',()=>{
  assert.equal(dayKey('2026-10-06T23:59:59+07:00'),'2026-10-06');assert.equal(dayKey('2026-10-07T00:00:00+07:00'),'2026-10-07');
  assert.equal(dayStart('2026-10-07'),Date.parse('2026-10-06T17:00:00Z'));
  const night=partitionSessions([{_id:'night',createdAt:'2026-10-07T01:00:00+07:00'},{_id:'late',createdAt:'2026-10-06T23:00:00+07:00'}],Date.parse('2026-10-07T09:00:00+07:00'));
@@ -24,9 +24,9 @@ test('session query is not constrained by gift timestamp; group points are count
  assert.equal(result.group[0].value,290);assert.equal(result.individual.find(e=>e.name==='Alice').value,250);assert.equal(result.individual.find(e=>e.name==='Bob').value,40);
 });
 test('new settings preserve visibility but isolate daily defaults and Today/Last Month source',()=>{
- const c=N.normalize({groups:{g:false},resetHour:0,freezeUntil:'09:00',showDaily:false});assert.equal(c.resetHour,0);assert.equal(c.freezeUntil,'09:00');assert.equal(c.groups.g,false);assert.equal(c.showDaily,false);
- assert.equal(N.normalize({}).resetHour,0);assert.equal(N.normalize({resetHour:6}).resetHour,0,'saved old 06:00 default moves to 00:00 once');assert.equal(N.normalize({resetHour:7,dailyResetVersion:1}).resetHour,7,'later choices are kept');assert.equal(N.normalize(N.normalize({resetHour:6})).resetHour,0);assert.equal(N.normalize({}).freezeUntil,'');assert.equal(N.normalize({}).layout,'podium');
- const migrated=N.migrate(null,{layout:'classic',resetHour:0,freezeUntil:'09:00',pause:5,tickerSpeed:100,celebrationSound:false});assert.equal(migrated.layout,'podium');assert.equal(migrated.resetHour,0);assert.equal(migrated.pause,5);assert.equal(migrated.tickerSpeed,100);assert.equal(migrated.celebrationSound,false);
+ const c=N.normalize({groups:{g:false},resetHour:0,freezeUntil:'09:00',showDaily:false,dailyResetVersion:2});assert.equal(c.resetHour,0);assert.equal(c.freezeUntil,'09:00');assert.equal(c.groups.g,false);assert.equal(c.showDaily,false);
+ assert.equal(N.normalize({}).resetHour,6);assert.equal(N.normalize({resetHour:0,freezeUntil:'',dailyResetVersion:1}).resetHour,6,'saved 00:00 setting moves to the 06:00 workday once');assert.equal(N.normalize({resetHour:0,dailyResetVersion:1}).freezeUntil,'16:00');assert.equal(N.normalize({resetHour:7,dailyResetVersion:2}).resetHour,7,'later choices are kept');assert.equal(N.normalize(N.normalize({resetHour:0})).resetHour,6);assert.equal(N.normalize({freezeUntil:'',dailyResetVersion:2}).freezeUntil,'');assert.equal(N.normalize({}).freezeUntil,'16:00');assert.equal(N.normalize({}).layout,'podium');
+ const migrated=N.migrate(null,{layout:'classic',resetHour:0,freezeUntil:'09:00',pause:5,tickerSpeed:100,celebrationSound:false});assert.equal(migrated.layout,'podium');assert.equal(migrated.resetHour,6);assert.equal(migrated.freezeUntil,'16:00');assert.equal(migrated.pause,5);assert.equal(migrated.tickerSpeed,100);assert.equal(migrated.celebrationSound,false);
  assert.equal(N.migrate({...c,layout:'classic',appearanceVersion:1},null).layout,'classic');
  const raw={individual:{monthly:[{name:'Monthly',value:1,locationId:'loc_hcm'}],daily:[{name:'Today',value:2,locationId:'loc_hcm'}]},group:{daily:[{name:'Group',value:1,locationId:'loc_hcm'}]}};
  const cfg=N.normalize({});assert.equal(N.panels(raw,cfg,null)[4].rows[0].name,'Monthly');assert.equal(N.panels(raw,cfg,null)[5].rows[0].name,'Today');
@@ -37,13 +37,33 @@ test('new service attributes a session spanning reset to yesterday and excludes 
  let pipeline;const db={collection(name){return{find(){return{toArray:async()=>name==='sessions'?sessions:[]}},aggregate(p){pipeline=p;return{toArray:async()=>[{gift:{sessionId:'before',cost:200,receivedTalent:'Alice'},count:1},{gift:{sessionId:'after',cost:100,receivedTalent:'Bob'},count:1}]}}}}};
  const monthly={status:'ok',meta:{computedAt:new Date(now).toISOString()},data:{individual:{monthly:[{name:'Alice',value:999,groupId:'g'}]},group:{monthly:[]},locations:[],groups:[]}};
  const service=createNextRanking({getDb:()=>db,current:async()=>monthly,readProfiles:async()=>profiles,readLocations:async()=>[],clock:()=>now});
- const result=await service.get(false,{resetHour:6});assert.equal(result.data.group.daily[0].value,100);assert.equal(result.data.group.yesterday[0].value,200);
- const byDefault=await service.get();assert.equal(byDefault.data.dailyPeriod.resetHour,0);assert.equal(byDefault.data.group.daily[0].value,300);assert.equal(result.data.individual.monthly[0].value,999);assert.deepEqual(pipeline[0].$match.sessionId.$in,['before','after']);
+ const result=await service.get(false,{resetHour:6,freezeUntil:''});assert.equal(result.data.group.daily[0].value,100);assert.equal(result.data.group.yesterday[0].value,200);
+ const byDefault=await service.get();assert.equal(byDefault.data.dailyPeriod.resetHour,6);assert.equal(byDefault.data.dailyPeriod.holdUntil,'16:00');assert.equal(byDefault.data.frozen,true,'07:00 still shows the finished workday');assert.equal(byDefault.data.group.daily[0].value,200);assert.equal(result.data.individual.monthly[0].value,999);assert.deepEqual(pipeline[0].$match.sessionId.$in,['before','after']);
  assert.equal(result.data.individual.daily.find(e=>e.name==='Alice').yesterday.value,200);
  const frozen=await service.get(false,{resetHour:6,freezeUntil:'09:00'});assert.equal(frozen.data.frozen,true);assert.equal(frozen.data.group.daily[0].value,200);
  const live=await service.get(false,{resetHour:6,freezeUntil:''});assert.equal(live.data.frozen,false);assert.equal(live.data.group.daily[0].value,100);
- const midnight=await service.get(false,{resetHour:0});assert.equal(midnight.data.group.daily[0].value,300);assert.equal(midnight.data.dailyPeriod.resetHour,0);assert.equal(midnight.data.individual.monthly[0].value,999);
+ const midnight=await service.get(false,{resetHour:0,freezeUntil:''});assert.equal(midnight.data.group.daily[0].value,300);assert.equal(midnight.data.dailyPeriod.resetHour,0);assert.equal(midnight.data.individual.monthly[0].value,999);
  await assert.rejects(service.get(false,{resetHour:24}),RangeError);await assert.rejects(service.get(false,{freezeUntil:'24:00'}),RangeError);
+});
+test('06:00 workday keeps restarts and DPM overtime on the shift day; board holds it until 16:00',async()=>{
+ const groups=[...profiles,{_id:'dpm',name:'HT - DPM ( tuyen thanh vien )',locationId:'loc_hcm',talents:{Dee:{}}}];
+ const sessions=[
+  {_id:'night',profileId:'g',createdAt:'2026-10-08T22:00:00+07:00',updatedAt:'2026-10-09T06:40:00+07:00'},
+  {_id:'restart',profileId:'g',createdAt:'2026-10-09T07:00:00+07:00',updatedAt:'2026-10-09T07:30:00+07:00'},
+  {_id:'fresh',profileId:'g',createdAt:'2026-10-09T20:00:00+07:00'},
+  {_id:'dpm-night',profileId:'dpm',createdAt:'2026-10-08T21:00:00+07:00',updatedAt:'2026-10-09T09:00:00+07:00'},
+  {_id:'dpm-overtime',profileId:'dpm',createdAt:'2026-10-09T13:00:00+07:00'},
+  {_id:'dpm-new',profileId:'dpm',createdAt:'2026-10-09T19:00:00+07:00'}];
+ const gifts={night:100,restart:10,fresh:1000,'dpm-night':200,'dpm-overtime':20,'dpm-new':2000};
+ let now;const db={collection(name){return{find(){return{toArray:async()=>name==='sessions'?sessions:[]}},aggregate(){return{toArray:async()=>Object.entries(gifts).map(([sessionId,cost])=>({gift:{sessionId,cost,receivedTalent:sessionId.startsWith('dpm')?'Dee':'Alice'},count:1}))}}}}};
+ const monthly={status:'ok',meta:{},data:{individual:{monthly:[]},group:{monthly:[]},locations:[],groups:[]}};
+ const service=createNextRanking({getDb:()=>db,current:async()=>monthly,readProfiles:async()=>groups,readLocations:async()=>[],clock:()=>now});
+ const value=(r,id)=>r.data.group.daily.find(e=>e.groupId===id)?.value||0;
+ now=Date.parse('2026-10-09T15:00:00+07:00');let r=await service.get(true);
+ assert.equal(r.data.dailyPeriod.today,'2026-10-08');assert.equal(r.data.frozen,true);assert.equal(value(r,'g'),110,'restart at 07:00 stays on the night shift');assert.equal(value(r,'dpm'),220,'DPM overtime until 18:00 stays on the shift day');assert.equal(r.data.dailyPeriod.groupResetHours.dpm,18);
+ now=Date.parse('2026-10-09T21:00:00+07:00');r=await service.get(true);
+ assert.equal(r.data.dailyPeriod.today,'2026-10-09');assert.equal(r.data.frozen,false);assert.equal(value(r,'g'),1000);assert.equal(value(r,'dpm'),2000);assert.equal(r.data.group.yesterday.find(e=>e.groupId==='dpm').value,220);
+ now=Date.parse('2026-10-10T03:00:00+07:00');r=await service.get(true);assert.equal(r.data.dailyPeriod.today,'2026-10-09');assert.equal(r.data.frozen,false);
 });
 test('smart TV browsers get the simple live mark; phones and computers keep the animation',()=>{
  assert.equal(N.isTvDevice('Mozilla/5.0 (SMART-TV; Linux; Tizen 6.0) AppleWebKit/537.36 SamsungBrowser/4.0 TV Safari/537.36'),true);

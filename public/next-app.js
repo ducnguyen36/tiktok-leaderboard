@@ -147,9 +147,10 @@ function celebrationChime(){
  });
 }
 function updateCelebrations(result){
- if(result.data.frozen||result.meta?.stale||dailyHistory)return;
+ // The held workday is still live (overtime), so it keeps celebrating; the ledger follows the shown day.
+ if(result.meta?.stale||dailyHistory)return;
  const timestamp=new Date(result.meta?.computedAt||Date.now()).getTime();if(!Number.isFinite(timestamp))return;
- const day=new Date(timestamp+(7-config.resetHour)*3600000).toISOString().slice(0,10),key=storageKey+'_celebrations';
+ const day=result.data.dailyPeriod?.today||new Date(timestamp+(7-config.resetHour)*3600000).toISOString().slice(0,10),key=storageKey+'_celebrations';
  let ledger=celebrationLedger;try{ledger=JSON.parse(localStorage.getItem(key)||'null')||ledger}catch{}
  if(!ledger||ledger.day!==day||ledger.reset!==config.resetHour)ledger={day,reset:config.resetHour,groups:{},talents:{}};
  ledger.talents??={};

@@ -37,9 +37,21 @@ function scoreRows(profiles,gifts,sessions,avatar=value=>value||''){
     group:A.aggregateGroup(gifts,tp,map,names,uids.uidToTalent,uids.uidToProfile,owners).map(e=>({name:e.name,value:e.totalDiamonds,groupId:String(e._id),locationId:map[e._id]?.locationId||'',avatar:avatar(map[e._id]?.avatar,map[e._id]?.username)}))
   };
 }
-function partitionSessions(sessions,now=Date.now(),resetHour=0){
-  const today=dayKey(now,resetHour),yesterday=dayKey(dayStart(today,resetHour)-DAY,resetHour);
-  const starts=shiftStarts(sessions),keys=new Map(sessions.map(s=>[String(s._id),dayKey(starts.get(String(s._id)),resetHour)]));
+// The workday (06:00 by default) decides which day a shift belongs to. DPM works
+// overtime until the next afternoon, so its shifts only roll over at 18:00.
+const WORKDAY_HOUR=6,LATE_GROUP_HOUR=18,LATE_GROUPS=/\bDPM\b/i;
+function groupResetHours(profiles,resetHour){
+  const hours={};if(resetHour!==WORKDAY_HOUR)return hours;
+  for(const p of profiles||[])if(LATE_GROUPS.test(p.name||''))hours[String(p._id)]=LATE_GROUP_HOUR;
+  return hours;
+}
+// The board keeps showing the finished workday until the hold time (16:00), then
+// moves to the new one. A hold at or before the reset hour has no effect.
+function holdHours(holdUntil){const m=/^(\d{2}):(\d{2})$/.exec(holdUntil||'');return m?+m[1]+m[2]/60:0}
+function displayDay(now,resetHour=0,holdUntil=''){return dayKey(now,Math.max(resetHour,holdHours(holdUntil)))}
+function partitionSessions(sessions,now=Date.now(),resetHour=0,{holdUntil='',groupHours={}}={}){
+  const today=displayDay(now,resetHour,holdUntil),yesterday=new Date(Date.parse(today)-DAY).toISOString().slice(0,10);
+  const starts=shiftStarts(sessions),keys=new Map(sessions.map(s=>[String(s._id),dayKey(starts.get(String(s._id)),groupHours[String(s.profileId)]??resetHour)]));
   return{today,yesterday,keys};
 }
 function sessionGiftPipeline(ids){
@@ -47,50 +59,52 @@ function sessionGiftPipeline(ids){
   return[{$match:{sessionId:{$in:ids}}},{$group:{_id:Object.fromEntries(fields.map(f=>[f,'$'+f])),count:{$sum:1}}},{$project:{_id:0,gift:'$_id',count:1}}];
 }
 function decorateLive(rows,states,now){const groups=liveGroups(states,now);return rows.map(row=>({...row,...(groups.get(String(row.groupId))||{live:false})}))}
-function createNextRankingForHour({getDb,current,readProfiles,readLocations,avatar,reconcile,clock=Date.now,resetHour=0}){
+function createNextRankingForHour({getDb,current,readProfiles,readLocations,avatar,reconcile,clock=Date.now,resetHour=0,holdUntil=''}){
   let cached,pending,generation=0;
   async function build(force=false){
     const revision=generation,started=clock(),db=getDb();if(!db)throw Error('Database unavailable');
-    const today=dayKey(started,resetHour),yesterday=dayKey(dayStart(today,resetHour)-DAY,resetHour);
-    const [monthly,profiles,locations,sessions,states]=await Promise.all([current(resetHour,'',{force}),readProfiles(),readLocations(),db.collection('sessions').find({$or:[{createdAt:{$gte:new Date(dayStart(yesterday,resetHour))}},{sessionStartedAt:{$gte:new Date(dayStart(yesterday,resetHour))}}]},{projection:{profileId:1,createdAt:1,sessionStartedAt:1,sessionName:1,updatedAt:1}}).toArray(),db.collection('leaderboard_live').find({live:true,heartbeatAt:{$gt:new Date(started-90000)}}).toArray()]);
+    // Restarted shifts reach back up to 14 hours, so read sessions from before the earlier day's start.
+    const from=new Date(dayStart(displayDay(started,resetHour,holdUntil),resetHour)-DAY-MAX_SHIFT);
+    const [monthly,profiles,locations,sessions,states]=await Promise.all([current(resetHour,'',{force}),readProfiles(),readLocations(),db.collection('sessions').find({$or:[{createdAt:{$gte:from}},{sessionStartedAt:{$gte:from}}]},{projection:{profileId:1,createdAt:1,sessionStartedAt:1,sessionName:1,updatedAt:1}}).toArray(),db.collection('leaderboard_live').find({live:true,heartbeatAt:{$gt:new Date(started-90000)}}).toArray()]);
     const buckets=sessions.length?decodeGiftBuckets(await db.collection('gifts').aggregate(sessionGiftPipeline(sessions.map(s=>s._id)),{allowDiskUse:true,maxTimeMS:60000}).toArray()):[];
-    const days=partitionSessions(sessions,started,resetHour);
+    const groupHours=groupResetHours(profiles,resetHour),days=partitionSessions(sessions,started,resetHour,{holdUntil,groupHours}),{today,yesterday}=days;
     const scores=key=>scoreRows(profiles,buckets.filter(g=>days.keys.get(String(g.sessionId))===key),sessions,avatar);
     const daily=scores(today),prior=scores(yesterday);
     for(const kind of ['group','individual'])daily[kind]=daily[kind].map(row=>({...row,yesterday:prior[kind].find(p=>p.name===row.name&&p.groupId===row.groupId)||null}));
-    const data={...monthly.data,individual:{...monthly.data.individual,daily:daily.individual,yesterday:prior.individual},group:{...monthly.data.group,daily:daily.group,yesterday:prior.group},frozen:false,dailyPeriod:{today,yesterday,resetHour,attribution:'session-start'}};
+    const data={...monthly.data,individual:{...monthly.data.individual,daily:daily.individual,yesterday:prior.individual},group:{...monthly.data.group,daily:daily.group,yesterday:prior.group},frozen:false,dailyPeriod:{today,yesterday,resetHour,holdUntil,groupResetHours:groupHours,attribution:'session-start'}};
     for(const kind of ['individual','group'])for(const period of ['daily','yesterday','monthly'])data[kind][period]=decorateLive(data[kind][period],states,started);
     cached={status:'ok',data,meta:{...monthly.meta,computedAt:new Date(started).toISOString(),dailyAttribution:'session-start',liveSource:'helioscontrol-heartbeat',stale:monthly.meta?.stale===true},builtAt:started,revision};
     reconcile?.refresh(profiles).catch(()=>{});return cached;
   }
   return{invalidate(){generation++},async get(force=false){
     if(force&&pending)await pending;
-    if(!cached||dayKey(clock(),resetHour)!==cached.data.dailyPeriod.today||force||clock()-cached.builtAt>15000||cached.revision!==generation){if(!pending)pending=build(force).finally(()=>pending=null);if(!cached||force||dayKey(clock(),resetHour)!==cached.data.dailyPeriod.today)await pending;else pending.catch(()=>{})}
+    const newDay=()=>displayDay(clock(),resetHour,holdUntil)!==cached.data.dailyPeriod.today;
+    if(!cached||newDay()||force||clock()-cached.builtAt>15000||cached.revision!==generation){if(!pending)pending=build(force).finally(()=>pending=null);if(!cached||force||newDay())await pending;else pending.catch(()=>{})}
     const result={...cached,data:structuredClone(cached.data),meta:{...cached.meta,stale:cached.meta.stale||cached.revision!==generation||clock()-cached.builtAt>15000}};
     // Expire indicators locally even when an older cached result is served.
     for(const kind of ['individual','group'])for(const period of ['daily','yesterday','monthly'])for(const row of result.data[kind][period])if(row.live&&Date.parse(row.liveExpiresAt)<=clock())row.live=false;
     result.data.reconciliation=reconcile?.status()||{state:'unavailable',warnings:[]};return result;
   }};
 }
-// Keep all original timing settings functional while 00:00 is the new default.
+// Default: 06:00 workday (DPM 18:00), the finished day held on the board until 16:00.
+const DEFAULT_CONTEXT={resetHour:WORKDAY_HOUR,freezeUntil:'16:00'};
 function createNextRanking(options){
  const services=new Map(),clock=options.clock||Date.now;
  return{
   invalidate(){services.forEach(service=>service.invalidate())},
   async get(force=false,context={}){
-   const hour=context.resetHour===undefined?0:Number(context.resetHour);
+   const hour=context.resetHour===undefined?DEFAULT_CONTEXT.resetHour:Number(context.resetHour);
    if(!Number.isInteger(hour)||hour<0||hour>23)throw new RangeError('Invalid reset hour');
-   const freeze=context.freezeUntil||'';
+   const freeze=context.freezeUntil===undefined?DEFAULT_CONTEXT.freezeUntil:context.freezeUntil||'';
    if(typeof freeze!=='string'||(freeze&&!/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(freeze)))throw new RangeError('Invalid freeze time');
-   if(!services.has(hour))services.set(hour,createNextRankingForHour({...options,resetHour:hour}));
-   const result=await services.get(hour).get(force),now=clock();
-   const calendar=new Date(now+OFFSET).toISOString().slice(0,10);
-   const frozen=!!freeze&&now<Date.parse(calendar+'T'+freeze+':00+07:00')&&now>=dayStart(dayKey(now,hour),hour);
-   if(frozen)for(const kind of ['individual','group'])result.data[kind].daily=structuredClone(result.data[kind].yesterday);
-   result.data.frozen=frozen;result.meta.contextKey=hour+'|'+freeze;
+   const key=hour+'|'+freeze;
+   if(!services.has(key))services.set(key,createNextRankingForHour({...options,resetHour:hour,holdUntil:freeze}));
+   const result=await services.get(key).get(force);
+   // Held: the board still shows the workday that ended at the reset hour.
+   result.data.frozen=result.data.dailyPeriod.today!==dayKey(clock(),hour);result.meta.contextKey=key;
    return result;
   }
  };
 }
-module.exports={dayKey,dayStart,sessionStart,shiftStarts,partitionSessions,liveGroups,scoreRows,sessionGiftPipeline,decorateLive,createNextRanking};
+module.exports={WORKDAY_HOUR,DEFAULT_CONTEXT,dayKey,dayStart,displayDay,groupResetHours,sessionStart,shiftStarts,partitionSessions,liveGroups,scoreRows,sessionGiftPipeline,decorateLive,createNextRanking};
 
