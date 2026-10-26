@@ -354,6 +354,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,.b
  .tv[data-studio="true"]~.quick-toolbar{top:8px}
 }
 .mobile-board-tabs{display:none}
+.admin-block{display:grid;gap:6px;margin-top:6px;padding:10px;border:1px solid #79624f;border-radius:7px;background:#211c18}.admin-block h4{margin:0;font-size:15px}.admin-block p{margin:0}.group-reset-row{display:grid;grid-template-columns:1fr 70px 36px;gap:6px;align-items:center}.group-reset-row select,.group-reset-row input{width:100%;box-sizing:border-box;padding:5px;background:#0e1220;border:1px solid #656c81;color:white;border-radius:5px}#broadcast-settings{background:#7a3fb4;color:#fff}
 .settings-link{display:inline-flex;align-items:center;justify-content:center;align-self:flex-start;min-height:40px;padding:0 16px;box-sizing:border-box;border:1px solid #79624f;border-radius:7px;background:#39312a;color:#fff4e7;text-decoration:none}
 
 @media (max-width:767px), (max-width:950px) and (max-height:500px){

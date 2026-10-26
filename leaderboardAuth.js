@@ -259,6 +259,8 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     return { async send(message) { if (await check()) res.write(message); }, close };
   }
   async function isAdmin(req) { try { return (await identity(req))?.kind === 'admin'; } catch { return false; } }
-  return { middleware: router, guardStream, sheets, isAdmin };
+  // Admin-only same-origin, CSRF-checked request; resolves to the admin record or null (response sent).
+  async function adminMutation(req, res) { try { return await mutation(req, res, true); } catch { if (!res.headersSent) fail(res, 503, 'access_unavailable'); return null; } }
+  return { middleware: router, guardStream, sheets, isAdmin, adminMutation };
 }
 module.exports = { createLeaderboardAuth };

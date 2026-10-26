@@ -4,7 +4,15 @@ function createNextFixture(){
  state.invalidate=()=>streams.forEach(r=>r.write('data: {"status":"invalidate"}\n\n'));
  function row(name,value,kind){return{name,value:value+state.offset,groupId:'g',locationId:'loc_hcm',avatar:'/helios-asset-23.png',live:state.live,liveExpiresAt:new Date(Date.now()+90000).toISOString()}}
  function data(){return{individual:{monthly:Array.from({length:23},(_,i)=>row(i===0?'TEST ALICE':'TEST TALENT '+i,9000-i*100)),daily:[row('TEST TODAY',400)],yesterday:[row('TEST YESTERDAY',300)]},group:{monthly:[row('TEST GROUP',13000)],daily:[row('TEST GROUP',400)],yesterday:[row('TEST GROUP',300)]},groups:[{id:'g',name:'TEST GROUP',locationId:'loc_hcm'}],locations:[{id:'loc_hcm',name:'TEST HCM'}],dailyPeriod:{today:'2026-10-07',yesterday:'2026-10-06'},reconciliation:{state:'checked',warnings:[{kind:'individual',period:'monthly',groupId:'g',name:'TEST ALICE',backend:9000,sheet:7000,delta:2000,dates:['2026-10-01'],checkedAt:new Date().toISOString(),sheetUrl:'https://docs.google.com/spreadsheets/d/test/edit'}],sources:[]}}}
- app.get('/api/leaderboard/next',(req,res)=>{state.nextRequests++;state.contexts.push({...req.query});if(state.fail)return res.status(503).json({status:'error'});res.json({status:'ok',data:data(),meta:{computedAt:new Date().toISOString(),source:'computed',stale:false}})});
+ app.get('/api/leaderboard/next',(req,res)=>{state.nextRequests++;state.contexts.push({...req.query});if(state.fail)return res.status(503).json({status:'error'});res.json({status:'ok',data:data(),meta:{computedAt:new Date().toISOString(),source:'computed',stale:false,settingsVersion:state.settings.version}})});
+ // Broadcast settings: admin flag and stored document are controlled by the test.
+ state.admin=false;state.settings={version:0,config:null,groupResetHours:null,updatedAt:null,updatedBy:null};
+ state.broadcast=()=>streams.forEach(r=>r.write('data: '+JSON.stringify({status:'ok',invalidated:true,settingsVersion:state.settings.version})+'\n\n'));
+ app.use(express.json());
+ app.get('/auth/status',(req,res)=>res.json({authorized:true,admin:state.admin,csrf:state.admin?'test-csrf':undefined,email:state.admin?'admin@example.test':undefined}));
+ app.get('/api/board-settings',(req,res)=>res.json({status:'ok',...state.settings}));
+ app.post('/api/board-settings',(req,res)=>{if(!state.admin||req.get('x-csrf-token')!=='test-csrf')return res.status(403).json({status:'error',error:'admin_required'});
+  state.settings={version:state.settings.version+1,config:req.body.config,groupResetHours:req.body.groupResetHours,updatedAt:new Date().toISOString(),updatedBy:'admin@example.test'};state.broadcast();res.json({status:'ok',version:state.settings.version,updatedAt:state.settings.updatedAt,updatedBy:state.settings.updatedBy})});
  app.get('/api/leaderboard/history',(req,res)=>{state.historyRequests++;res.json({status:'ok',period:{month:req.query.month,complete:true},data:{individual:[row('TEST PRIOR TALENT',100)],group:[row('TEST PRIOR GROUP',100)]}})});
  app.get('/api/leaderboard/stream',(req,res)=>{res.set('Content-Type','text/event-stream');res.flushHeaders();streams.add(res);req.on('close',()=>streams.delete(res))});
  app.get('/new',(req,res)=>res.sendFile('new.html',{root:path.join(__dirname,'../../public')}));

@@ -260,8 +260,8 @@ async function loadCurrent(indices=[0,1,2,3,4,5,6],manual=false){
  try{const result=await liveInFlight.get(key);if(context!==requestContext()||(!manual&&epoch!==(manualEpoch.get(context)||0)))return;
   const accepted=indices.filter(i=>columnVersion[i]===request);if(!accepted.length)return;
   rawData=result.data;dataError=false;allLocations=(rawData.locations||[]).map(l=>({...l,id:String(l.id)}));allGroups=(rawData.groups||[]).map(g=>({...g,id:String(g.id),locationId:String(g.locationId||'')}));
-  updateCelebrations(result);
-  accepted.forEach(i=>{columnData[i]=rawData;columnMeta[i]=result.meta||null});let changed=false;accepted.forEach(i=>{changed=renderRows(i)||changed});if(changed)setupScroll();renderSummary();renderLocations();syncInputs();
+  updateCelebrations(result);followBroadcast(result.meta?.settingsVersion||0);
+  accepted.forEach(i=>{columnData[i]=rawData;columnMeta[i]=result.meta||null});let changed=false;accepted.forEach(i=>{changed=renderRows(i)||changed});if(changed)setupScroll();renderSummary();renderLocations();syncInputs();if(adminState&&!groupRules)renderAdmin();
   renderConnection();if(manual)notify(t(result.meta?.stale===true?'toast.pointsPending':'toast.pointsRefreshed'));
  }catch(e){if(context===requestContext()&&(manual||epoch===(manualEpoch.get(context)||0))){dataError=true;renderConnection();if(manual||!rawData)notify(t('toast.refreshFailed'))}}
  finally{if(manual){const remaining=(manualPending.get(context)||1)-1;if(remaining)manualPending.set(context,remaining);else manualPending.delete(context)}indices.forEach(i=>{if(columnVersion[i]===request){boards[i].classList.remove('loading');boards[i].querySelector('.column-refresh')?.removeAttribute('disabled')}})}
@@ -332,6 +332,53 @@ gear.onclick=showSettings;['close-settings','done-settings'].forEach(id=>documen
 function saveDefault(){try{localStorage.setItem(storageKey+'_default',JSON.stringify(config));saved=JSON.parse(JSON.stringify(config));document.getElementById('save-status').textContent=t('settings.defaultSavedDevice');notify(t('toast.defaultSaved'))}catch(e){notify(t('toast.storageSettings'))}}
 ['save-default','save-default-page'].forEach(id=>document.getElementById(id).onclick=saveDefault);
 document.getElementById('restore-default').onclick=()=>{config=C.normalize(saved||defaults);apply();renderLocations();notify(t('toast.defaultRestored'))};
+// Administrators broadcast their settings to every approved TV; each TV adopts the
+// newest broadcast once, as its current settings and its saved default.
+const say=(vi,en)=>config.language==='vi'?vi:en,broadcastKey=storageKey+'_broadcast';
+let adminState=null,groupRules=null,settingsInFlight=null;
+function appliedBroadcast(){try{return Number(localStorage.getItem(broadcastKey))||0}catch{return 0}}
+function markBroadcast(version){try{localStorage.setItem(broadcastKey,String(version))}catch{}}
+async function readBoardSettings(){const response=await fetch('/api/board-settings',{cache:'no-store',credentials:'same-origin'});const payload=await response.json();if(!response.ok||payload.status!=='ok')throw Error('settings');return payload}
+// Until an administrator saves exceptions, the server default is DPM at 18:00.
+function defaultRules(){const rules={};for(const g of allGroups)if(/\bDPM\b/i.test(g.name||''))rules[g.id]=18;return rules}
+function followBroadcast(version){
+ if(!(version>appliedBroadcast())||settingsInFlight)return;
+ settingsInFlight=readBoardSettings().then(payload=>{
+  groupRules=payload.groupResetHours;
+  if(payload.config&&payload.version>appliedBroadcast()){config=C.normalize(payload.config);saved=C.clone(config);try{localStorage.setItem(storageKey+'_default',JSON.stringify(config))}catch{}apply();renderLocations();notify(say('Đã nhận cài đặt mới từ admin','New settings received from admin'))}
+  markBroadcast(payload.version);if(adminState)adminState.lastSaved=payload;renderAdmin();
+ }).catch(()=>{}).finally(()=>settingsInFlight=null);
+}
+function renderAdmin(){
+ const admin=Boolean(adminState?.admin);document.getElementById('group-reset').hidden=!admin;document.getElementById('broadcast-box').hidden=!admin;if(!admin)return;
+ document.getElementById('group-reset-title').textContent=say('Giờ reset riêng theo nhóm','Group reset exceptions');
+ document.getElementById('group-reset-help').textContent=say('Các nhóm khác reset lúc 06:00. Áp dụng cho bảng ngày và đối soát sheet sau khi bấm Lưu cho tất cả TV.','Other groups reset at 06:00. Applies to the daily ranking and sheet checks after Save for all TVs.');
+ document.getElementById('group-reset-add').textContent=say('+ Thêm nhóm','+ Add group');
+ document.getElementById('broadcast-settings').textContent=say('📡 Lưu cho tất cả TV','📡 Save for all TVs');
+ const last=adminState.lastSaved,when=last?.updatedAt?new Date(last.updatedAt).toLocaleString(config.language==='vi'?'vi-VN':'en-GB',{timeZone:'Asia/Ho_Chi_Minh'}):'';
+ document.getElementById('broadcast-status').textContent=last?.version?say('Đã gửi bản '+last.version+' lúc '+when+' · '+(last.updatedBy||''),'Version '+last.version+' sent '+when+' · '+(last.updatedBy||'')):say('TV được cấp quyền sẽ đổi theo ngay và lưu làm mặc định.','Approved TVs follow at once and keep it as their default.');
+ const rules=groupRules||defaultRules(),items=document.getElementById('group-reset-items');
+ items.replaceChildren();
+ Object.entries(rules).forEach(([id,hour],index)=>{
+  const row=document.createElement('div');row.className='group-reset-row';const select=document.createElement('select'),input=document.createElement('input'),remove=document.createElement('button');
+  for(const g of allGroups)select.append(new Option(g.name,g.id,false,g.id===id));if(!allGroups.some(g=>g.id===id))select.append(new Option(id,id,true,true));
+  input.type='number';input.min='0';input.max='23';input.value=hour;remove.textContent='✕';remove.setAttribute('aria-label',say('Xóa','Remove'));
+  const without=()=>{const next={...rules};delete next[id];return next};
+  const update=field=>()=>{const next=without(),h=Math.floor(Number(input.value));if(!(select.value in next))next[select.value]=Number.isFinite(h)?Math.max(0,Math.min(23,h)):18;groupRules=next;renderAdmin();items.children[index]?.children[field]?.focus()};
+  select.onchange=update(0);input.onchange=update(1);remove.onclick=()=>{groupRules=without();renderAdmin()};
+  row.append(select,input,remove);items.append(row);
+ });
+}
+document.getElementById('group-reset-add').onclick=()=>{const rules=groupRules||defaultRules(),free=allGroups.find(g=>!(g.id in rules));if(!free)return;groupRules={...rules,[free.id]:18};renderAdmin()};
+document.getElementById('broadcast-settings').onclick=async()=>{
+ const button=document.getElementById('broadcast-settings');button.disabled=true;
+ try{const response=await fetch('/api/board-settings',{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json','X-CSRF-Token':adminState?.csrf||''},body:JSON.stringify({config,groupResetHours:groupRules||defaultRules()})});const payload=await response.json();
+  if(!response.ok||payload.status!=='ok')throw Error(payload.message||payload.error||'failed');
+  markBroadcast(payload.version);groupRules=groupRules||defaultRules();adminState.lastSaved=payload;saved=C.clone(config);try{localStorage.setItem(storageKey+'_default',JSON.stringify(config))}catch{}
+  renderAdmin();notify(say('Đã lưu và gửi cho tất cả TV','Saved and sent to all TVs'));loadCurrent();
+ }catch(e){notify(say('Không gửi được cài đặt: ','Could not send settings: ')+e.message)}finally{button.disabled=false}
+};
+fetch('/auth/status',{cache:'no-store',credentials:'same-origin'}).then(r=>r.json()).then(status=>{adminState=status?.admin?{admin:true,csrf:status.csrf||'',email:status.email}:null;return readBoardSettings()}).then(payload=>{groupRules=payload.groupResetHours;if(adminState&&payload.version)adminState.lastSaved=payload;renderAdmin();followBroadcast(payload.version)}).catch(()=>{});
 document.getElementById('factory').onclick=()=>{config=C.normalize(defaults);apply();renderLocations();notify(t('toast.factory'))};
 configInputs.forEach(e=>e.onchange=()=>{if(editing===e&&!['layout','language','rankOrder'].includes(e.dataset.config))return;let value=e.type==='checkbox'?e.checked:e.type==='number'?Number(e.value):e.value;
  if(e.type==='number'){value=Math.max(Number(e.min),Math.min(Number(e.max),value));if(!Number.isFinite(value))return}
@@ -541,7 +588,7 @@ function connectStream(){
  if(!window.EventSource)return;
  stream=new EventSource('/api/leaderboard/stream');
  stream.onopen=()=>{streamConnected=true;renderConnection()};
- stream.onmessage=()=>streamInvalidation();
+ stream.onmessage=event=>{let message=null;try{message=JSON.parse(event.data)}catch{}if(message?.settingsVersion)followBroadcast(message.settingsVersion);streamInvalidation()};
  stream.onerror=()=>{streamConnected=false;renderConnection()};
 }
 setInterval(()=>{if(!streamConnected||columnMeta.some(meta=>meta?.stale))loadCurrent();if(unfreezeUntil&&Date.now()>=unfreezeUntil){unfreezeUntil=0;lastContext='';apply()}},10000);

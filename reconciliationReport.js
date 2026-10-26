@@ -5,7 +5,7 @@
 // previous report. It only reads gifts/sessions/sheets and writes its own
 // report documents; it never edits scores, sessions or sheets.
 const { GROUP_SHEETS, findMonthTab } = require('./groupSheets');
-const { dayKey, dayStart, shiftStarts, scoreRows, sessionGiftPipeline, liveGroups } = require('./rankingNext');
+const { dayKey, dayStart, shiftStarts, scoreRows, sessionGiftPipeline, liveGroups, groupResetHours, sessionWorkday } = require('./rankingNext');
 const { decodeGiftBuckets } = require('./leaderboardPerformance');
 const { parseSheet, matchingProfile } = require('./sheetReconciliation');
 const { sheetsReadError } = require('./sheetsConnection');
@@ -45,7 +45,7 @@ function classify({ sheetValue, dbValue, filled, comparable, noSession, isPast, 
   return { status: STATUS.unexplained, diff, note: noSession ? 'Database không có phiên nào của nhóm trong ngày công này' : '' };
 }
 
-async function buildReport({ db, sheets, profiles, monthly, now = Date.now(), groups = DEFAULT_GROUPS, previous = null, known = KNOWN_ISSUES, appVersion = 'dev' }) {
+async function buildReport({ db, sheets, profiles, monthly, now = Date.now(), groups = DEFAULT_GROUPS, previous = null, known = KNOWN_ISSUES, appVersion = 'dev', groupRules = null }) {
   const today = workday(now), month = today.slice(0, 7);
   const from = new Date(dayStart(month + '-01', WORKDAY_HOUR) - DAY);
   const sessions = await db.collection('sessions').find({ createdAt: { $gte: from } }, { projection: { createdAt: 1, sessionStartedAt: 1, profileId: 1, sessionName: 1, updatedAt: 1 } }).toArray();
@@ -53,7 +53,9 @@ async function buildReport({ db, sheets, profiles, monthly, now = Date.now(), gr
   const live = await db.collection('leaderboard_live').find({ source: 'helioscontrol', liveSince: { $gte: from } }).toArray();
   const knownSessionIds = new Set(live.map(s => String(s.sessionId)));
   const liveSessionIds = new Set(live.filter(s => liveGroups([s], now).size).map(s => String(s.sessionId)));
-  const starts = shiftStarts(sessions), dayOf = s => workday(starts.get(String(s._id)));
+  // Each group's own reset hour (e.g. DPM 18:00 for overtime) decides its workday.
+  const hours = groupResetHours(profiles, WORKDAY_HOUR, groupRules);
+  const starts = shiftStarts(sessions), dayOf = s => sessionWorkday(starts.get(String(s._id)), s.profileId, hours);
   const sessionDay = new Map(sessions.map(s => [String(s._id), dayOf(s)]));
   const days = monthDays(month, today);
   // Database scores per workday (all sessions of the day: battles and borrowed accounts included).
@@ -69,7 +71,7 @@ async function buildReport({ db, sheets, profiles, monthly, now = Date.now(), gr
   // (sessions from before the heartbeat existed).
   const closed = s => !liveSessionIds.has(String(s._id)) && (knownSessionIds.has(String(s._id)) || now - (+new Date(s.updatedAt) || 0) > SETTLED);
 
-  const report = { _id: calendarDate(now), runId: `recon-${new Date(now).toISOString()}`, createdAt: new Date(now).toISOString(), month, workdayToday: today, appVersion, rules: 'workday 06:00; restart ≤30 min = same shift; group gifts shared among live members; Chung added only when not spread in the sheet', groups: [] };
+  const report = { _id: calendarDate(now), runId: `recon-${new Date(now).toISOString()}`, createdAt: new Date(now).toISOString(), month, workdayToday: today, appVersion, rules: 'workday 06:00 (group exceptions: ' + (Object.entries(hours).map(([id, h]) => (profiles.find(p => String(p._id) === id)?.name || id) + ' ' + h + ':00').join(', ') || 'none') + '); restart ≤30 min = same shift; group gifts shared among live members; Chung added only when not spread in the sheet', groups: [] };
   for (const source of GROUP_SHEETS.filter(s => groups.includes(s.group))) {
     const entry = { group: source.group, coverage: { state: 'checked', comparedDays: [], pendingDays: [], unmatchedTalents: [] }, rows: [], bridge: [] };
     report.groups.push(entry);
@@ -93,7 +95,7 @@ async function buildReport({ db, sheets, profiles, monthly, now = Date.now(), gr
     const compared = new Set();
 
     for (const date of days) {
-      const isPast = date < today, sheetDay = sheetDays.get(date);
+      const isPast = date < sessionWorkday(now, groupId, hours), sheetDay = sheetDays.get(date);
       const own = sessions.filter(s => sessionDay.get(String(s._id)) === date && (String(s.profileId) === groupId || sessionGroups.get(String(s._id))?.has(groupId)));
       const dayScores = scores.get(date);
       const dbGroup = dayScores.group.find(g => g.groupId === groupId)?.value || 0;
@@ -182,14 +184,14 @@ function renderMarkdown(report) {
 }
 
 const COLLECTION = 'reconciliation_reports';
-function createDailyReport({ getDb, sheets, readProfiles, current, clock = Date.now, groups = DEFAULT_GROUPS, runHour = 9, appVersion = 'dev' }) {
+function createDailyReport({ getDb, sheets, readProfiles, current, clock = Date.now, groups = DEFAULT_GROUPS, runHour = 9, appVersion = 'dev', groupRules }) {
   let running = null;
   async function build() {
     const db = getDb(); if (!db) throw new Error('Database unavailable');
     if (!(await sheets.status()).connected) throw new Error('Sheets not connected');
     const now = clock(), [profiles, monthlyResult] = await Promise.all([readProfiles(), current(0, '')]);
     const previous = await db.collection(COLLECTION).find({ _id: { $lt: calendarDate(now) } }).sort({ _id: -1 }).limit(1).next();
-    const report = await buildReport({ db, sheets, profiles, monthly: monthlyResult?.data, now, groups, previous, appVersion });
+    const report = await buildReport({ db, sheets, profiles, monthly: monthlyResult?.data, now, groups, previous, appVersion, groupRules: groupRules?.() || null });
     await db.collection(COLLECTION).replaceOne({ _id: report._id }, report, { upsert: true });
     return report;
   }

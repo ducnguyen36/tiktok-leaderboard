@@ -1,6 +1,6 @@
 'use strict';
 const {GROUP_SHEETS,findMonthTab}=require('./groupSheets');
-const {dayKey,dayStart,shiftStarts,scoreRows,sessionGiftPipeline,liveGroups}=require('./rankingNext');
+const {dayKey,dayStart,shiftStarts,scoreRows,sessionGiftPipeline,liveGroups,groupResetHours,sessionWorkday}=require('./rankingNext');
 const {decodeGiftBuckets}=require('./leaderboardPerformance');
 const {sheetsReadError}=require('./sheetsConnection');
 // Sheets record a workday from 06:00: a night shift after midnight belongs to the
@@ -67,13 +67,13 @@ function matchingProfile(profiles,group){
   const matches=profiles.filter(p=>allowed.includes(canonical(p.name)));return matches.length===1?matches[0]:null;
 }
 function discrepancy(backend,sheet,details){const delta=backend-sheet;return Number.isFinite(delta)&&Math.abs(delta)>1000?{...details,backend,sheet,delta,threshold:1000}:null}
-function comparableDay(date,profileId,sessions,known,active,starts=shiftStarts(sessions)){
-  const entries=sessions.filter(s=>String(s.profileId)===String(profileId)&&workday(starts.get(String(s._id)))===date);
+function comparableDay(date,profileId,sessions,known,active,starts=shiftStarts(sessions),hours={}){
+  const entries=sessions.filter(s=>String(s.profileId)===String(profileId)&&sessionWorkday(starts.get(String(s._id)),s.profileId,hours)===date);
   // Legacy controllers can reuse a session for multiple days. Only compare days
   // whose sessions have been observed by the new, day-aware controller publisher.
   return entries.length>0&&entries.every(s=>known.has(String(s._id))&&!active.has(String(s._id)));
 }
-function createSheetReconciliation({getDb,sheets,clock=Date.now}){
+function createSheetReconciliation({getDb,sheets,groupRules,clock=Date.now}){
   let result={state:'pending',warnings:[],sources:[]},pending,checked=0,version='';
   async function build(profiles,currentVersion){
     const now=clock(),today=workday(now),month=today.slice(0,7),db=getDb();
@@ -81,7 +81,8 @@ function createSheetReconciliation({getDb,sheets,clock=Date.now}){
     const gifts=sessions.length?decodeGiftBuckets(await db.collection('gifts').aggregate(sessionGiftPipeline(sessions.map(s=>s._id)),{allowDiskUse:true,maxTimeMS:60000}).toArray()):[];
     const live=await db.collection('leaderboard_live').find({source:'helioscontrol',liveSince:{$gte:new Date(dayStart(month+'-01',WORKDAY_HOUR)-86400000)}}).toArray();
     // Sessions opened by a mid-shift restart belong to the shift's workday.
-    const starts=shiftStarts(sessions),shiftDay=s=>workday(starts.get(String(s._id)));
+    // Each group's own reset hour (e.g. DPM 18:00 for overtime) decides its workday.
+    const hours=groupResetHours(profiles,WORKDAY_HOUR,groupRules?.()),starts=shiftStarts(sessions),shiftDay=s=>sessionWorkday(starts.get(String(s._id)),s.profileId,hours);
     const knownSessionIds=new Set(live.map(s=>String(s.sessionId)));
     const liveSessionIds=new Set(live.filter(s=>liveGroups([s],now).size).map(s=>String(s.sessionId)));
     const warnings=[],sources=[];
@@ -97,7 +98,8 @@ function createSheetReconciliation({getDb,sheets,clock=Date.now}){
         if(parsed.error){sources.push({group:source.group,state:parsed.error});continue}
         // Talents without a recognisable sheet column are left out; group totals are explicit.
         const names=parsed.names,groupOnly=!names.length;
-        const complete=parsed.days.filter(day=>day.date<today&&comparableDay(day.date,profile._id,sessions,knownSessionIds,liveSessionIds,starts));
+        const groupToday=sessionWorkday(now,profile._id,hours);
+        const complete=parsed.days.filter(day=>day.date<groupToday&&comparableDay(day.date,profile._id,sessions,knownSessionIds,liveSessionIds,starts,hours));
         const dates=new Set(complete.map(d=>d.date));
         // Every session of those workdays counts: battles and lives on another
         // group's account are split by member group exactly like the board.
@@ -119,7 +121,7 @@ function createSheetReconciliation({getDb,sheets,clock=Date.now}){
     if(await sheets.version()!==currentVersion)return;
     result={state:'checked',warnings,sources,checkedAt:new Date(now).toISOString()};checked=clock();version=currentVersion;
   }
-  return{status(){return result},async refresh(profiles){
+  return{status(){return result},invalidate(){checked=0;version=''},async refresh(profiles){
     const connected=await sheets.status();if(!connected.connected){result={state:'disconnected',warnings:[],sources:[]};version='';return}
     const currentVersion=await sheets.version();if(currentVersion!==version)result={state:'pending',warnings:[],sources:[]};
     if(pending)return pending;if(currentVersion===version&&clock()-checked<300000)return;

@@ -38,13 +38,17 @@ function scoreRows(profiles,gifts,sessions,avatar=value=>value||''){
   };
 }
 // The workday (06:00 by default) decides which day a shift belongs to. DPM works
-// overtime until the next afternoon, so its shifts only roll over at 18:00.
+// overtime until the next afternoon, so its shifts only roll over at 18:00. Groups'
+// own reset hours are an admin setting; until one is saved, the DPM default applies.
 const WORKDAY_HOUR=6,LATE_GROUP_HOUR=18,LATE_GROUPS=/\bDPM\b/i;
-function groupResetHours(profiles,resetHour){
+function groupResetHours(profiles,resetHour,rules=null){
   const hours={};if(resetHour!==WORKDAY_HOUR)return hours;
+  if(rules){for(const p of profiles||[])if(Number.isInteger(rules[String(p._id)]))hours[String(p._id)]=rules[String(p._id)];return hours}
   for(const p of profiles||[])if(LATE_GROUPS.test(p.name||''))hours[String(p._id)]=LATE_GROUP_HOUR;
   return hours;
 }
+// Workday of a session from its shift start, using the group's own reset hour.
+function sessionWorkday(start,profileId,hours,resetHour=WORKDAY_HOUR){return dayKey(start,hours[String(profileId)]??resetHour)}
 // The board keeps showing the finished workday until the hold time (16:00), then
 // moves to the new one. A hold at or before the reset hour has no effect.
 function holdHours(holdUntil){const m=/^(\d{2}):(\d{2})$/.exec(holdUntil||'');return m?+m[1]+m[2]/60:0}
@@ -59,7 +63,7 @@ function sessionGiftPipeline(ids){
   return[{$match:{sessionId:{$in:ids}}},{$group:{_id:Object.fromEntries(fields.map(f=>[f,'$'+f])),count:{$sum:1}}},{$project:{_id:0,gift:'$_id',count:1}}];
 }
 function decorateLive(rows,states,now){const groups=liveGroups(states,now);return rows.map(row=>({...row,...(groups.get(String(row.groupId))||{live:false})}))}
-function createNextRankingForHour({getDb,current,readProfiles,readLocations,avatar,reconcile,clock=Date.now,resetHour=0,holdUntil=''}){
+function createNextRankingForHour({getDb,current,readProfiles,readLocations,avatar,reconcile,groupRules,clock=Date.now,resetHour=0,holdUntil=''}){
   let cached,pending,generation=0;
   async function build(force=false){
     const revision=generation,started=clock(),db=getDb();if(!db)throw Error('Database unavailable');
@@ -67,7 +71,7 @@ function createNextRankingForHour({getDb,current,readProfiles,readLocations,avat
     const from=new Date(dayStart(displayDay(started,resetHour,holdUntil),resetHour)-DAY-MAX_SHIFT);
     const [monthly,profiles,locations,sessions,states]=await Promise.all([current(resetHour,'',{force}),readProfiles(),readLocations(),db.collection('sessions').find({$or:[{createdAt:{$gte:from}},{sessionStartedAt:{$gte:from}}]},{projection:{profileId:1,createdAt:1,sessionStartedAt:1,sessionName:1,updatedAt:1}}).toArray(),db.collection('leaderboard_live').find({live:true,heartbeatAt:{$gt:new Date(started-90000)}}).toArray()]);
     const buckets=sessions.length?decodeGiftBuckets(await db.collection('gifts').aggregate(sessionGiftPipeline(sessions.map(s=>s._id)),{allowDiskUse:true,maxTimeMS:60000}).toArray()):[];
-    const groupHours=groupResetHours(profiles,resetHour),days=partitionSessions(sessions,started,resetHour,{holdUntil,groupHours}),{today,yesterday}=days;
+    const groupHours=groupResetHours(profiles,resetHour,groupRules?.()),days=partitionSessions(sessions,started,resetHour,{holdUntil,groupHours}),{today,yesterday}=days;
     const scores=key=>scoreRows(profiles,buckets.filter(g=>days.keys.get(String(g.sessionId))===key),sessions,avatar);
     const daily=scores(today),prior=scores(yesterday);
     for(const kind of ['group','individual'])daily[kind]=daily[kind].map(row=>({...row,yesterday:prior[kind].find(p=>p.name===row.name&&p.groupId===row.groupId)||null}));
@@ -106,5 +110,5 @@ function createNextRanking(options){
   }
  };
 }
-module.exports={WORKDAY_HOUR,DEFAULT_CONTEXT,dayKey,dayStart,displayDay,groupResetHours,sessionStart,shiftStarts,partitionSessions,liveGroups,scoreRows,sessionGiftPipeline,decorateLive,createNextRanking};
+module.exports={WORKDAY_HOUR,DEFAULT_CONTEXT,dayKey,dayStart,displayDay,groupResetHours,sessionWorkday,sessionStart,shiftStarts,partitionSessions,liveGroups,scoreRows,sessionGiftPipeline,decorateLive,createNextRanking};
 

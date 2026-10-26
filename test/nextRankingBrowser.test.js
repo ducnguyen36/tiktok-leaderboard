@@ -59,3 +59,23 @@ test('old preferences migrate without overwriting original settings, and hold-to
  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('helios_leaderboard_v2_current'))),legacy);
  await page.mouse.move(40,20);await page.mouse.down();await page.locator('#settings-dialog').waitFor({state:'visible'});await page.mouse.up();await page.keyboard.press('7');assert.equal(await page.locator('#settings-dialog').isVisible(),false);
 });
+test('TVs follow an admin broadcast at once and keep it as their default; admin controls stay hidden on TVs',async t=>{
+ const{page,state}=await fixture(t);assert.equal(await page.locator('#broadcast-box').isHidden(),true);assert.equal(await page.locator('#group-reset').isHidden(),true);
+ const current=await page.evaluate(()=>JSON.parse(localStorage.getItem('helios_leaderboard_next_current')));
+ state.settings={version:3,config:{...current,layout:'classic',scores:[false,false,false,false,false]},groupResetHours:{g:18},updatedAt:new Date().toISOString(),updatedBy:'admin@example.test'};state.broadcast();
+ await page.waitForFunction(()=>JSON.parse(localStorage.getItem('helios_leaderboard_next_current')).layout==='classic');
+ const stored=await page.evaluate(()=>({def:JSON.parse(localStorage.getItem('helios_leaderboard_next_default')),version:localStorage.getItem('helios_leaderboard_next_broadcast'),layout:document.querySelector('.tv').dataset.layout}));
+ assert.equal(stored.def.layout,'classic');assert.deepEqual(stored.def.scores,[false,false,false,false,false]);assert.equal(stored.version,'3');assert.equal(stored.layout,'classic');
+ // A local change afterwards is kept until the next broadcast.
+ await page.keyboard.press('1');await page.reload();await page.locator('[data-key="monthly-ranking"] .row').first().waitFor({state:'attached'});
+ assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('helios_leaderboard_next_current')).scores[0]),true);
+});
+test('admin edits group reset exceptions and saves settings for all TVs',async t=>{
+ const{page,state}=await fixture(t);state.admin=true;state.settings={...state.settings,groupResetHours:{g:18}};await page.reload();await page.locator('[data-key="monthly-ranking"] .row').first().waitFor({state:'attached'});
+ await page.keyboard.press('7');await page.locator('[data-page="1"]').click();await page.locator('#group-reset .group-reset-row').first().waitFor();
+ const hour=page.locator('#group-reset .group-reset-row input');await hour.fill('17');await hour.press('Tab');
+ await page.locator('[data-page="4"]').click();await page.locator('#broadcast-settings').click();
+ await page.waitForFunction(()=>/1/.test(document.getElementById('broadcast-status').textContent));
+ assert.equal(state.settings.version,1);assert.deepEqual(state.settings.groupResetHours,{g:17});assert.equal(state.settings.config.layout,'podium');
+ assert.equal(await page.evaluate(()=>localStorage.getItem('helios_leaderboard_next_broadcast')),'1');
+});
