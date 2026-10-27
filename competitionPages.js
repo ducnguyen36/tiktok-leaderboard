@@ -102,7 +102,7 @@ function fallbackRanks(out,participants,gifts,log=null){
     const together=fromLog.length?[...new Set([...fromLog,...group])]:[...out.entries()].filter(([n,e])=>names.includes(n)&&msOf(e.at)===t).map(([n])=>n);
     const m=useLog&&fromLog.length?stillInAt(names,log,t):active+[...out.values()].filter(e=>msOf(e.at)>t).length+together.length;
     const scores=scoreGifts((gifts||[]).filter(g=>(Number(g.timeStamp)||0)<=t));
-    together.sort((a,b)=>(scores.get(b)||0)-(scores.get(a)||0)||a.localeCompare(b)).forEach((n,i)=>{const e=out.get(n);if(!e.rank&&group.includes(n))out.set(n,{...e,rank:m-together.length+1+i,of:m,computed:true})});
+    together.sort((a,b)=>(scores.get(b)||0)-(scores.get(a)||0)||a.localeCompare(b)).forEach((n,i)=>{const e=out.get(n);if(e&&!e.rank&&group.includes(n))out.set(n,{...e,rank:m-together.length+1+i,of:m,computed:true})});
   }
   return out;
 }

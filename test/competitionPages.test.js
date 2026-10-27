@@ -152,3 +152,9 @@ test('revive counts come from the eliminatedLog "in" lines and are kept in snaps
  const rows=buildBoard(P,[],{eliminated:[{talentName:'A',at:new Date(3)}],eliminatedLog:log}).rows;assert.deepEqual(rows.map(r=>[r.talentName,r.revives]),[['A',1],['B',0]]);
  assert.equal(snapshotEntry({talentName:'A',revives:1},true).revives,1);assert.equal(snapshotEntry({talentName:'A'},true).revives,0,'old snapshots: none');
 });
+test('fallback rank survives a talent revived after going out with others (still in the log group, no longer out)',()=>{
+ const P=['A','B','C'].map(n=>({talentName:n,profileId:'g',profileName:'G'})),gifts=[{cost:5,timeStamp:1,receivedTalent:'A'}];
+ const log=[{talentName:'B',action:'out',at:new Date(100)},{talentName:'C',action:'out',at:new Date(100)},{talentName:'C',action:'in',at:new Date(200)}];
+ const rows=Object.fromEntries(buildBoard(P,gifts,{eliminated:[{talentName:'B',at:new Date(100)}],eliminatedLog:log}).rows.map(r=>[r.talentName,[r.eliminated,r.eliminatedRank,r.revives]]));
+ assert.deepEqual(rows,{A:[false,null,0],B:[true,2,0],C:[false,null,1]},'C left the group (revived): B still gets 2/3 by score at that moment (B 0 = C 0, name order)');
+});
