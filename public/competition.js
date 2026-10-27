@@ -58,13 +58,12 @@
  const value=(row,key=mode)=>row[key]==null?-Infinity:Number(row[key])||0,other=()=>mode==='competition'?'overall':'competition';
  function ranked(rows){return [...rows].sort((a,b)=>value(b)-value(a)||value(b,other())-value(a,other())||String(a.talentName||a.profileName).localeCompare(String(b.talentName||b.profileName)))}
  function score(row){const v=row[mode];return el('b',`score${v!=null&&Number(v)<0?' neg':''}`,fmt(v))}
- // Eliminated talents are hidden by default; when shown they are dimmed and unnumbered, so the
- // players still in the competition keep continuous ranks either way. Groups always count everyone.
+ // Eliminated talents are left out of the ranking; the toolbar eye shows how many (for the page in view)
+ // and can show them, dimmed and unnumbered, so the players still competing keep continuous ranks. Groups count everyone.
  function list(title,rows,group){
   const wrap=el(group?'aside':'div',group?'groups':'talents');if(group)wrap.setAttribute('aria-label',title);
   const head=el('div','section-head');head.append(el('div','section-title',`${title} · ${MODES[mode]}`));wrap.append(head);
-  const out=group?0:rows.filter(r=>r.eliminated).length,visible=group||showOut?rows:rows.filter(r=>!r.eliminated);
-  if(out){const t=el('button','out-toggle',`👁 ${showOut?'Ẩn':'Hiện'} người bị loại (${out})`);t.type='button';t.dataset.toggleOut='1';t.setAttribute('aria-pressed',String(showOut));head.append(t)}
+  const visible=group||showOut?rows:rows.filter(r=>!r.eliminated);
   const ol=el('ol','rows');if(!visible.length)ol.append(el('li','empty',rows.length?'Tất cả đã bị loại':'Chưa có dữ liệu'));
   let rank=0;
   ranked(visible).forEach(row=>{const isOut=!group&&row.eliminated;if(!isOut)rank++;const li=el('li',`row${isOut?' out':rank<=3?` top${rank}`:''}`);li.append(el('span','rank',isOut?'–':String(rank)));const name=group?row.profileName:row.talentName;
@@ -92,17 +91,23 @@
   box.style.scrollBehavior='auto';box.scrollLeft=box.children[index].offsetLeft;box.style.scrollBehavior='';markDots(index);
  }
  function indexNow(){const box=$('pages');let best=0,gap=Infinity;[...box.children].forEach((c,i)=>{const d=Math.abs(c.offsetLeft-box.scrollLeft);if(d<gap){gap=d;best=i}});return best}
- function markDots(index){[...$('dots').children].forEach((d,i)=>d.setAttribute('aria-current',String(i===index)));$('prev-page').disabled=index===0;$('next-page').disabled=index>=$('pages').children.length-1}
+ // Eye count follows the page in view (LIVE or a snapshot taken when fewer/more were out).
+ function applyOut(index=indexNow()){
+  const page=board&&pages()[index],out=page?page.rows.filter(r=>r.eliminated).length:0,b=$('out-toggle');
+  b.hidden=!out;$('out-count').textContent=String(out);b.setAttribute('aria-pressed',String(showOut));b.classList.toggle('on',showOut);
+  const label=`${showOut?'Ẩn':'Hiện'} ${out} người bị loại`;b.setAttribute('aria-label',label);b.title=label;
+ }
+ function markDots(index){applyOut(index);[...$('dots').children].forEach((d,i)=>d.setAttribute('aria-current',String(i===index)));$('prev-page').disabled=index===0;$('next-page').disabled=index>=$('pages').children.length-1}
  function go(index){const box=$('pages'),page=box.children[Math.max(0,Math.min(index,box.children.length-1))];if(page)box.scrollTo({left:page.offsetLeft,behavior:'smooth'})}
  let scrollFrame=0;$('pages').addEventListener('scroll',()=>{cancelAnimationFrame(scrollFrame);scrollFrame=requestAnimationFrame(()=>{const i=indexNow(),page=$('pages').children[i];if(page)current=page.dataset.id;markDots(i)})});
  $('pages').addEventListener('keydown',e=>{if(e.key==='ArrowRight'){e.preventDefault();go(indexNow()+1)}else if(e.key==='ArrowLeft'){e.preventDefault();go(indexNow()-1)}});
  $('prev-page').addEventListener('click',()=>go(indexNow()-1));$('next-page').addEventListener('click',()=>go(indexNow()+1));
  $('dots').addEventListener('click',e=>{const b=e.target.closest('button[data-page]');if(b)go(Number(b.dataset.page))});
  document.querySelector('.modes').addEventListener('click',e=>{const b=e.target.closest('button[data-mode]');if(!b||!MODES[b.dataset.mode])return;mode=b.dataset.mode;store('mode',mode);applyMode();if(board)renderPages()});
+ $('out-toggle').addEventListener('click',()=>{showOut=!showOut;store('out',showOut?'1':'0');renderPages();applyOut()});
  $('groups-toggle').addEventListener('click',()=>{showGroups=!showGroups;store('groups',showGroups?'1':'0');applyGroups()});
  applyMode();applyGroups();
  $('pages').addEventListener('click',async e=>{
-  if(e.target.closest('button[data-toggle-out]')){showOut=!showOut;store('out',showOut?'1':'0');renderPages();return}
   const rename=e.target.closest('button[data-rename]'),remove=e.target.closest('button[data-remove]');
   if(rename){const snap=board.snapshots.find(s=>s.id===rename.dataset.rename);if(snap)openDialog({mode:'rename',id:snap.id,value:snap.name})}
   if(remove){const snap=board.snapshots.find(s=>s.id===remove.dataset.remove);if(!snap||!confirm(`Xóa snapshot "${snap.name}"?`))return;

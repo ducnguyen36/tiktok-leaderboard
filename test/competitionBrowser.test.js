@@ -75,7 +75,7 @@ test('outside viewer requests access, admin approves, viewer switches modes, tog
  admin.once('dialog',d=>d.dismiss());await trash.click();await admin.waitForTimeout(300);assert.equal(await admin.locator('.page').count(),2,'cancelled confirm keeps it');
  admin.once('dialog',d=>{assert.match(d.message(),/Chốt 1/);d.accept()});await trash.click();await admin.waitForFunction(()=>document.querySelectorAll('.page').length===1);
 });
-test('eliminated talents are hidden by default, shown dimmed with a label on request, ranks stay continuous',async t=>{
+test('eliminated talents are left out of the ranking; the toolbar eye shows their count and can show them dimmed',async t=>{
  const {app,state}=createCompetitionFixture(),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base=`http://127.0.0.1:${server.address().port}`;
  // LILY 104, RYAN 40, Chanee 4 (Cuộc thi); RYAN is out.
  state.db.rows('competitions')[0].eliminated=[{talentName:'RYAN',at:new Date()}];
@@ -86,12 +86,14 @@ test('eliminated talents are hidden by default, shown dimmed with a label on req
  await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();
  const rows=()=>live.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.rank').textContent,r.querySelector('.who b').textContent,r.classList.contains('out')]));
  assert.deepEqual(await rows(),[['1','LILY 🍉',false],['2','Chanee🌸',false]],'hidden by default; ranks continuous');
- const toggle=live.getByRole('button',{name:/Hiện người bị loại \(1\)/});await toggle.click();
+ const eye=page.locator('#out-toggle');assert.equal(await eye.isVisible(),true);assert.equal((await eye.textContent()).trim(),'1','eye icon shows only the count');assert.equal(await live.locator('.out-toggle').count(),0,'no text button in the list');
+ const [eyeBox,groupsBox]=await Promise.all([eye.boundingBox(),page.getByRole('button',{name:'Nhóm'}).boundingBox()]);assert.ok(Math.abs(eyeBox.y-groupsBox.y)<4,'eye sits on the toolbar row with Nhóm');
+ assert.equal(await eye.getAttribute('aria-label'),'Hiện 1 người bị loại');await eye.click();
  assert.deepEqual(await rows(),[['1','LILY 🍉',false],['–','RYAN',true],['2','Chanee🌸',false]],'shown in score order, unnumbered');
  const out=live.locator('.talents .row.out');assert.match(await out.textContent(),/Đã loại/);assert.ok(Number(await out.evaluate(e=>getComputedStyle(e).opacity))<0.7,'dimmed');
  assert.match(await out.locator('.score').textContent(),/40/,'score still visible');
  await page.getByRole('button',{name:'Nhóm'}).click();assert.match(await live.locator('.groups').textContent(),/HT - ICONZ\s*40/,'groups still count eliminated points');
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  await page.reload();await live.locator('.talents .row').first().waitFor();assert.equal((await rows()).length,3,'choice remembered per browser');
- await live.getByRole('button',{name:/Ẩn người bị loại \(1\)/}).click();assert.equal((await rows()).length,2);
+ assert.equal(await eye.getAttribute('aria-label'),'Ẩn 1 người bị loại');await eye.click();assert.equal((await rows()).length,2);
 });
