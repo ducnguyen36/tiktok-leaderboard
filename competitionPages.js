@@ -85,14 +85,22 @@ function withLogRanks(list,log){
   return list.map(e=>{if(posInt(e?.rank))return e;const at=+new Date(e?.at);const hit=[...log].reverse().find(l=>l?.action==='out'&&l.talentName===e?.talentName&&+new Date(l.at)===at&&posInt(l.rank));return hit?{...e,rank:hit.rank,of:hit.of}:e});
 }
 // Fallback when HeliosControl wrote no rank (older competitions or panel versions): M = players still in just
-// before that elimination (those still competing now + everyone out at that moment or later); talents out at
-// the same moment take M-g+1..M by their score at that moment (higher score = better rank).
-function fallbackRanks(out,participants,gifts){
-  const names=(participants||[]).map(p=>p.talentName||''),active=names.filter(n=>!out.has(n)).length,moments=new Map();
-  for(const [name,e] of out){if(e.rank||!names.includes(name))continue;const t=Date.parse(e.at||'');const key=Number.isFinite(t)?t:-Infinity;(moments.get(key)||moments.set(key,[]).get(key)).push(name)}
+// before that elimination; talents out at the same moment take M-g+1..M by their score at that moment
+// (higher score = better rank). With eliminatedLog, "still in" is replayed from the log (revivals at that
+// same moment count first, as on the panel); without it: those competing now + everyone out then or later.
+const msOf=v=>{const t=Date.parse(v instanceof Date?v.toISOString():v||'');return Number.isFinite(t)?t:-Infinity};
+function stillInAt(names,log,t){
+  const last=new Map();for(const l of log){const at=msOf(l?.at);if(!names.includes(l?.talentName)||!['out','in'].includes(l?.action))continue;if(at<t||(at===t&&l.action==='in')){const prev=last.get(l.talentName);if(!prev||at>=prev.at)last.set(l.talentName,{at,action:l.action})}}
+  return names.filter(n=>last.get(n)?.action!=='out').length;
+}
+function fallbackRanks(out,participants,gifts,log=null){
+  const names=(participants||[]).map(p=>p.talentName||''),active=names.filter(n=>!out.has(n)).length,moments=new Map(),useLog=Array.isArray(log)&&log.length>0;
+  for(const [name,e] of out){if(e.rank||!names.includes(name))continue;const key=msOf(e.at);(moments.get(key)||moments.set(key,[]).get(key)).push(name)}
   for(const [t,group] of moments){
-    const together=[...out.entries()].filter(([n,e])=>{const x=Date.parse(e.at||'');return names.includes(n)&&(Number.isFinite(x)?x:-Infinity)===t}).map(([n])=>n);
-    const later=[...out.values()].filter(e=>{const x=Date.parse(e.at||'');return(Number.isFinite(x)?x:-Infinity)>t}).length,m=active+later+together.length;
+    // Out together at t: from the log (including talents revived since), else those still out with that time.
+    const fromLog=useLog?[...new Set(log.filter(l=>l?.action==='out'&&msOf(l.at)===t&&names.includes(l.talentName)).map(l=>l.talentName))]:[];
+    const together=fromLog.length?[...new Set([...fromLog,...group])]:[...out.entries()].filter(([n,e])=>names.includes(n)&&msOf(e.at)===t).map(([n])=>n);
+    const m=useLog&&fromLog.length?stillInAt(names,log,t):active+[...out.values()].filter(e=>msOf(e.at)>t).length+together.length;
     const scores=scoreGifts((gifts||[]).filter(g=>(Number(g.timeStamp)||0)<=t));
     together.sort((a,b)=>(scores.get(b)||0)-(scores.get(a)||0)||a.localeCompare(b)).forEach((n,i)=>{const e=out.get(n);if(!e.rank&&group.includes(n))out.set(n,{...e,rank:m-together.length+1+i,of:m,computed:true})});
   }
@@ -101,8 +109,8 @@ function fallbackRanks(out,participants,gifts){
 const eliminatedFields=e=>e?{eliminated:true,eliminatedAt:e.at,eliminatedRank:e.rank,eliminatedOf:e.of,eliminatedRankSource:e.rank?(e.computed?'computed':'helioscontrol'):null}:{eliminated:false,eliminatedAt:null,eliminatedRank:null,eliminatedOf:null,eliminatedRankSource:null};
 // rows/groups carry both modes; overall (array by participant index) defaults to the competition gifts alone.
 // Eliminated talents keep their rows (flagged) and still count in their group: the gifts are the group's income.
-function buildBoard(participants,gifts,{windowGifts=[],overall=null,eliminated=null}={}){
-  const competition=scoreGifts(gifts),total=overall||overallScores(participants,gifts,windowGifts),out=fallbackRanks(eliminatedMap(eliminated),participants,gifts);
+function buildBoard(participants,gifts,{windowGifts=[],overall=null,eliminated=null,eliminatedLog=null}={}){
+  const competition=scoreGifts(gifts),total=overall||overallScores(participants,gifts,windowGifts),out=fallbackRanks(eliminatedMap(eliminated),participants,gifts,eliminatedLog);
   const rows=(participants||[]).map((p,i)=>({talentName:p.talentName||'',talentUid:String(p.talentUid||''),profileId:String(p.profileId||''),profileName:p.profileName||'',competition:competition.get(p.talentName)||0,overall:total[i]||0,...eliminatedFields(out.get(p.talentName||''))}));
   rows.sort((a,b)=>b.competition-a.competition||b.overall-a.overall||a.talentName.localeCompare(b.talentName));
   const groups=new Map();
@@ -150,7 +158,7 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
   async function loadEliminated(comp,fresh=false){
     const key=String(comp._id),cached=eliminatedCache.get(key),ttl=comp.status==='active'?LIVE_TTL:ENDED_TTL;
     if(!fresh&&cached&&clock()-cached.at<ttl)return cached.list;
-    const doc=await db().collection('competitions').findOne({_id:comp._id},{projection:{eliminated:1,eliminatedLog:1}}),list=withLogRanks(Array.isArray(doc?.eliminated)?doc.eliminated:[],doc?.eliminatedLog);
+    const doc=await db().collection('competitions').findOne({_id:comp._id},{projection:{eliminated:1,eliminatedLog:1}}),log=Array.isArray(doc?.eliminatedLog)?doc.eliminatedLog:[],list=withLogRanks(Array.isArray(doc?.eliminated)?doc.eliminated:[],log);list.log=log;
     eliminatedCache.delete(key);eliminatedCache.set(key,{at:clock(),list});if(eliminatedCache.size>6)eliminatedCache.delete(eliminatedCache.keys().next().value);
     return list;
   }
@@ -200,7 +208,7 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
   async function liveBoard(comp,fresh=false){
     const [gifts,window,eliminated]=await Promise.all([loadGifts(comp,fresh),loadWindow(comp,fresh),loadEliminated(comp,fresh)]);
     const overall=scoreOverall(comp.participants,gifts,{skip:window.ids,scores:window.scores}).scores;
-    return{at:clock(),...buildBoard(comp.participants,gifts,{overall,eliminated})};
+    return{at:clock(),...buildBoard(comp.participants,gifts,{overall,eliminated,eliminatedLog:eliminated.log})};
   }
 
   for(const file of STATIC_FILES)router.get(`/${file}`,(req,res)=>{res.set({'Cache-Control':'public, max-age=3600','X-Content-Type-Options':'nosniff'});res.sendFile(file,{root:publicDir})});

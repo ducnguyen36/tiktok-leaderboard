@@ -49,8 +49,10 @@
   schedule(10000);
  }
  async function loadCsrf(){try{csrf=(await call('/auth/status')).csrf||''}catch{csrf=''}}
- // gone = talents already out in the snapshot before this page (newest first): they left in an earlier round.
- const outNames=snap=>new Set((snap?.rows||[]).filter(r=>r.eliminated).map(r=>r.talentName));
+ // gone = talents out since before the snapshot preceding this page (newest first): they left in an earlier
+ // round. Someone revived and eliminated again after that snapshot went out in this round, so is not gone.
+ const outNames=snap=>{const gone=new Set();for(const r of snap?.rows||[])if(r.eliminated)gone.add(r.talentName);gone.at=snap?.at??null;gone.outAt=new Map((snap?.rows||[]).filter(r=>r.eliminated).map(r=>[r.talentName,r.eliminatedAt||null]));return gone};
+ const isGone=(page,row)=>{if(!row.eliminated||!page.gone.has(row.talentName))return false;const before=page.gone.outAt.get(row.talentName),now=row.eliminatedAt;return !(before&&now&&Date.parse(now)>Date.parse(before))};
  function pages(){
   const live=board.live,snaps=board.snapshots,list=[{id:'live',live:true,title:'LIVE',sub:'Cộng dồn từ đầu cuộc thi',rows:live.rows,groups:live.groups,gone:outNames(snaps[0])}];
   snaps.forEach((s,i)=>list.push({id:s.id,title:s.name,sub:`${when(s.at)}${s.createdBy?` · ${s.createdBy}`:''}`,rows:s.rows,groups:s.groups,gone:outNames(snaps[i+1])}));
@@ -58,15 +60,16 @@
  }
  // "Cuộc thi": talents out since an earlier round are gone; those out in this round are hidden behind the eye
  // (shown dimmed and unnumbered when it is on). "Tổng cộng" (revenue) lists everyone normally.
- const roundOut=(page,row)=>mode==='competition'&&row.eliminated&&!page.gone.has(row.talentName);
- function talentRows(page){return mode==='competition'?page.rows.filter(r=>!(r.eliminated&&page.gone.has(r.talentName))&&(showOut||!r.eliminated)):page.rows}
+ const roundOut=(page,row)=>mode==='competition'&&row.eliminated&&!isGone(page,row);
+ function talentRows(page){return mode==='competition'?page.rows.filter(r=>!isGone(page,r)&&(showOut||!r.eliminated)):page.rows}
  // Sorted by the selected mode; unknown values (old snapshots in "Tổng cộng") go last.
  const value=(row,key=mode)=>row[key]==null?-Infinity:Number(row[key])||0,other=()=>mode==='competition'?'overall':'competition';
  function ranked(rows){return [...rows].sort((a,b)=>value(b)-value(a)||value(b,other())-value(a,other())||String(a.talentName||a.profileName).localeCompare(String(b.talentName||b.profileName)))}
  function score(row){const v=row[mode];return el('b',`score${v!=null&&Number(v)<0?' neg':''}`,fmt(v))}
- // Players still competing rank by score. Eliminated ones (eye on) follow at the bottom with the rank they
- // went out at (eliminatedRank: HeliosControl's panel position, or the server's fallback); rows without one
- // (old snapshots) follow by when they went out, latest first. Groups always count everyone.
+ // Players still competing rank by score. Eliminated ones (eye on) follow at the bottom, ordered by the rank they
+ // went out at (eliminatedRank: HeliosControl's panel position, or the server's fallback), shown in their label;
+ // revivals can give two people the same locked rank, so the number column is just the position (no gaps or
+ // repeats). Rows without a rank (old snapshots) follow by when they went out, latest first. Groups count everyone.
  const outTime=row=>{const t=Date.parse(row.eliminatedAt||'');return Number.isFinite(t)?t:-Infinity};
  const outRank=row=>Number.isInteger(row.eliminatedRank)&&row.eliminatedRank>0?row.eliminatedRank:null;
  function placed(rows,page,group){
@@ -79,7 +82,7 @@
   const head=el('div','section-head');head.append(el('div','section-title',`${title} · ${MODES[mode]}`));wrap.append(head);
   const visible=group?rows:talentRows(page);
   const ol=el('ol','rows');if(!visible.length)ol.append(el('li','empty',rows.length?'Tất cả đã bị loại':'Chưa có dữ liệu'));
-  placed(visible,page,group).forEach((row,i)=>{const isOut=!group&&roundOut(page,row),rank=isOut&&outRank(row)?outRank(row):i+1;const li=el('li',`row${isOut?' out':rank<=3?` top${rank}`:''}`);li.append(el('span','rank',String(rank)));const name=group?row.profileName:row.talentName;
+  placed(visible,page,group).forEach((row,i)=>{const isOut=!group&&roundOut(page,row),rank=i+1;const li=el('li',`row${isOut?' out':rank<=3?` top${rank}`:''}`);li.append(el('span','rank',String(rank)));const name=group?row.profileName:row.talentName;
    if(!group)li.append(el('span','avatar',Array.from(name||'?')[0]||'?'));
    const who=el('div','who');who.append(el('b','',name||'—'));if(!group){const sub=el('small','',row.profileName||'');if(isOut){const r=outRank(row),tag=el('span','out-tag',r?`Loại ở hạng ${r}${row.eliminatedOf?`/${row.eliminatedOf}`:''}`:'Đã loại');if(row.eliminatedAt)tag.title=`Bị loại lúc ${when(row.eliminatedAt)}`;sub.prepend(tag)}who.append(sub)}li.append(who,score(row));ol.append(li)});
   wrap.append(ol);return wrap;

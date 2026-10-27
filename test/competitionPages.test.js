@@ -137,3 +137,13 @@ test('elimination rank: HeliosControl rank/of used as is, missing ones computed 
  const live=(await call(slug+'/board',admin)).json.live;assert.deepEqual(live.rows.find(r=>r.talentName==='RYAN').eliminatedRank,2);
  const snap=(await call(slug+'/snapshots',{method:'POST',body:{name:'V'},...admin})).json.snapshot;assert.deepEqual([snap.rows.find(r=>r.talentName==='RYAN').eliminatedRank,snap.rows.find(r=>r.talentName==='RYAN').eliminatedOf],[2,3]);
 });
+test('fallback rank replays eliminatedLog: revived talents count as still in, revivals at the same moment first',()=>{
+ const P=['A','B','C','D','E','F'].map(n=>({talentName:n,profileId:'g',profileName:'G'})),gifts=['A','B','C','D','E','F'].map((n,i)=>({cost:60-i*10,timeStamp:1,receivedTalent:n}));
+ // t=100: E,F out (6 in). t=200: E revived and D out at the same moment (E counts as in: 5 in -> D 5/5). t=300: E out again (4 in: A,B,C,E).
+ const log=[{talentName:'E',action:'out',at:new Date(100)},{talentName:'F',action:'out',at:new Date(100)},{talentName:'E',action:'in',at:new Date(200)},{talentName:'D',action:'out',at:new Date(200)},{talentName:'E',action:'out',at:new Date(300)}];
+ const eliminated=[{talentName:'F',at:new Date(100)},{talentName:'D',at:new Date(200)},{talentName:'E',at:new Date(300)}];
+ const rows=Object.fromEntries(buildBoard(P,gifts,{eliminated,eliminatedLog:log}).rows.map(r=>[r.talentName,r.eliminatedRank+'/'+r.eliminatedOf]));
+ assert.deepEqual([rows.E,rows.D,rows.F],['4/4','5/5','6/6'],'E (revived, out again) gets the later rank; F keeps 6/6 although E left with it');
+ // Without the log the old estimate (current state) is used.
+ const plain=Object.fromEntries(buildBoard(P,gifts,{eliminated}).rows.map(r=>[r.talentName,r.eliminatedRank+'/'+r.eliminatedOf]));assert.deepEqual([plain.E,plain.D,plain.F],['4/4','5/5','6/6']);
+});

@@ -150,6 +150,18 @@ test('eliminated rows use the rank they went out at from HeliosControl, with a "
  const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
  await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();await page.locator('#out-toggle').click();
  const rows=await live.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.rank').textContent,r.querySelector('.who b').textContent,r.querySelector('.out-tag')?.textContent||'']));
- assert.deepEqual(rows,[['1','LILY 🍉',''],['2','Chanee🌸','Loại ở hạng 2/3'],['3','RYAN','Loại ở hạng 3/3']],'locked rank, not score (RYAN has more points)');
+ assert.deepEqual(rows,[['1','LILY 🍉',''],['2','Chanee🌸','Loại ở hạng 2/3'],['3','RYAN','Loại ở hạng 3/3']],'locked rank order, not score (RYAN has more points)');
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+});
+test('revivals can repeat a locked rank: the label keeps it, the number column stays a continuous position',async t=>{
+ const {app,state}=createCompetitionFixture(),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base=`http://127.0.0.1:${server.address().port}`;
+ // Like the panel: Chanee went out 2/3, was revived, and RYAN then went out 2/2 later.
+ state.db.rows('competitions')[0].eliminated=[{talentName:'Chanee🌸',at:new Date(Date.now()-60000),rank:2,of:3},{talentName:'RYAN',at:new Date(Date.now()-30000),rank:2,of:2}];
+ const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']}),errors=[];
+ t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});
+ const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);
+ const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();await page.locator('#out-toggle').click();
+ const rows=await live.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.rank').textContent,r.querySelector('.who b').textContent,r.querySelector('.out-tag')?.textContent||'']));
+ assert.deepEqual(rows,[['1','LILY 🍉',''],['2','RYAN','Loại ở hạng 2/2'],['3','Chanee🌸','Loại ở hạng 2/3']],'same locked rank: later out first; positions 1..3');
 });
