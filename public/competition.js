@@ -9,7 +9,7 @@
  const VIEWS=['loading-view','missing-view','request-view','pending-view','board-view'],MODES={competition:'Cuộc thi',overall:'Tổng cộng'};
  // Per-browser view preferences; storage can be unavailable (private mode, blocked site data).
  const stored=key=>{try{return localStorage.getItem(`heliosComp.${key}`)}catch{return null}},store=(key,value)=>{try{localStorage.setItem(`heliosComp.${key}`,value)}catch{}};
- let board=null,csrf='',mode=MODES[stored('mode')]?stored('mode'):'competition',showGroups=stored('groups')==='1',showOut=stored('out')==='1',timer=0,current='live',pageSig='',adminSig='',dialogMode=null,toastTimer=0;
+ let board=null,csrf='',mode=MODES[stored('mode')]?stored('mode'):'competition',showGroups=stored('groups')==='1',showOut=stored('out')==='1',standingsPref=stored('standings'),timer=0,current='live',pageSig='',adminSig='',dialogMode=null,toastTimer=0;
  function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
  const ICONS={pencil:'M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4',trash:'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6'};
  function iconButton(icon,label,data,cls=''){
@@ -60,8 +60,11 @@
  }
  // "Cuộc thi": talents out since an earlier round are gone; those out in this round are hidden behind the eye
  // (shown dimmed and unnumbered when it is on). "Tổng cộng" (revenue) lists everyone normally.
- const roundOut=(page,row)=>mode==='competition'&&row.eliminated&&!isGone(page,row);
- function talentRows(page){return mode==='competition'?page.rows.filter(r=>!isGone(page,r)&&(showOut||!r.eliminated)):page.rows}
+ // "Bảng chung cuộc" (podium): the provisional final standings, everyone 1..N with every eliminated talent
+ // below those still in (by elimination order). On by default once the competition has ended.
+ const standingsOn=()=>standingsPref==null?board?.competition?.status==='ended':standingsPref==='1';
+ const roundOut=(page,row)=>mode==='competition'&&row.eliminated&&(standingsOn()||!isGone(page,row));
+ function talentRows(page){return mode!=='competition'||standingsOn()?page.rows:page.rows.filter(r=>!isGone(page,r)&&(showOut||!r.eliminated))}
  // Sorted by the selected mode; unknown values (old snapshots in "Tổng cộng") go last.
  const value=(row,key=mode)=>row[key]==null?-Infinity:Number(row[key])||0,other=()=>mode==='competition'?'overall':'competition';
  function ranked(rows){return [...rows].sort((a,b)=>value(b)-value(a)||value(b,other())-value(a,other())||String(a.talentName||a.profileName).localeCompare(String(b.talentName||b.profileName)))}
@@ -81,7 +84,8 @@
   const head=el('div','section-head');head.append(el('div','section-title',`${title} · ${MODES[mode]}`));wrap.append(head);
   const visible=group?rows:talentRows(page);
   const ol=el('ol','rows');if(!visible.length)ol.append(el('li','empty',rows.length?'Tất cả đã bị loại':'Chưa có dữ liệu'));
-  placed(visible,page,group).forEach((row,i)=>{const isOut=!group&&roundOut(page,row),rank=i+1;const li=el('li',`row${isOut?' out':rank<=3?` top${rank}`:''}`);li.append(el('span','rank',String(rank)));const name=group?row.profileName:row.talentName;
+  placed(visible,page,group).forEach((row,i)=>{const isOut=!group&&roundOut(page,row),rank=i+1;// Eliminated rows are dimmed while the competition runs; the final standings of an ended one show everyone clearly.
+   const dim=isOut&&board.competition?.status!=='ended',li=el('li',`row${dim?' out':isOut?' out-final':''}${!isOut&&rank<=3?` top${rank}`:''}`);li.append(el('span','rank',String(rank)));const name=group?row.profileName:row.talentName;
    if(!group)li.append(el('span','avatar',Array.from(name||'?')[0]||'?'));
    const who=el('div','who');who.append(el('b','',name||'—'));if(!group){const sub=el('small','',row.profileName||'');if(isOut){const at=row.eliminatedAt?hhmm.format(new Date(row.eliminatedAt)):'',tag=el('span','out-tag',`Bị loại${at?` · ${at}`:''}${row.revives?` ↺${row.revives}`:''}`);
      tag.title=[row.eliminatedAt?`Bị loại lúc ${when(row.eliminatedAt)}`:'',row.revives?`đã hồi sinh ${row.revives} lần`:''].filter(Boolean).join(' · ');sub.prepend(tag)}who.append(sub)}li.append(who,score(row));ol.append(li)});
@@ -90,7 +94,7 @@
  function applyGroups(){$('board-view').classList.toggle('groups-on',showGroups);$('groups-toggle').setAttribute('aria-pressed',String(showGroups))}
  function applyMode(){for(const b of document.querySelectorAll('.modes button'))b.setAttribute('aria-pressed',String(b.dataset.mode===mode))}
  function renderPages(){
-  const all=pages(),sig=JSON.stringify([mode,showOut,board.canSnapshot,board.admin,all]);if(sig===pageSig)return;pageSig=sig;
+  const all=pages(),sig=JSON.stringify([mode,showOut,standingsOn(),board.canSnapshot,board.admin,all]);if(sig===pageSig)return;pageSig=sig;
   const box=$('pages'),dots=$('dots');box.replaceChildren();dots.replaceChildren();
   all.forEach((p,i)=>{
    const page=el('article',`page${p.live?' live':''}`);page.dataset.id=p.id;page.setAttribute('aria-label',p.title);
@@ -110,7 +114,8 @@
  // Eye count follows the page in view (LIVE or a snapshot taken when fewer/more were out).
  function applyOut(index=indexNow()){
   const page=board&&pages()[index],out=page?page.rows.filter(r=>roundOut(page,r)).length:0,b=$('out-toggle');
-  b.hidden=!out;$('out-count').textContent=String(out);b.setAttribute('aria-pressed',String(showOut));b.classList.toggle('on',showOut);
+  b.hidden=!out||standingsOn();const s=$('standings-toggle');s.hidden=mode!=='competition';s.setAttribute('aria-pressed',String(standingsOn()));
+  $('out-count').textContent=String(out);b.setAttribute('aria-pressed',String(showOut));b.classList.toggle('on',showOut);
   const label=`${showOut?'Ẩn':'Hiện'} ${out} người bị loại`;b.setAttribute('aria-label',label);b.title=label;
  }
  function markDots(index){applyOut(index);[...$('dots').children].forEach((d,i)=>d.setAttribute('aria-current',String(i===index)));$('prev-page').disabled=index===0;$('next-page').disabled=index>=$('pages').children.length-1}
@@ -120,6 +125,7 @@
  $('prev-page').addEventListener('click',()=>go(indexNow()-1));$('next-page').addEventListener('click',()=>go(indexNow()+1));
  $('dots').addEventListener('click',e=>{const b=e.target.closest('button[data-page]');if(b)go(Number(b.dataset.page))});
  document.querySelector('.modes').addEventListener('click',e=>{const b=e.target.closest('button[data-mode]');if(!b||!MODES[b.dataset.mode])return;mode=b.dataset.mode;store('mode',mode);applyMode();if(board){renderPages();applyOut()}});
+ $('standings-toggle').addEventListener('click',()=>{standingsPref=standingsOn()?'0':'1';store('standings',standingsPref);renderPages();applyOut()});
  $('out-toggle').addEventListener('click',()=>{showOut=!showOut;store('out',showOut?'1':'0');renderPages();applyOut()});
  $('groups-toggle').addEventListener('click',()=>{showGroups=!showGroups;store('groups',showGroups?'1':'0');applyGroups()});
  applyMode();applyGroups();

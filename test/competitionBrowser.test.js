@@ -182,3 +182,30 @@ test('revived then eliminated again: placed by the latest out, ↺1 label, placi
  assert.deepEqual(rows.map(r=>r.slice(0,2)),[['1','LILY 🍉'],['2','Chanee🌸'],['3','RYAN']],'Chanee went out last, so places above RYAN');
  assert.match(rows[1][2],/^Bị loại · \d\d:\d\d ↺1$/);assert.match(rows[2][2],/^Bị loại · \d\d:\d\d$/);
 });
+test('podium toggle shows provisional final standings 1..N during the competition, including earlier rounds; on by default when ended',async t=>{
+ const {app,state}=createCompetitionFixture(),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base=`http://127.0.0.1:${server.address().port}`;
+ const {ObjectId}=require('mongodb'),now=Date.now(),row=(talentName,profileId,profileName,competition,eliminated)=>({talentName,talentUid:'',profileId,profileName,competition,overall:competition,eliminated,eliminatedAt:eliminated?new Date(now-600000).toISOString():null});
+ // RYAN went out before the "Vòng 1" snapshot (gone from LIVE normally); Chanee in this round.
+ state.db.rows('competition_snapshots').push({_id:new ObjectId(),competitionId:String(state.id),name:'Vòng 1',at:now-300000,createdAt:new Date(now-300000),createdBy:'x',
+  rows:[row('LILY 🍉','g1','HT - DPM',100,false),row('RYAN','g2','HT - ICONZ',40,true),row('Chanee🌸','g1','HT - DPM',4,false)],groups:[]});
+ const comp=state.db.rows('competitions')[0];comp.eliminated=[{talentName:'RYAN',at:new Date(now-600000)},{talentName:'Chanee🌸',at:new Date(now-60000)}];
+ const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']}),errors=[];
+ t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});
+ const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);
+ const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();
+ const rows=()=>live.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.rank').textContent,r.querySelector('.who b').textContent,r.classList.contains('out')]));
+ const podium=page.getByRole('button',{name:'Bảng chung cuộc',exact:true});assert.equal(await podium.getAttribute('aria-pressed'),'false','off while the competition runs');
+ assert.deepEqual(await rows(),[['1','LILY 🍉',false]]);
+ await podium.click();assert.deepEqual(await rows(),[['1','LILY 🍉',false],['2','Chanee🌸',true],['3','RYAN',true]],'everyone, earlier rounds too, by elimination order');
+ assert.equal(await page.locator('#out-toggle').isVisible(),false,'eye not needed');
+ await page.reload();await live.locator('.talents .row').first().waitFor();assert.equal((await rows()).length,3,'remembered per browser');
+ await page.getByRole('button',{name:'Tổng cộng',exact:true}).click();assert.equal(await podium.isVisible(),false,'only for Cuộc thi');
+ // A fresh browser on an ended competition gets the standings by default.
+ comp.status='ended';comp.endedAt=new Date();state.pages.reset();
+ const fresh=await (await browser.newContext({viewport:{width:375,height:812}})).newPage();fresh.on('pageerror',e=>errors.push(e.message));await fresh.context().addCookies([{name:'test_admin',value:'1',url:base}]);
+ await fresh.goto(`${base}/pk-battle-16-10`);await fresh.locator('.page.live .talents .row').first().waitFor();
+ assert.equal(await fresh.getByRole('button',{name:'Bảng chung cuộc',exact:true}).getAttribute('aria-pressed'),'true');assert.equal(await fresh.locator('.page.live .talents .row').count(),3);
+ assert.equal(await fresh.locator('.page.live .talents .row.out').count(),0,'ended: nobody dimmed');assert.equal(await fresh.locator('.page.live .talents .row.out-final').count(),2);
+ assert.ok(await fresh.locator('.page.live .talents .row.out-final').first().evaluate(e=>Number(getComputedStyle(e).opacity)===1),'shown clearly');
+});
