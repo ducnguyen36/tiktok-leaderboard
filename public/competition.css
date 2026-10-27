@@ -97,3 +97,4 @@ dialog h2{margin:0;font-size:18px}
 @media(prefers-reduced-motion:reduce){.groups,.groups-on .groups{transition:none;animation:none}}
 
 .chip.eye{display:inline-flex;align-items:center;gap:5px;padding-inline:10px}.chip.eye #out-count{font-weight:800;font-variant-numeric:tabular-nums}.chip.eye .eye-slash{display:none}.chip.eye:not(.on) .eye-slash{display:inline}
+.modes button,.chip.icon-chip{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:36px}.modes button svg,.chip svg{display:block}

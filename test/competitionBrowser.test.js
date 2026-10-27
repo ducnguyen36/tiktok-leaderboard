@@ -97,3 +97,30 @@ test('eliminated talents are left out of the ranking; the toolbar eye shows thei
  await page.reload();await live.locator('.talents .row').first().waitFor();assert.equal((await rows()).length,3,'choice remembered per browser');
  assert.equal(await eye.getAttribute('aria-label'),'Ẩn 1 người bị loại');await eye.click();assert.equal((await rows()).length,2);
 });
+test('earlier-round eliminations vanish from LIVE, this round ones are behind the eye; Tổng cộng lists everyone; toolbar uses icons',async t=>{
+ const {app,state}=createCompetitionFixture(),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base=`http://127.0.0.1:${server.address().port}`;
+ const {ObjectId}=require('mongodb'),now=Date.now(),row=(talentName,profileId,profileName,competition,eliminated)=>({talentName,talentUid:'',profileId,profileName,competition,overall:competition,eliminated,eliminatedAt:eliminated?new Date(now-600000).toISOString():null});
+ // Round 1 ended with RYAN out (snapshot). In round 2 Chanee is out too.
+ state.db.rows('competition_snapshots').push({_id:new ObjectId(),competitionId:String(state.id),name:'Vòng 1',at:now-300000,createdAt:new Date(now-300000),createdBy:'x',
+  rows:[row('LILY 🍉','g1','HT - DPM',100,false),row('RYAN','g2','HT - ICONZ',40,true),row('Chanee🌸','g1','HT - DPM',4,false)],groups:[{profileId:'g1',profileName:'HT - DPM',competition:104,overall:104},{profileId:'g2',profileName:'HT - ICONZ',competition:40,overall:40}]});
+ state.db.rows('competitions')[0].eliminated=[{talentName:'RYAN',at:new Date(now-600000)},{talentName:'Chanee🌸',at:new Date(now-60000)}];
+ const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']}),errors=[];
+ t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});
+ const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);
+ const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();
+ const names=p=>p.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.rank').textContent,r.querySelector('.who b').textContent]));
+ for(const [label] of [['Cuộc thi'],['Tổng cộng'],['Nhóm']]){const b=page.getByRole('button',{name:label,exact:true});assert.equal((await b.textContent()).trim(),'',label+' is an icon');assert.equal(await b.getAttribute('title'),label)}
+ const eye=page.locator('#out-toggle');assert.equal((await eye.textContent()).trim(),'1','only this round\'s elimination is counted');
+ assert.deepEqual(await names(live),[['1','LILY 🍉']]);
+ await eye.click();assert.deepEqual(await names(live),[['1','LILY 🍉'],['–','Chanee🌸']],'RYAN (out since round 1) stays gone');
+ await page.getByRole('button',{name:'Tổng cộng',exact:true}).click();assert.equal(await eye.isVisible(),false,'no eye in Tổng cộng');
+ assert.equal(await live.locator('.talents .row.out').count(),0);assert.deepEqual((await names(live)).map(r=>r[1]).sort(),['Chanee🌸','LILY 🍉','RYAN'].sort(),'Tổng cộng lists everyone');
+ assert.deepEqual((await names(live)).map(r=>r[0]),['1','2','3']);
+ await page.getByRole('button',{name:'Cuộc thi',exact:true}).click();await eye.click();
+ // Snapshot "Vòng 1" has no earlier snapshot: RYAN was out in that round, so he is behind the eye there.
+ await page.locator('#pages').evaluate(box=>box.scrollTo({left:box.children[1].offsetLeft,behavior:'auto'}));
+ await page.waitForFunction(()=>document.querySelectorAll('.dots button')[1].getAttribute('aria-current')==='true');
+ assert.equal((await eye.textContent()).trim(),'1');assert.deepEqual(await names(page.locator('.page').nth(1)),[['1','LILY 🍉'],['2','Chanee🌸']]);
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+});

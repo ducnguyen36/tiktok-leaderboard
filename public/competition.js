@@ -49,24 +49,29 @@
   schedule(10000);
  }
  async function loadCsrf(){try{csrf=(await call('/auth/status')).csrf||''}catch{csrf=''}}
+ // gone = talents already out in the snapshot before this page (newest first): they left in an earlier round.
+ const outNames=snap=>new Set((snap?.rows||[]).filter(r=>r.eliminated).map(r=>r.talentName));
  function pages(){
-  const live=board.live,list=[{id:'live',live:true,title:'LIVE',sub:'Cộng dồn từ đầu cuộc thi',rows:live.rows,groups:live.groups}];
-  for(const s of board.snapshots)list.push({id:s.id,title:s.name,sub:`${when(s.at)}${s.createdBy?` · ${s.createdBy}`:''}`,rows:s.rows,groups:s.groups});
+  const live=board.live,snaps=board.snapshots,list=[{id:'live',live:true,title:'LIVE',sub:'Cộng dồn từ đầu cuộc thi',rows:live.rows,groups:live.groups,gone:outNames(snaps[0])}];
+  snaps.forEach((s,i)=>list.push({id:s.id,title:s.name,sub:`${when(s.at)}${s.createdBy?` · ${s.createdBy}`:''}`,rows:s.rows,groups:s.groups,gone:outNames(snaps[i+1])}));
   return list;
  }
+ // "Cuộc thi": talents out since an earlier round are gone; those out in this round are hidden behind the eye
+ // (shown dimmed and unnumbered when it is on). "Tổng cộng" (revenue) lists everyone normally.
+ const roundOut=(page,row)=>mode==='competition'&&row.eliminated&&!page.gone.has(row.talentName);
+ function talentRows(page){return mode==='competition'?page.rows.filter(r=>!(r.eliminated&&page.gone.has(r.talentName))&&(showOut||!r.eliminated)):page.rows}
  // Sorted by the selected mode; unknown values (old snapshots in "Tổng cộng") go last.
  const value=(row,key=mode)=>row[key]==null?-Infinity:Number(row[key])||0,other=()=>mode==='competition'?'overall':'competition';
  function ranked(rows){return [...rows].sort((a,b)=>value(b)-value(a)||value(b,other())-value(a,other())||String(a.talentName||a.profileName).localeCompare(String(b.talentName||b.profileName)))}
  function score(row){const v=row[mode];return el('b',`score${v!=null&&Number(v)<0?' neg':''}`,fmt(v))}
- // Eliminated talents are left out of the ranking; the toolbar eye shows how many (for the page in view)
- // and can show them, dimmed and unnumbered, so the players still competing keep continuous ranks. Groups count everyone.
- function list(title,rows,group){
+ // Ranks stay continuous for the players still competing. Groups always count everyone.
+ function list(title,rows,group,page){
   const wrap=el(group?'aside':'div',group?'groups':'talents');if(group)wrap.setAttribute('aria-label',title);
   const head=el('div','section-head');head.append(el('div','section-title',`${title} · ${MODES[mode]}`));wrap.append(head);
-  const visible=group||showOut?rows:rows.filter(r=>!r.eliminated);
+  const visible=group?rows:talentRows(page);
   const ol=el('ol','rows');if(!visible.length)ol.append(el('li','empty',rows.length?'Tất cả đã bị loại':'Chưa có dữ liệu'));
   let rank=0;
-  ranked(visible).forEach(row=>{const isOut=!group&&row.eliminated;if(!isOut)rank++;const li=el('li',`row${isOut?' out':rank<=3?` top${rank}`:''}`);li.append(el('span','rank',isOut?'–':String(rank)));const name=group?row.profileName:row.talentName;
+  ranked(visible).forEach(row=>{const isOut=!group&&roundOut(page,row);if(!isOut)rank++;const li=el('li',`row${isOut?' out':rank<=3?` top${rank}`:''}`);li.append(el('span','rank',isOut?'–':String(rank)));const name=group?row.profileName:row.talentName;
    if(!group)li.append(el('span','avatar',Array.from(name||'?')[0]||'?'));
    const who=el('div','who');who.append(el('b','',name||'—'));if(!group){const sub=el('small','',row.profileName||'');if(isOut){const tag=el('span','out-tag','Đã loại');if(row.eliminatedAt)tag.title=`Bị loại lúc ${when(row.eliminatedAt)}`;sub.prepend(tag)}who.append(sub)}li.append(who,score(row));ol.append(li)});
   wrap.append(ol);return wrap;
@@ -84,7 +89,7 @@
    titles.append(row,el('div','page-sub',p.sub));head.append(titles);
    if(!p.live&&board.admin)head.append(iconButton('trash','Xóa snapshot',{remove:p.id},'danger'));
    if(mode==='overall'&&p.rows.some(r=>r.overall==null))page.append(head,el('div','old-note','Snapshot cũ chưa lưu số Tổng cộng.'));else page.append(head);
-   const body=el('div','page-body');body.append(list('Tổng theo nhóm',p.groups,true),list('Xếp hạng talent',p.rows,false));page.append(body);box.append(page);
+   const body=el('div','page-body');body.append(list('Tổng theo nhóm',p.groups,true),list('Xếp hạng talent',p.rows,false,p));page.append(body);box.append(page);
    const dot=el('button');dot.type='button';dot.setAttribute('aria-label',p.title);dot.dataset.page=String(i);dots.append(dot);
   });
   const index=Math.max(0,all.findIndex(p=>p.id===current));current=all[index].id;
@@ -93,7 +98,7 @@
  function indexNow(){const box=$('pages');let best=0,gap=Infinity;[...box.children].forEach((c,i)=>{const d=Math.abs(c.offsetLeft-box.scrollLeft);if(d<gap){gap=d;best=i}});return best}
  // Eye count follows the page in view (LIVE or a snapshot taken when fewer/more were out).
  function applyOut(index=indexNow()){
-  const page=board&&pages()[index],out=page?page.rows.filter(r=>r.eliminated).length:0,b=$('out-toggle');
+  const page=board&&pages()[index],out=page?page.rows.filter(r=>roundOut(page,r)).length:0,b=$('out-toggle');
   b.hidden=!out;$('out-count').textContent=String(out);b.setAttribute('aria-pressed',String(showOut));b.classList.toggle('on',showOut);
   const label=`${showOut?'Ẩn':'Hiện'} ${out} người bị loại`;b.setAttribute('aria-label',label);b.title=label;
  }
@@ -103,7 +108,7 @@
  $('pages').addEventListener('keydown',e=>{if(e.key==='ArrowRight'){e.preventDefault();go(indexNow()+1)}else if(e.key==='ArrowLeft'){e.preventDefault();go(indexNow()-1)}});
  $('prev-page').addEventListener('click',()=>go(indexNow()-1));$('next-page').addEventListener('click',()=>go(indexNow()+1));
  $('dots').addEventListener('click',e=>{const b=e.target.closest('button[data-page]');if(b)go(Number(b.dataset.page))});
- document.querySelector('.modes').addEventListener('click',e=>{const b=e.target.closest('button[data-mode]');if(!b||!MODES[b.dataset.mode])return;mode=b.dataset.mode;store('mode',mode);applyMode();if(board)renderPages()});
+ document.querySelector('.modes').addEventListener('click',e=>{const b=e.target.closest('button[data-mode]');if(!b||!MODES[b.dataset.mode])return;mode=b.dataset.mode;store('mode',mode);applyMode();if(board){renderPages();applyOut()}});
  $('out-toggle').addEventListener('click',()=>{showOut=!showOut;store('out',showOut?'1':'0');renderPages();applyOut()});
  $('groups-toggle').addEventListener('click',()=>{showGroups=!showGroups;store('groups',showGroups?'1':'0');applyGroups()});
  applyMode();applyGroups();
