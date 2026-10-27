@@ -22,7 +22,7 @@ test('Cuộc thi matches HeliosControl (name match, floor split, negative manual
  assert.deepEqual(board.groups.map(g=>[g.profileName,g.competition,g.overall]),[['G1',73,130],['G2',47,42]]);
  assert.ok(board.rows.every(r=>!('round' in r)&&!('total' in r)),'no round split any more');
  assert.deepEqual(buildBoard(participants,gifts).rows.map(r=>r.overall),[73,47,0],'without window gifts overall is the competition gifts');
- assert.deepEqual(snapshotEntry({talentName:'A',talentUid:'1',profileId:'g1',profileName:'G1',round:5,total:73},true),{talentName:'A',talentUid:'1',profileId:'g1',profileName:'G1',competition:73,overall:null,eliminated:false,eliminatedAt:null,eliminatedRank:null,eliminatedOf:null,eliminatedRankSource:null},'old snapshot rows: total is the competition score');
+ assert.deepEqual(snapshotEntry({talentName:'A',talentUid:'1',profileId:'g1',profileName:'G1',round:5,total:73},true),{talentName:'A',talentUid:'1',profileId:'g1',profileName:'G1',competition:73,overall:null,eliminated:false,eliminatedAt:null,eliminatedRank:null,eliminatedOf:null,eliminatedRankSource:null,revives:0},'old snapshot rows: total is the competition score');
  assert.deepEqual(snapshotEntry({profileId:'g1',profileName:'G1',round:1,total:9},false),{profileId:'g1',profileName:'G1',competition:9,overall:null});
 });
 async function server(t){
@@ -52,7 +52,7 @@ test('access requests, roles, revocation and same-origin checks',async t=>{
  assert.equal((await call(`${slug}/requests/${id}`,{method:'POST',body:{action:'viewer'},cookie:admin.cookie})).status,403,'admin actions need CSRF');
  assert.equal((await call(`${slug}/requests/${id}`,{method:'POST',body:{action:'viewer'},...admin})).status,200);
  const board=await call(slug+'/board',{cookie:visitor});assert.equal(board.status,200);assert.equal(board.json.role,'viewer');assert.equal(board.json.canSnapshot,false);
- assert.deepEqual(Object.keys(board.json.live).sort(),['at','groups','rows']);assert.deepEqual(Object.keys(board.json.live.rows[0]).sort(),['competition','eliminated','eliminatedAt','eliminatedOf','eliminatedRank','eliminatedRankSource','overall','profileId','profileName','talentName','talentUid']);
+ assert.deepEqual(Object.keys(board.json.live).sort(),['at','groups','rows']);assert.deepEqual(Object.keys(board.json.live.rows[0]).sort(),['competition','eliminated','eliminatedAt','eliminatedOf','eliminatedRank','eliminatedRankSource','overall','profileId','profileName','revives','talentName','talentUid']);
  assert.deepEqual(board.json.live.rows.map(r=>[r.talentName,r.competition,r.overall]),[['LILY 🍉',104,154],['RYAN',40,1039],['Chanee🌸',4,4]],
   'Cuộc thi ignores the foreign-session gift with the same competitionId; Tổng cộng counts it, the uid-matched gift once, and nothing outside the window');
  assert.deepEqual(board.json.live.groups.map(g=>[g.profileName,g.competition,g.overall]),[['HT - DPM',108,158],['HT - ICONZ',40,1039]]);
@@ -78,7 +78,7 @@ test('snapshots freeze both modes and groups; live stays cumulative; old snapsho
  assert.deepEqual(second.groups.map(g=>[g.profileName,g.competition,g.overall]),[['HT - ICONZ',240,1239],['HT - DPM',104,184]]);assert.equal(second.createdBy,'admin@example.test');
  const board=(await call(slug+'/board',{cookie:visitor})).json;assert.deepEqual(board.snapshots.map(s=>s.name),['Snapshot 2','Snapshot 1','Bản cũ'],'newest first');
  assert.deepEqual(board.snapshots[1].rows.map(r=>[r.talentName,r.competition,r.overall]),[['LILY 🍉',104,154],['RYAN',40,1039],['Chanee🌸',4,4]],'a snapshot stays frozen');
- assert.deepEqual(board.snapshots[2].rows,[{talentName:'RYAN',talentUid:'3',profileId:'g2',profileName:'HT - ICONZ',competition:40,overall:null,eliminated:false,eliminatedAt:null,eliminatedRank:null,eliminatedOf:null,eliminatedRankSource:null}],'old snapshot: total -> competition, overall unknown, nobody eliminated');
+ assert.deepEqual(board.snapshots[2].rows,[{talentName:'RYAN',talentUid:'3',profileId:'g2',profileName:'HT - ICONZ',competition:40,overall:null,eliminated:false,eliminatedAt:null,eliminatedRank:null,eliminatedOf:null,eliminatedRankSource:null,revives:0}],'old snapshot: total -> competition, overall unknown, nobody eliminated');
  assert.deepEqual(board.snapshots[2].groups,[{profileId:'g2',profileName:'HT - ICONZ',competition:40,overall:null}]);
  assert.equal((await call(`${slug}/snapshots/${second.id}/rename`,{method:'POST',body:{name:'Chung kết'},cookie:visitor})).status,200);
  assert.equal((await call(`${slug}/snapshots/${second.id}/delete`,{method:'POST',body:{},cookie:visitor})).status,403,'only admins delete');
@@ -146,4 +146,9 @@ test('fallback rank replays eliminatedLog: revived talents count as still in, re
  assert.deepEqual([rows.E,rows.D,rows.F],['4/4','5/5','6/6'],'E (revived, out again) gets the later rank; F keeps 6/6 although E left with it');
  // Without the log the old estimate (current state) is used.
  const plain=Object.fromEntries(buildBoard(P,gifts,{eliminated}).rows.map(r=>[r.talentName,r.eliminatedRank+'/'+r.eliminatedOf]));assert.deepEqual([plain.E,plain.D,plain.F],['4/4','5/5','6/6']);
+});
+test('revive counts come from the eliminatedLog "in" lines and are kept in snapshots',()=>{
+ const P=['A','B'].map(n=>({talentName:n,profileId:'g',profileName:'G'})),log=[{talentName:'A',action:'out',at:new Date(1)},{talentName:'A',action:'in',at:new Date(2)},{talentName:'A',action:'out',at:new Date(3)}];
+ const rows=buildBoard(P,[],{eliminated:[{talentName:'A',at:new Date(3)}],eliminatedLog:log}).rows;assert.deepEqual(rows.map(r=>[r.talentName,r.revives]),[['A',1],['B',0]]);
+ assert.equal(snapshotEntry({talentName:'A',revives:1},true).revives,1);assert.equal(snapshotEntry({talentName:'A'},true).revives,0,'old snapshots: none');
 });

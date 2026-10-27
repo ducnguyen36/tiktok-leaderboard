@@ -90,7 +90,7 @@ test('eliminated talents are left out of the ranking; the toolbar eye shows thei
  const [eyeBox,groupsBox]=await Promise.all([eye.boundingBox(),page.getByRole('button',{name:'Nhóm'}).boundingBox()]);assert.ok(Math.abs(eyeBox.y-groupsBox.y)<4,'eye sits on the toolbar row with Nhóm');
  assert.equal(await eye.getAttribute('aria-label'),'Hiện 1 người bị loại');await eye.click();
  assert.deepEqual(await rows(),[['1','LILY 🍉',false],['2','Chanee🌸',false],['3','RYAN',true]],'eliminated at the bottom with the rank they went out at, never between players still in');
- const out=live.locator('.talents .row.out');assert.match(await out.textContent(),/Loại ở hạng 3\/3/,'no HeliosControl rank: the computed one is shown');assert.ok(Number(await out.evaluate(e=>getComputedStyle(e).opacity))<0.7,'dimmed');
+ const out=live.locator('.talents .row.out');assert.match(await out.textContent(),/Bị loại · \d\d:\d\d/,'label: time of the latest out');assert.ok(Number(await out.evaluate(e=>getComputedStyle(e).opacity))<0.7,'dimmed');
  assert.match(await out.locator('.score').textContent(),/40/,'score still visible');
  await page.getByRole('button',{name:'Nhóm'}).click();assert.match(await live.locator('.groups').textContent(),/HT - ICONZ\s*40/,'groups still count eliminated points');
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
@@ -140,7 +140,7 @@ test('eliminated players rank by elimination order below everyone still in, not 
  await page.getByRole('button',{name:'Tổng cộng',exact:true}).click();
  assert.deepEqual((await rows()).map(r=>r[1]),['RYAN','LILY 🍉','Chanee🌸'],'Tổng cộng stays a plain score ranking');
 });
-test('eliminated rows use the rank they went out at from HeliosControl, with a "Loại ở hạng" label',async t=>{
+test('eliminated rows at the same moment follow the panel rank; label shows the time, X/Y only in the tooltip',async t=>{
  const {app,state}=createCompetitionFixture(),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base=`http://127.0.0.1:${server.address().port}`;
  // Scores: LILY 104, RYAN 40, Chanee 4. The panel had Chanee 2/3 and RYAN 3/3 (round points the page cannot see).
  const at=new Date(Date.now()-30000);state.db.rows('competitions')[0].eliminated=[{talentName:'RYAN',at,rank:3,of:3},{talentName:'Chanee🌸',at,rank:2,of:3}];
@@ -150,10 +150,11 @@ test('eliminated rows use the rank they went out at from HeliosControl, with a "
  const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
  await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();await page.locator('#out-toggle').click();
  const rows=await live.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.rank').textContent,r.querySelector('.who b').textContent,r.querySelector('.out-tag')?.textContent||'']));
- assert.deepEqual(rows,[['1','LILY 🍉',''],['2','Chanee🌸','Loại ở hạng 2/3'],['3','RYAN','Loại ở hạng 3/3']],'locked rank order, not score (RYAN has more points)');
+ assert.deepEqual(rows.map(r=>r.slice(0,2)),[['1','LILY 🍉'],['2','Chanee🌸'],['3','RYAN']],'same moment: panel rank order, not score (RYAN has more points)');
+ assert.ok(rows.slice(1).every(r=>/^Bị loại · \d\d:\d\d$/.test(r[2])),'no X/Y in the label');assert.match(await live.locator('.out-tag').nth(1).getAttribute('title'),/hạng 3\/3 lúc bị loại/,'X/Y stays in the tooltip');
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
 });
-test('revivals can repeat a locked rank: the label keeps it, the number column stays a continuous position',async t=>{
+test('revivals can repeat a locked rank: the later out places higher and placings never repeat',async t=>{
  const {app,state}=createCompetitionFixture(),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base=`http://127.0.0.1:${server.address().port}`;
  // Like the panel: Chanee went out 2/3, was revived, and RYAN then went out 2/2 later.
  state.db.rows('competitions')[0].eliminated=[{talentName:'Chanee🌸',at:new Date(Date.now()-60000),rank:2,of:3},{talentName:'RYAN',at:new Date(Date.now()-30000),rank:2,of:2}];
@@ -163,5 +164,21 @@ test('revivals can repeat a locked rank: the label keeps it, the number column s
  const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
  await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();await page.locator('#out-toggle').click();
  const rows=await live.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.rank').textContent,r.querySelector('.who b').textContent,r.querySelector('.out-tag')?.textContent||'']));
- assert.deepEqual(rows,[['1','LILY 🍉',''],['2','RYAN','Loại ở hạng 2/2'],['3','Chanee🌸','Loại ở hạng 2/3']],'same locked rank: later out first; positions 1..3');
+ assert.deepEqual(rows.map(r=>r.slice(0,2)),[['1','LILY 🍉'],['2','RYAN'],['3','Chanee🌸']],'later out first; final placings 1..3, no repeats');
+});
+test('revived then eliminated again: placed by the latest out, ↺1 label, placings stay continuous',async t=>{
+ const {app,state}=createCompetitionFixture(),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base=`http://127.0.0.1:${server.address().port}`;
+ const now=Date.now(),at=ms=>new Date(now-ms);
+ // RYAN out (90 s ago), Chanee out (60 s ago, no panel rank), Chanee revived (45 s), then out again (10 s ago).
+ const comp=state.db.rows('competitions')[0];
+ comp.eliminatedLog=[{talentName:'RYAN',action:'out',at:at(90000)},{talentName:'Chanee🌸',action:'out',at:at(60000)},{talentName:'Chanee🌸',action:'in',at:at(45000)},{talentName:'Chanee🌸',action:'out',at:at(10000)}];
+ comp.eliminated=[{talentName:'RYAN',at:at(90000)},{talentName:'Chanee🌸',at:at(10000)}];
+ const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']}),errors=[];
+ t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});
+ const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);
+ const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();await page.locator('#out-toggle').click();
+ const rows=await live.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.rank').textContent,r.querySelector('.who b').textContent,r.querySelector('.out-tag')?.textContent||'']));
+ assert.deepEqual(rows.map(r=>r.slice(0,2)),[['1','LILY 🍉'],['2','Chanee🌸'],['3','RYAN']],'Chanee went out last, so places above RYAN');
+ assert.match(rows[1][2],/^Bị loại · \d\d:\d\d ↺1$/);assert.match(rows[2][2],/^Bị loại · \d\d:\d\d$/);
 });
