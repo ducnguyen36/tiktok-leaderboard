@@ -9,7 +9,7 @@
  const VIEWS=['loading-view','missing-view','request-view','pending-view','board-view'],MODES={competition:'Cuộc thi',overall:'Tổng cộng'};
  // Per-browser view preferences; storage can be unavailable (private mode, blocked site data).
  const stored=key=>{try{return localStorage.getItem(`heliosComp.${key}`)}catch{return null}},store=(key,value)=>{try{localStorage.setItem(`heliosComp.${key}`,value)}catch{}};
- let board=null,csrf='',mode=MODES[stored('mode')]?stored('mode'):'competition',showGroups=stored('groups')==='1',timer=0,current='live',pageSig='',adminSig='',dialogMode=null,toastTimer=0;
+ let board=null,csrf='',mode=MODES[stored('mode')]?stored('mode'):'competition',showGroups=stored('groups')==='1',showOut=stored('out')==='1',timer=0,current='live',pageSig='',adminSig='',dialogMode=null,toastTimer=0;
  function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
  const ICONS={pencil:'M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4',trash:'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6'};
  function iconButton(icon,label,data,cls=''){
@@ -58,19 +58,24 @@
  const value=(row,key=mode)=>row[key]==null?-Infinity:Number(row[key])||0,other=()=>mode==='competition'?'overall':'competition';
  function ranked(rows){return [...rows].sort((a,b)=>value(b)-value(a)||value(b,other())-value(a,other())||String(a.talentName||a.profileName).localeCompare(String(b.talentName||b.profileName)))}
  function score(row){const v=row[mode];return el('b',`score${v!=null&&Number(v)<0?' neg':''}`,fmt(v))}
+ // Eliminated talents are hidden by default; when shown they are dimmed and unnumbered, so the
+ // players still in the competition keep continuous ranks either way. Groups always count everyone.
  function list(title,rows,group){
   const wrap=el(group?'aside':'div',group?'groups':'talents');if(group)wrap.setAttribute('aria-label',title);
-  wrap.append(el('div','section-title',`${title} · ${MODES[mode]}`));const ol=el('ol','rows');
-  if(!rows.length)ol.append(el('li','empty','Chưa có dữ liệu'));
-  ranked(rows).forEach((row,i)=>{const li=el('li',`row${i<3?` top${i+1}`:''}`);li.append(el('span','rank',String(i+1)));const name=group?row.profileName:row.talentName;
+  const head=el('div','section-head');head.append(el('div','section-title',`${title} · ${MODES[mode]}`));wrap.append(head);
+  const out=group?0:rows.filter(r=>r.eliminated).length,visible=group||showOut?rows:rows.filter(r=>!r.eliminated);
+  if(out){const t=el('button','out-toggle',`👁 ${showOut?'Ẩn':'Hiện'} người bị loại (${out})`);t.type='button';t.dataset.toggleOut='1';t.setAttribute('aria-pressed',String(showOut));head.append(t)}
+  const ol=el('ol','rows');if(!visible.length)ol.append(el('li','empty',rows.length?'Tất cả đã bị loại':'Chưa có dữ liệu'));
+  let rank=0;
+  ranked(visible).forEach(row=>{const isOut=!group&&row.eliminated;if(!isOut)rank++;const li=el('li',`row${isOut?' out':rank<=3?` top${rank}`:''}`);li.append(el('span','rank',isOut?'–':String(rank)));const name=group?row.profileName:row.talentName;
    if(!group)li.append(el('span','avatar',Array.from(name||'?')[0]||'?'));
-   const who=el('div','who');who.append(el('b','',name||'—'));if(!group)who.append(el('small','',row.profileName||''));li.append(who,score(row));ol.append(li)});
+   const who=el('div','who');who.append(el('b','',name||'—'));if(!group){const sub=el('small','',row.profileName||'');if(isOut){const tag=el('span','out-tag','Đã loại');if(row.eliminatedAt)tag.title=`Bị loại lúc ${when(row.eliminatedAt)}`;sub.prepend(tag)}who.append(sub)}li.append(who,score(row));ol.append(li)});
   wrap.append(ol);return wrap;
  }
  function applyGroups(){$('board-view').classList.toggle('groups-on',showGroups);$('groups-toggle').setAttribute('aria-pressed',String(showGroups))}
  function applyMode(){for(const b of document.querySelectorAll('.modes button'))b.setAttribute('aria-pressed',String(b.dataset.mode===mode))}
  function renderPages(){
-  const all=pages(),sig=JSON.stringify([mode,board.canSnapshot,board.admin,all]);if(sig===pageSig)return;pageSig=sig;
+  const all=pages(),sig=JSON.stringify([mode,showOut,board.canSnapshot,board.admin,all]);if(sig===pageSig)return;pageSig=sig;
   const box=$('pages'),dots=$('dots');box.replaceChildren();dots.replaceChildren();
   all.forEach((p,i)=>{
    const page=el('article',`page${p.live?' live':''}`);page.dataset.id=p.id;page.setAttribute('aria-label',p.title);
@@ -97,6 +102,7 @@
  $('groups-toggle').addEventListener('click',()=>{showGroups=!showGroups;store('groups',showGroups?'1':'0');applyGroups()});
  applyMode();applyGroups();
  $('pages').addEventListener('click',async e=>{
+  if(e.target.closest('button[data-toggle-out]')){showOut=!showOut;store('out',showOut?'1':'0');renderPages();return}
   const rename=e.target.closest('button[data-rename]'),remove=e.target.closest('button[data-remove]');
   if(rename){const snap=board.snapshots.find(s=>s.id===rename.dataset.rename);if(snap)openDialog({mode:'rename',id:snap.id,value:snap.name})}
   if(remove){const snap=board.snapshots.find(s=>s.id===remove.dataset.remove);if(!snap||!confirm(`Xóa snapshot "${snap.name}"?`))return;

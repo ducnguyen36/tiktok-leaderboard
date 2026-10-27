@@ -1,5 +1,5 @@
 const test=require('node:test'),assert=require('node:assert/strict');
-const {slugify,assignSlugs,scoreGifts,overallScores,buildBoard,snapshotEntry,validName}=require('../competitionPages');
+const {slugify,assignSlugs,scoreGifts,overallScores,buildBoard,snapshotEntry,validName,eliminatedMap}=require('../competitionPages');
 const {createCompetitionFixture}=require('./support/competition-server');
 test('slugs fold Vietnamese, styled letters and emoji; the newest namesake keeps the plain slug',()=>{
  assert.equal(slugify('PK BATTLE 16/10'),'pk-battle-16-10');assert.equal(slugify('  Cuộc thi Đại chiến 🔥 Mùa 2 '),'cuoc-thi-dai-chien-mua-2');
@@ -22,7 +22,7 @@ test('Cuộc thi matches HeliosControl (name match, floor split, negative manual
  assert.deepEqual(board.groups.map(g=>[g.profileName,g.competition,g.overall]),[['G1',73,130],['G2',47,42]]);
  assert.ok(board.rows.every(r=>!('round' in r)&&!('total' in r)),'no round split any more');
  assert.deepEqual(buildBoard(participants,gifts).rows.map(r=>r.overall),[73,47,0],'without window gifts overall is the competition gifts');
- assert.deepEqual(snapshotEntry({talentName:'A',talentUid:'1',profileId:'g1',profileName:'G1',round:5,total:73},true),{talentName:'A',talentUid:'1',profileId:'g1',profileName:'G1',competition:73,overall:null},'old snapshot rows: total is the competition score');
+ assert.deepEqual(snapshotEntry({talentName:'A',talentUid:'1',profileId:'g1',profileName:'G1',round:5,total:73},true),{talentName:'A',talentUid:'1',profileId:'g1',profileName:'G1',competition:73,overall:null,eliminated:false,eliminatedAt:null},'old snapshot rows: total is the competition score');
  assert.deepEqual(snapshotEntry({profileId:'g1',profileName:'G1',round:1,total:9},false),{profileId:'g1',profileName:'G1',competition:9,overall:null});
 });
 async function server(t){
@@ -52,7 +52,7 @@ test('access requests, roles, revocation and same-origin checks',async t=>{
  assert.equal((await call(`${slug}/requests/${id}`,{method:'POST',body:{action:'viewer'},cookie:admin.cookie})).status,403,'admin actions need CSRF');
  assert.equal((await call(`${slug}/requests/${id}`,{method:'POST',body:{action:'viewer'},...admin})).status,200);
  const board=await call(slug+'/board',{cookie:visitor});assert.equal(board.status,200);assert.equal(board.json.role,'viewer');assert.equal(board.json.canSnapshot,false);
- assert.deepEqual(Object.keys(board.json.live).sort(),['at','groups','rows']);assert.deepEqual(Object.keys(board.json.live.rows[0]).sort(),['competition','overall','profileId','profileName','talentName','talentUid']);
+ assert.deepEqual(Object.keys(board.json.live).sort(),['at','groups','rows']);assert.deepEqual(Object.keys(board.json.live.rows[0]).sort(),['competition','eliminated','eliminatedAt','overall','profileId','profileName','talentName','talentUid']);
  assert.deepEqual(board.json.live.rows.map(r=>[r.talentName,r.competition,r.overall]),[['LILY 🍉',104,154],['RYAN',40,1039],['Chanee🌸',4,4]],
   'Cuộc thi ignores the foreign-session gift with the same competitionId; Tổng cộng counts it, the uid-matched gift once, and nothing outside the window');
  assert.deepEqual(board.json.live.groups.map(g=>[g.profileName,g.competition,g.overall]),[['HT - DPM',108,158],['HT - ICONZ',40,1039]]);
@@ -78,7 +78,7 @@ test('snapshots freeze both modes and groups; live stays cumulative; old snapsho
  assert.deepEqual(second.groups.map(g=>[g.profileName,g.competition,g.overall]),[['HT - ICONZ',240,1239],['HT - DPM',104,184]]);assert.equal(second.createdBy,'admin@example.test');
  const board=(await call(slug+'/board',{cookie:visitor})).json;assert.deepEqual(board.snapshots.map(s=>s.name),['Snapshot 2','Snapshot 1','Bản cũ'],'newest first');
  assert.deepEqual(board.snapshots[1].rows.map(r=>[r.talentName,r.competition,r.overall]),[['LILY 🍉',104,154],['RYAN',40,1039],['Chanee🌸',4,4]],'a snapshot stays frozen');
- assert.deepEqual(board.snapshots[2].rows,[{talentName:'RYAN',talentUid:'3',profileId:'g2',profileName:'HT - ICONZ',competition:40,overall:null}],'old snapshot: total -> competition, overall unknown');
+ assert.deepEqual(board.snapshots[2].rows,[{talentName:'RYAN',talentUid:'3',profileId:'g2',profileName:'HT - ICONZ',competition:40,overall:null,eliminated:false,eliminatedAt:null}],'old snapshot: total -> competition, overall unknown, nobody eliminated');
  assert.deepEqual(board.snapshots[2].groups,[{profileId:'g2',profileName:'HT - ICONZ',competition:40,overall:null}]);
  assert.equal((await call(`${slug}/snapshots/${second.id}/rename`,{method:'POST',body:{name:'Chung kết'},cookie:visitor})).status,200);
  assert.equal((await call(`${slug}/snapshots/${second.id}/delete`,{method:'POST',body:{},cookie:visitor})).status,403,'only admins delete');
@@ -94,4 +94,21 @@ test('a browser may hold only a few pending requests',async t=>{
  assert.equal((await call('/api/competitions/extra-1/request',{method:'POST',body:{name:'A'},cookie})).status,200);
  assert.equal((await call('/api/competitions/extra-2/request',{method:'POST',body:{name:'A'},cookie})).json.error,'too_many_pending');
  assert.equal((await call('/api/competitions/extra-1/request',{method:'POST',body:{name:'A2'},cookie})).status,200,'renaming a pending request is fine');
+});
+test('eliminated talents: missing field means none, flags follow the gifts cache, groups still count them, snapshots keep the state',async t=>{
+ assert.equal(eliminatedMap(undefined).size,0);assert.equal(eliminatedMap(null).size,0);assert.deepEqual([...eliminatedMap([{talentName:'A',at:new Date('2026-10-27T16:00:00Z')},{at:1},null])],[['A','2026-10-27T16:00:00.000Z']]);
+ const parts=[{talentName:'A',profileId:'g',profileName:'G'},{talentName:'B',profileId:'g',profileName:'G'}],gifts=[{cost:10,timeStamp:1,receivedTalent:'A'},{cost:5,timeStamp:2,receivedTalent:'B'}];
+ const b=buildBoard(parts,gifts,{eliminated:[{talentName:'A',at:new Date(0)}]});
+ assert.deepEqual(b.rows.map(r=>[r.talentName,r.eliminated,r.eliminatedAt]),[['A',true,'1970-01-01T00:00:00.000Z'],['B',false,null]]);assert.equal(b.groups[0].competition,15,'eliminated points stay in the group total');
+ assert.deepEqual(snapshotEntry({talentName:'A',competition:1,eliminated:true,eliminatedAt:'2026-10-27T16:00:00.000Z'},true).eliminated,true);
+ const {state,call,advance,now}=await server(t),slug='/api/competitions/pk-battle-16-10';
+ const flags=async()=>(await call(slug+'/board',admin)).json.live.rows.map(r=>[r.talentName,r.eliminated,r.eliminatedAt]);
+ assert.deepEqual(await flags(),[['LILY 🍉',false,null],['RYAN',false,null],['Chanee🌸',false,null]],'no eliminated field: nobody is out');
+ const comp=state.db.rows('competitions')[0],at=new Date(now());comp.eliminated=[{talentName:'RYAN',at}];comp.eliminatedLog=[{talentName:'RYAN',action:'out',at}];comp.eliminatedUpdatedAt=at;
+ assert.equal((await flags())[1][1],false,'read at the gifts pace (8 s while active), not instantly');
+ advance(9000);assert.deepEqual((await flags())[1],['RYAN',true,at.toISOString()]);
+ const groups=(await call(slug+'/board',admin)).json.live.groups;assert.deepEqual(groups.map(g=>[g.profileName,g.competition]),[['HT - DPM',108],['HT - ICONZ',40]],'RYAN (out) still counts for ICONZ');
+ const snap=(await call(slug+'/snapshots',{method:'POST',body:{name:'Vòng 1'},...admin})).json.snapshot;assert.deepEqual(snap.rows.find(r=>r.talentName==='RYAN').eliminated,true);
+ comp.eliminated=[];advance(9000);assert.equal((await flags())[1][1],false,'revived');
+ const board=(await call(slug+'/board',admin)).json;assert.equal(board.snapshots[0].rows.find(r=>r.talentName==='RYAN').eliminated,true,'snapshot keeps the state at capture time');
 });

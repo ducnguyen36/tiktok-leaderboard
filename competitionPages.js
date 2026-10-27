@@ -69,10 +69,18 @@ function scoreOverall(participants,gifts,{skip=null,scores=null}={}){
   return{scores:out,ids};
 }
 function overallScores(participants,gifts,windowGifts=[]){const window=scoreOverall(participants,windowGifts);return scoreOverall(participants,gifts,{skip:window.ids,scores:window.scores}).scores}
+// HeliosControl writes competitions.eliminated [{talentName,at}] = who is OUT right now (revived names drop off).
+// Missing on older competitions: nobody is out. Returns talentName -> ISO time of elimination.
+function eliminatedMap(list){
+  const out=new Map();if(!Array.isArray(list))return out;
+  for(const e of list){const name=typeof e?.talentName==='string'?e.talentName:'';if(!name)continue;const at=new Date(e.at);out.set(name,Number.isFinite(+at)?at.toISOString():null)}
+  return out;
+}
 // rows/groups carry both modes; overall (array by participant index) defaults to the competition gifts alone.
-function buildBoard(participants,gifts,{windowGifts=[],overall=null}={}){
-  const competition=scoreGifts(gifts),total=overall||overallScores(participants,gifts,windowGifts);
-  const rows=(participants||[]).map((p,i)=>({talentName:p.talentName||'',talentUid:String(p.talentUid||''),profileId:String(p.profileId||''),profileName:p.profileName||'',competition:competition.get(p.talentName)||0,overall:total[i]||0}));
+// Eliminated talents keep their rows (flagged) and still count in their group: the gifts are the group's income.
+function buildBoard(participants,gifts,{windowGifts=[],overall=null,eliminated=null}={}){
+  const competition=scoreGifts(gifts),total=overall||overallScores(participants,gifts,windowGifts),out=eliminatedMap(eliminated);
+  const rows=(participants||[]).map((p,i)=>({talentName:p.talentName||'',talentUid:String(p.talentUid||''),profileId:String(p.profileId||''),profileName:p.profileName||'',competition:competition.get(p.talentName)||0,overall:total[i]||0,eliminated:out.has(p.talentName||''),eliminatedAt:out.get(p.talentName||'')??null}));
   rows.sort((a,b)=>b.competition-a.competition||b.overall-a.overall||a.talentName.localeCompare(b.talentName));
   const groups=new Map();
   for(const row of rows){const key=row.profileId||row.profileName,group=groups.get(key)||{profileId:row.profileId,profileName:row.profileName,competition:0,overall:0};group.competition+=row.competition;group.overall+=row.overall;groups.set(key,group)}
@@ -80,14 +88,14 @@ function buildBoard(participants,gifts,{windowGifts=[],overall=null}={}){
 }
 // Snapshots taken before the two modes only stored rows[].total (= competition); overall is then unknown (null).
 const num=v=>v==null||v===''||!Number.isFinite(Number(v))?null:Number(v);
-function snapshotEntry(entry,row){const out={profileId:String(entry?.profileId||''),profileName:entry?.profileName||'',competition:num(entry?.competition)??num(entry?.total)??0,overall:num(entry?.overall)};return row?{talentName:entry?.talentName||'',talentUid:String(entry?.talentUid||''),...out}:out}
+function snapshotEntry(entry,row){const out={profileId:String(entry?.profileId||''),profileName:entry?.profileName||'',competition:num(entry?.competition)??num(entry?.total)??0,overall:num(entry?.overall)};return row?{talentName:entry?.talentName||'',talentUid:String(entry?.talentUid||''),...out,eliminated:entry?.eliminated===true,eliminatedAt:entry?.eliminated===true&&entry?.eliminatedAt?String(entry.eliminatedAt):null}:out}
 function cookieSecret(req){for(const part of (req.headers.cookie||'').split(';')){const i=part.indexOf('=');if(i>0&&part.slice(0,i).trim()===COOKIE)return part.slice(i+1).trim()}return ''}
 // Small in-memory budget; behind the Cloudflare tunnel every visitor shares one IP, so it is global.
 function createBudget(max,windowMs,clock){let hits=[];return()=>{const now=clock();hits=hits.filter(t=>now-t<windowMs);if(hits.length>=max)return false;hits.push(now);return true}}
 function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'public'),assetVersion=()=>'',clock=Date.now}){
   const router=express.Router(),json=express.json({limit:'4kb'});
   const requestBudget=createBudget(40,600000,clock),snapshotBudget=createBudget(30,600000,clock);
-  let list=null,listAt=0,listLoading=null,missAt=0;const giftCache=new Map(),windowCache=new Map(),windowLoading=new Map();
+  let list=null,listAt=0,listLoading=null,missAt=0;const giftCache=new Map(),eliminatedCache=new Map(),windowCache=new Map(),windowLoading=new Map();
   const db=()=>{const d=getDb();if(!d)throw Object.assign(Error('Database unavailable'),{status:503});return d};
   const noStore=res=>res.set({'Cache-Control':'private, no-store, max-age=0','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','X-Frame-Options':'DENY'});
   const fail=(res,code,error)=>noStore(res).status(code).json({status:'error',error});
@@ -114,6 +122,14 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
     const gifts=await d.collection('gifts').find(query,{projection:GIFT_FIELDS}).toArray();
     giftCache.delete(key);giftCache.set(key,{at:clock(),gifts});if(giftCache.size>6)giftCache.delete(giftCache.keys().next().value);
     return gifts;
+  }
+  // Elimination state is read fresh at the gifts' pace, not from the 30 s competition list.
+  async function loadEliminated(comp,fresh=false){
+    const key=String(comp._id),cached=eliminatedCache.get(key),ttl=comp.status==='active'?LIVE_TTL:ENDED_TTL;
+    if(!fresh&&cached&&clock()-cached.at<ttl)return cached.list;
+    const doc=await db().collection('competitions').findOne({_id:comp._id},{projection:{eliminated:1}}),list=Array.isArray(doc?.eliminated)?doc.eliminated:[];
+    eliminatedCache.delete(key);eliminatedCache.set(key,{at:clock(),list});if(eliminatedCache.size>6)eliminatedCache.delete(eliminatedCache.keys().next().value);
+    return list;
   }
   // "Tổng cộng" part outside the competition gifts: scores of every gift in sessions overlapping the window.
   // Heavier, so it is cached longer and concurrent loads share one query; the competition gifts are added per request.
@@ -159,9 +175,9 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
   const publicSnapshot=(snap,admin)=>({id:String(snap._id),name:snap.name,at:snap.at,createdAt:snap.createdAt,createdBy:admin?snap.createdBy:undefined,rows:(snap.rows||[]).map(r=>snapshotEntry(r,true)),groups:(snap.groups||[]).map(g=>snapshotEntry(g,false))});
   const competitionFor=handler=>endpoint(async(req,res)=>{const comp=await bySlug(req.params.slug);if(!comp)return fail(res,404,'not_found');return handler(req,res,comp)});
   async function liveBoard(comp,fresh=false){
-    const [gifts,window]=await Promise.all([loadGifts(comp,fresh),loadWindow(comp,fresh)]);
+    const [gifts,window,eliminated]=await Promise.all([loadGifts(comp,fresh),loadWindow(comp,fresh),loadEliminated(comp,fresh)]);
     const overall=scoreOverall(comp.participants,gifts,{skip:window.ids,scores:window.scores}).scores;
-    return{at:clock(),...buildBoard(comp.participants,gifts,{overall})};
+    return{at:clock(),...buildBoard(comp.participants,gifts,{overall,eliminated})};
   }
 
   for(const file of STATIC_FILES)router.get(`/${file}`,(req,res)=>{res.set({'Cache-Control':'public, max-age=3600','X-Content-Type-Options':'nosniff'});res.sendFile(file,{root:publicDir})});
@@ -242,6 +258,6 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
     noStore(res).set('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'").type('html').send(html);
   }));
   async function ensureIndexes(){const d=db();await Promise.all([d.collection(ACCESS).createIndex({competitionId:1,secretHash:1}),d.collection(ACCESS).createIndex({secretHash:1,status:1}),d.collection(SNAPSHOTS).createIndex({competitionId:1,at:-1})])}
-  return{router,ensureIndexes,competitions,bySlug,loadGifts,reset(){list=null;listAt=0;missAt=0;giftCache.clear();windowCache.clear()}};
+  return{router,ensureIndexes,competitions,bySlug,loadGifts,loadEliminated,reset(){list=null;listAt=0;missAt=0;giftCache.clear();windowCache.clear();eliminatedCache.clear()}};
 }
-module.exports={createCompetitionPages,slugify,assignSlugs,scoreGifts,scoreOverall,overallScores,buildBoard,snapshotEntry,giftTalents,giftReceivers,validName,RESERVED};
+module.exports={createCompetitionPages,slugify,assignSlugs,scoreGifts,scoreOverall,overallScores,buildBoard,eliminatedMap,snapshotEntry,giftTalents,giftReceivers,validName,RESERVED};

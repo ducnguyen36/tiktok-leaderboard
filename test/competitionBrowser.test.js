@@ -75,3 +75,23 @@ test('outside viewer requests access, admin approves, viewer switches modes, tog
  admin.once('dialog',d=>d.dismiss());await trash.click();await admin.waitForTimeout(300);assert.equal(await admin.locator('.page').count(),2,'cancelled confirm keeps it');
  admin.once('dialog',d=>{assert.match(d.message(),/Chốt 1/);d.accept()});await trash.click();await admin.waitForFunction(()=>document.querySelectorAll('.page').length===1);
 });
+test('eliminated talents are hidden by default, shown dimmed with a label on request, ranks stay continuous',async t=>{
+ const {app,state}=createCompetitionFixture(),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base=`http://127.0.0.1:${server.address().port}`;
+ // LILY 104, RYAN 40, Chanee 4 (Cuộc thi); RYAN is out.
+ state.db.rows('competitions')[0].eliminated=[{talentName:'RYAN',at:new Date()}];
+ const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']}),errors=[];
+ t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});
+ const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);
+ const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();
+ const rows=()=>live.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.rank').textContent,r.querySelector('.who b').textContent,r.classList.contains('out')]));
+ assert.deepEqual(await rows(),[['1','LILY 🍉',false],['2','Chanee🌸',false]],'hidden by default; ranks continuous');
+ const toggle=live.getByRole('button',{name:/Hiện người bị loại \(1\)/});await toggle.click();
+ assert.deepEqual(await rows(),[['1','LILY 🍉',false],['–','RYAN',true],['2','Chanee🌸',false]],'shown in score order, unnumbered');
+ const out=live.locator('.talents .row.out');assert.match(await out.textContent(),/Đã loại/);assert.ok(Number(await out.evaluate(e=>getComputedStyle(e).opacity))<0.7,'dimmed');
+ assert.match(await out.locator('.score').textContent(),/40/,'score still visible');
+ await page.getByRole('button',{name:'Nhóm'}).click();assert.match(await live.locator('.groups').textContent(),/HT - ICONZ\s*40/,'groups still count eliminated points');
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ await page.reload();await live.locator('.talents .row').first().waitFor();assert.equal((await rows()).length,3,'choice remembered per browser');
+ await live.getByRole('button',{name:/Ẩn người bị loại \(1\)/}).click();assert.equal((await rows()).length,2);
+});
