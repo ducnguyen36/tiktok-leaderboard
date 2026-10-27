@@ -140,7 +140,7 @@ test('eliminated players rank by elimination order below everyone still in, not 
  await page.getByRole('button',{name:'Tổng cộng',exact:true}).click();
  assert.deepEqual((await rows()).map(r=>r[1]),['RYAN','LILY 🍉','Chanee🌸'],'Tổng cộng stays a plain score ranking');
 });
-test('eliminated rows at the same moment follow the panel rank; label shows the time, X/Y only in the tooltip',async t=>{
+test('eliminated rows at the same moment follow the panel rank; label shows the time, never X/Y',async t=>{
  const {app,state}=createCompetitionFixture(),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base=`http://127.0.0.1:${server.address().port}`;
  // Scores: LILY 104, RYAN 40, Chanee 4. The panel had Chanee 2/3 and RYAN 3/3 (round points the page cannot see).
  const at=new Date(Date.now()-30000);state.db.rows('competitions')[0].eliminated=[{talentName:'RYAN',at,rank:3,of:3},{talentName:'Chanee🌸',at,rank:2,of:3}];
@@ -151,7 +151,7 @@ test('eliminated rows at the same moment follow the panel rank; label shows the 
  await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();await page.locator('#out-toggle').click();
  const rows=await live.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.rank').textContent,r.querySelector('.who b').textContent,r.querySelector('.out-tag')?.textContent||'']));
  assert.deepEqual(rows.map(r=>r.slice(0,2)),[['1','LILY 🍉'],['2','Chanee🌸'],['3','RYAN']],'same moment: panel rank order, not score (RYAN has more points)');
- assert.ok(rows.slice(1).every(r=>/^Bị loại · \d\d:\d\d$/.test(r[2])),'no X/Y in the label');assert.match(await live.locator('.out-tag').nth(1).getAttribute('title'),/hạng 3\/3 lúc bị loại/,'X/Y stays in the tooltip');
+ assert.ok(rows.slice(1).every(r=>/^Bị loại · \d\d:\d\d$/.test(r[2])),'no X/Y in the label');assert.doesNotMatch(await live.locator('.out-tag').nth(1).getAttribute('title'),/hạng/,'no X/Y anywhere, not even the tooltip');assert.match(await live.locator('.out-tag').nth(1).getAttribute('title'),/^Bị loại lúc /);
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
 });
 test('revivals can repeat a locked rank: the later out places higher and placings never repeat',async t=>{

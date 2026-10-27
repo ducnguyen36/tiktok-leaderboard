@@ -83,8 +83,8 @@
   const ol=el('ol','rows');if(!visible.length)ol.append(el('li','empty',rows.length?'Tất cả đã bị loại':'Chưa có dữ liệu'));
   placed(visible,page,group).forEach((row,i)=>{const isOut=!group&&roundOut(page,row),rank=i+1;const li=el('li',`row${isOut?' out':rank<=3?` top${rank}`:''}`);li.append(el('span','rank',String(rank)));const name=group?row.profileName:row.talentName;
    if(!group)li.append(el('span','avatar',Array.from(name||'?')[0]||'?'));
-   const who=el('div','who');who.append(el('b','',name||'—'));if(!group){const sub=el('small','',row.profileName||'');if(isOut){const r=outRank(row),at=row.eliminatedAt?hhmm.format(new Date(row.eliminatedAt)):'',tag=el('span','out-tag',`Bị loại${at?` · ${at}`:''}${row.revives?` ↺${row.revives}`:''}`);
-     tag.title=[row.eliminatedAt?`Bị loại lúc ${when(row.eliminatedAt)}`:'',r?`hạng ${r}${row.eliminatedOf?`/${row.eliminatedOf}`:''} lúc bị loại`:'',row.revives?`đã hồi sinh ${row.revives} lần`:''].filter(Boolean).join(' · ');sub.prepend(tag)}who.append(sub)}li.append(who,score(row));ol.append(li)});
+   const who=el('div','who');who.append(el('b','',name||'—'));if(!group){const sub=el('small','',row.profileName||'');if(isOut){const at=row.eliminatedAt?hhmm.format(new Date(row.eliminatedAt)):'',tag=el('span','out-tag',`Bị loại${at?` · ${at}`:''}${row.revives?` ↺${row.revives}`:''}`);
+     tag.title=[row.eliminatedAt?`Bị loại lúc ${when(row.eliminatedAt)}`:'',row.revives?`đã hồi sinh ${row.revives} lần`:''].filter(Boolean).join(' · ');sub.prepend(tag)}who.append(sub)}li.append(who,score(row));ol.append(li)});
   wrap.append(ol);return wrap;
  }
  function applyGroups(){$('board-view').classList.toggle('groups-on',showGroups);$('groups-toggle').setAttribute('aria-pressed',String(showGroups))}
