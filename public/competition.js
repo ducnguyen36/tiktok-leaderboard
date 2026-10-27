@@ -64,13 +64,14 @@
  const value=(row,key=mode)=>row[key]==null?-Infinity:Number(row[key])||0,other=()=>mode==='competition'?'overall':'competition';
  function ranked(rows){return [...rows].sort((a,b)=>value(b)-value(a)||value(b,other())-value(a,other())||String(a.talentName||a.profileName).localeCompare(String(b.talentName||b.profileName)))}
  function score(row){const v=row[mode];return el('b',`score${v!=null&&Number(v)<0?' neg':''}`,fmt(v))}
- // Players still competing rank by score. Eliminated ones (eye on) follow at the bottom, ranked by when they
- // went out: the latest out ranks right below the last player still in, as at the moment of elimination
- // (same moment: higher score first). Groups always count everyone.
+ // Players still competing rank by score. Eliminated ones (eye on) follow at the bottom with the rank they
+ // went out at (eliminatedRank: HeliosControl's panel position, or the server's fallback); rows without one
+ // (old snapshots) follow by when they went out, latest first. Groups always count everyone.
  const outTime=row=>{const t=Date.parse(row.eliminatedAt||'');return Number.isFinite(t)?t:-Infinity};
+ const outRank=row=>Number.isInteger(row.eliminatedRank)&&row.eliminatedRank>0?row.eliminatedRank:null;
  function placed(rows,page,group){
   if(group||mode!=='competition')return ranked(rows);
-  const out=rows.filter(r=>roundOut(page,r)).sort((a,b)=>outTime(b)-outTime(a)||value(b)-value(a)||String(a.talentName).localeCompare(String(b.talentName)));
+  const out=rows.filter(r=>roundOut(page,r)).sort((a,b)=>(outRank(a)??Infinity)-(outRank(b)??Infinity)||outTime(b)-outTime(a)||value(b)-value(a)||String(a.talentName).localeCompare(String(b.talentName)));
   return [...ranked(rows.filter(r=>!roundOut(page,r))),...out];
  }
  function list(title,rows,group,page){
@@ -78,9 +79,9 @@
   const head=el('div','section-head');head.append(el('div','section-title',`${title} · ${MODES[mode]}`));wrap.append(head);
   const visible=group?rows:talentRows(page);
   const ol=el('ol','rows');if(!visible.length)ol.append(el('li','empty',rows.length?'Tất cả đã bị loại':'Chưa có dữ liệu'));
-  placed(visible,page,group).forEach((row,i)=>{const rank=i+1,isOut=!group&&roundOut(page,row);const li=el('li',`row${isOut?' out':rank<=3?` top${rank}`:''}`);li.append(el('span','rank',String(rank)));const name=group?row.profileName:row.talentName;
+  placed(visible,page,group).forEach((row,i)=>{const isOut=!group&&roundOut(page,row),rank=isOut&&outRank(row)?outRank(row):i+1;const li=el('li',`row${isOut?' out':rank<=3?` top${rank}`:''}`);li.append(el('span','rank',String(rank)));const name=group?row.profileName:row.talentName;
    if(!group)li.append(el('span','avatar',Array.from(name||'?')[0]||'?'));
-   const who=el('div','who');who.append(el('b','',name||'—'));if(!group){const sub=el('small','',row.profileName||'');if(isOut){const tag=el('span','out-tag','Đã loại');if(row.eliminatedAt)tag.title=`Bị loại lúc ${when(row.eliminatedAt)}`;sub.prepend(tag)}who.append(sub)}li.append(who,score(row));ol.append(li)});
+   const who=el('div','who');who.append(el('b','',name||'—'));if(!group){const sub=el('small','',row.profileName||'');if(isOut){const r=outRank(row),tag=el('span','out-tag',r?`Loại ở hạng ${r}${row.eliminatedOf?`/${row.eliminatedOf}`:''}`:'Đã loại');if(row.eliminatedAt)tag.title=`Bị loại lúc ${when(row.eliminatedAt)}`;sub.prepend(tag)}who.append(sub)}li.append(who,score(row));ol.append(li)});
   wrap.append(ol);return wrap;
  }
  function applyGroups(){$('board-view').classList.toggle('groups-on',showGroups);$('groups-toggle').setAttribute('aria-pressed',String(showGroups))}

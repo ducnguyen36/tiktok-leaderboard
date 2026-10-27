@@ -90,7 +90,7 @@ test('eliminated talents are left out of the ranking; the toolbar eye shows thei
  const [eyeBox,groupsBox]=await Promise.all([eye.boundingBox(),page.getByRole('button',{name:'Nhóm'}).boundingBox()]);assert.ok(Math.abs(eyeBox.y-groupsBox.y)<4,'eye sits on the toolbar row with Nhóm');
  assert.equal(await eye.getAttribute('aria-label'),'Hiện 1 người bị loại');await eye.click();
  assert.deepEqual(await rows(),[['1','LILY 🍉',false],['2','Chanee🌸',false],['3','RYAN',true]],'eliminated at the bottom with the rank they went out at, never between players still in');
- const out=live.locator('.talents .row.out');assert.match(await out.textContent(),/Đã loại/);assert.ok(Number(await out.evaluate(e=>getComputedStyle(e).opacity))<0.7,'dimmed');
+ const out=live.locator('.talents .row.out');assert.match(await out.textContent(),/Loại ở hạng 3\/3/,'no HeliosControl rank: the computed one is shown');assert.ok(Number(await out.evaluate(e=>getComputedStyle(e).opacity))<0.7,'dimmed');
  assert.match(await out.locator('.score').textContent(),/40/,'score still visible');
  await page.getByRole('button',{name:'Nhóm'}).click();assert.match(await live.locator('.groups').textContent(),/HT - ICONZ\s*40/,'groups still count eliminated points');
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
@@ -139,4 +139,17 @@ test('eliminated players rank by elimination order below everyone still in, not 
  assert.deepEqual(await rows(),[['1','LILY 🍉',false],['2','Chanee🌸',true],['3','RYAN',true]],'later out ranks higher even with fewer points');
  await page.getByRole('button',{name:'Tổng cộng',exact:true}).click();
  assert.deepEqual((await rows()).map(r=>r[1]),['RYAN','LILY 🍉','Chanee🌸'],'Tổng cộng stays a plain score ranking');
+});
+test('eliminated rows use the rank they went out at from HeliosControl, with a "Loại ở hạng" label',async t=>{
+ const {app,state}=createCompetitionFixture(),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base=`http://127.0.0.1:${server.address().port}`;
+ // Scores: LILY 104, RYAN 40, Chanee 4. The panel had Chanee 2/3 and RYAN 3/3 (round points the page cannot see).
+ const at=new Date(Date.now()-30000);state.db.rows('competitions')[0].eliminated=[{talentName:'RYAN',at,rank:3,of:3},{talentName:'Chanee🌸',at,rank:2,of:3}];
+ const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']}),errors=[];
+ t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});
+ const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);
+ const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();await page.locator('#out-toggle').click();
+ const rows=await live.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.rank').textContent,r.querySelector('.who b').textContent,r.querySelector('.out-tag')?.textContent||'']));
+ assert.deepEqual(rows,[['1','LILY 🍉',''],['2','Chanee🌸','Loại ở hạng 2/3'],['3','RYAN','Loại ở hạng 3/3']],'locked rank, not score (RYAN has more points)');
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
 });

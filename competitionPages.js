@@ -71,16 +71,39 @@ function scoreOverall(participants,gifts,{skip=null,scores=null}={}){
 function overallScores(participants,gifts,windowGifts=[]){const window=scoreOverall(participants,windowGifts);return scoreOverall(participants,gifts,{skip:window.ids,scores:window.scores}).scores}
 // HeliosControl writes competitions.eliminated [{talentName,at}] = who is OUT right now (revived names drop off).
 // Missing on older competitions: nobody is out. Returns talentName -> ISO time of elimination.
+// Each entry may carry rank/of: HeliosControl's panel position when the talent went out (1 = best) and how
+// many were still in just before. Returns talentName -> {at: ISO|null, rank, of} (rank/of null when missing).
+const posInt=v=>Number.isInteger(Number(v))&&Number(v)>0?Number(v):null;
 function eliminatedMap(list){
   const out=new Map();if(!Array.isArray(list))return out;
-  for(const e of list){const name=typeof e?.talentName==='string'?e.talentName:'';if(!name)continue;const at=new Date(e.at);out.set(name,Number.isFinite(+at)?at.toISOString():null)}
+  for(const e of list){const name=typeof e?.talentName==='string'?e.talentName:'';if(!name)continue;const at=new Date(e?.at);out.set(name,{at:Number.isFinite(+at)?at.toISOString():null,rank:posInt(e?.rank),of:posInt(e?.of)})}
   return out;
 }
+// Fill rank/of from eliminatedLog when an eliminated[] entry lacks them: the 'out' line of the same talent and moment.
+function withLogRanks(list,log){
+  if(!Array.isArray(list))return [];if(!Array.isArray(log))return list;
+  return list.map(e=>{if(posInt(e?.rank))return e;const at=+new Date(e?.at);const hit=[...log].reverse().find(l=>l?.action==='out'&&l.talentName===e?.talentName&&+new Date(l.at)===at&&posInt(l.rank));return hit?{...e,rank:hit.rank,of:hit.of}:e});
+}
+// Fallback when HeliosControl wrote no rank (older competitions or panel versions): M = players still in just
+// before that elimination (those still competing now + everyone out at that moment or later); talents out at
+// the same moment take M-g+1..M by their score at that moment (higher score = better rank).
+function fallbackRanks(out,participants,gifts){
+  const names=(participants||[]).map(p=>p.talentName||''),active=names.filter(n=>!out.has(n)).length,moments=new Map();
+  for(const [name,e] of out){if(e.rank||!names.includes(name))continue;const t=Date.parse(e.at||'');const key=Number.isFinite(t)?t:-Infinity;(moments.get(key)||moments.set(key,[]).get(key)).push(name)}
+  for(const [t,group] of moments){
+    const together=[...out.entries()].filter(([n,e])=>{const x=Date.parse(e.at||'');return names.includes(n)&&(Number.isFinite(x)?x:-Infinity)===t}).map(([n])=>n);
+    const later=[...out.values()].filter(e=>{const x=Date.parse(e.at||'');return(Number.isFinite(x)?x:-Infinity)>t}).length,m=active+later+together.length;
+    const scores=scoreGifts((gifts||[]).filter(g=>(Number(g.timeStamp)||0)<=t));
+    together.sort((a,b)=>(scores.get(b)||0)-(scores.get(a)||0)||a.localeCompare(b)).forEach((n,i)=>{const e=out.get(n);if(!e.rank&&group.includes(n))out.set(n,{...e,rank:m-together.length+1+i,of:m,computed:true})});
+  }
+  return out;
+}
+const eliminatedFields=e=>e?{eliminated:true,eliminatedAt:e.at,eliminatedRank:e.rank,eliminatedOf:e.of,eliminatedRankSource:e.rank?(e.computed?'computed':'helioscontrol'):null}:{eliminated:false,eliminatedAt:null,eliminatedRank:null,eliminatedOf:null,eliminatedRankSource:null};
 // rows/groups carry both modes; overall (array by participant index) defaults to the competition gifts alone.
 // Eliminated talents keep their rows (flagged) and still count in their group: the gifts are the group's income.
 function buildBoard(participants,gifts,{windowGifts=[],overall=null,eliminated=null}={}){
-  const competition=scoreGifts(gifts),total=overall||overallScores(participants,gifts,windowGifts),out=eliminatedMap(eliminated);
-  const rows=(participants||[]).map((p,i)=>({talentName:p.talentName||'',talentUid:String(p.talentUid||''),profileId:String(p.profileId||''),profileName:p.profileName||'',competition:competition.get(p.talentName)||0,overall:total[i]||0,eliminated:out.has(p.talentName||''),eliminatedAt:out.get(p.talentName||'')??null}));
+  const competition=scoreGifts(gifts),total=overall||overallScores(participants,gifts,windowGifts),out=fallbackRanks(eliminatedMap(eliminated),participants,gifts);
+  const rows=(participants||[]).map((p,i)=>({talentName:p.talentName||'',talentUid:String(p.talentUid||''),profileId:String(p.profileId||''),profileName:p.profileName||'',competition:competition.get(p.talentName)||0,overall:total[i]||0,...eliminatedFields(out.get(p.talentName||''))}));
   rows.sort((a,b)=>b.competition-a.competition||b.overall-a.overall||a.talentName.localeCompare(b.talentName));
   const groups=new Map();
   for(const row of rows){const key=row.profileId||row.profileName,group=groups.get(key)||{profileId:row.profileId,profileName:row.profileName,competition:0,overall:0};group.competition+=row.competition;group.overall+=row.overall;groups.set(key,group)}
@@ -88,7 +111,7 @@ function buildBoard(participants,gifts,{windowGifts=[],overall=null,eliminated=n
 }
 // Snapshots taken before the two modes only stored rows[].total (= competition); overall is then unknown (null).
 const num=v=>v==null||v===''||!Number.isFinite(Number(v))?null:Number(v);
-function snapshotEntry(entry,row){const out={profileId:String(entry?.profileId||''),profileName:entry?.profileName||'',competition:num(entry?.competition)??num(entry?.total)??0,overall:num(entry?.overall)};return row?{talentName:entry?.talentName||'',talentUid:String(entry?.talentUid||''),...out,eliminated:entry?.eliminated===true,eliminatedAt:entry?.eliminated===true&&entry?.eliminatedAt?String(entry.eliminatedAt):null}:out}
+function snapshotEntry(entry,row){const out={profileId:String(entry?.profileId||''),profileName:entry?.profileName||'',competition:num(entry?.competition)??num(entry?.total)??0,overall:num(entry?.overall)};return row?{talentName:entry?.talentName||'',talentUid:String(entry?.talentUid||''),...out,eliminated:entry?.eliminated===true,eliminatedAt:entry?.eliminated===true&&entry?.eliminatedAt?String(entry.eliminatedAt):null,eliminatedRank:entry?.eliminated===true?posInt(entry?.eliminatedRank):null,eliminatedOf:entry?.eliminated===true?posInt(entry?.eliminatedOf):null,eliminatedRankSource:entry?.eliminated===true&&posInt(entry?.eliminatedRank)?(entry.eliminatedRankSource==='computed'?'computed':'helioscontrol'):null}:out}
 function cookieSecret(req){for(const part of (req.headers.cookie||'').split(';')){const i=part.indexOf('=');if(i>0&&part.slice(0,i).trim()===COOKIE)return part.slice(i+1).trim()}return ''}
 // Small in-memory budget; behind the Cloudflare tunnel every visitor shares one IP, so it is global.
 function createBudget(max,windowMs,clock){let hits=[];return()=>{const now=clock();hits=hits.filter(t=>now-t<windowMs);if(hits.length>=max)return false;hits.push(now);return true}}
@@ -127,7 +150,7 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
   async function loadEliminated(comp,fresh=false){
     const key=String(comp._id),cached=eliminatedCache.get(key),ttl=comp.status==='active'?LIVE_TTL:ENDED_TTL;
     if(!fresh&&cached&&clock()-cached.at<ttl)return cached.list;
-    const doc=await db().collection('competitions').findOne({_id:comp._id},{projection:{eliminated:1}}),list=Array.isArray(doc?.eliminated)?doc.eliminated:[];
+    const doc=await db().collection('competitions').findOne({_id:comp._id},{projection:{eliminated:1,eliminatedLog:1}}),list=withLogRanks(Array.isArray(doc?.eliminated)?doc.eliminated:[],doc?.eliminatedLog);
     eliminatedCache.delete(key);eliminatedCache.set(key,{at:clock(),list});if(eliminatedCache.size>6)eliminatedCache.delete(eliminatedCache.keys().next().value);
     return list;
   }
@@ -260,4 +283,4 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
   async function ensureIndexes(){const d=db();await Promise.all([d.collection(ACCESS).createIndex({competitionId:1,secretHash:1}),d.collection(ACCESS).createIndex({secretHash:1,status:1}),d.collection(SNAPSHOTS).createIndex({competitionId:1,at:-1})])}
   return{router,ensureIndexes,competitions,bySlug,loadGifts,loadEliminated,reset(){list=null;listAt=0;missAt=0;giftCache.clear();windowCache.clear();eliminatedCache.clear()}};
 }
-module.exports={createCompetitionPages,slugify,assignSlugs,scoreGifts,scoreOverall,overallScores,buildBoard,eliminatedMap,snapshotEntry,giftTalents,giftReceivers,validName,RESERVED};
+module.exports={createCompetitionPages,slugify,assignSlugs,scoreGifts,scoreOverall,overallScores,buildBoard,eliminatedMap,withLogRanks,fallbackRanks,snapshotEntry,giftTalents,giftReceivers,validName,RESERVED};
