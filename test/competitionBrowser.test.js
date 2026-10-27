@@ -64,4 +64,14 @@ test('outside viewer requests access, admin approves, viewer switches modes, tog
  const [side,list]=await Promise.all([panel.boundingBox(),adminLive.locator('.talents').boundingBox()]);
  assert.ok(side.x>=list.x+list.width-1,'side panel is right of the ranking, not over it');assert.ok(Math.abs(side.y-list.y)<2,'side by side');
  assert.ok(await panel.evaluate(e=>getComputedStyle(e).transitionProperty.includes('flex-basis')),'slides with a CSS transition');
+ // Snapshot header: pencil right after the name; only admins get the trash, at the far right, confirmed first.
+ const visitorSnap=visitor.locator('.page').nth(1);
+ assert.equal(await visitorSnap.locator('.title-row button[aria-label="Đổi tên snapshot"]').count(),1);assert.equal(await visitorSnap.locator('button[aria-label="Xóa snapshot"]').count(),0);
+ await admin.reload();const adminSnap=admin.locator('.page').nth(1);await adminSnap.waitFor({state:'attached'});
+ const trash=adminSnap.locator('.page-head > button[aria-label="Xóa snapshot"]');
+ assert.equal(await adminSnap.locator('.page-head').evaluate(h=>h.lastElementChild.getAttribute('aria-label')),'Xóa snapshot');
+ const [pencilBox,trashBox,headBox]=await Promise.all([adminSnap.locator('.title-row button').boundingBox(),trash.boundingBox(),adminSnap.locator('.page-head').boundingBox()]);
+ assert.ok(trashBox.x-(pencilBox.x+pencilBox.width)>60,'trash is well away from the pencil');assert.ok(headBox.x+headBox.width-(trashBox.x+trashBox.width)<20,'trash hugs the right edge');
+ admin.once('dialog',d=>d.dismiss());await trash.click();await admin.waitForTimeout(300);assert.equal(await admin.locator('.page').count(),2,'cancelled confirm keeps it');
+ admin.once('dialog',d=>{assert.match(d.message(),/Chốt 1/);d.accept()});await trash.click();await admin.waitForFunction(()=>document.querySelectorAll('.page').length===1);
 });

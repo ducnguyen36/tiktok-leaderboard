@@ -11,6 +11,14 @@
  const stored=key=>{try{return localStorage.getItem(`heliosComp.${key}`)}catch{return null}},store=(key,value)=>{try{localStorage.setItem(`heliosComp.${key}`,value)}catch{}};
  let board=null,csrf='',mode=MODES[stored('mode')]?stored('mode'):'competition',showGroups=stored('groups')==='1',timer=0,current='live',pageSig='',adminSig='',dialogMode=null,toastTimer=0;
  function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
+ const ICONS={pencil:'M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4',trash:'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6'};
+ function iconButton(icon,label,data,cls=''){
+  const b=el('button',('icon-mini '+cls).trim()),svg=document.createElementNS('http://www.w3.org/2000/svg','svg'),path=document.createElementNS('http://www.w3.org/2000/svg','path');
+  b.type='button';b.title=label;b.setAttribute('aria-label',label);Object.assign(b.dataset,data);
+  svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('width','16');svg.setAttribute('height','16');svg.setAttribute('aria-hidden','true');
+  path.setAttribute('d',ICONS[icon]);path.setAttribute('fill','none');path.setAttribute('stroke','currentColor');path.setAttribute('stroke-width','2');path.setAttribute('stroke-linecap','round');path.setAttribute('stroke-linejoin','round');
+  svg.append(path);b.append(svg);return b;
+ }
  function toast(message){const t=$('toast');t.textContent=message;t.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.hidden=true,3500)}
  async function call(url,{method='GET',body}={}){
   const headers={accept:'application/json'};if(body!==undefined)headers['content-type']='application/json';if(method!=='GET'&&csrf)headers['x-csrf-token']=csrf;
@@ -66,11 +74,11 @@
   const box=$('pages'),dots=$('dots');box.replaceChildren();dots.replaceChildren();
   all.forEach((p,i)=>{
    const page=el('article',`page${p.live?' live':''}`);page.dataset.id=p.id;page.setAttribute('aria-label',p.title);
-   const head=el('div','page-head'),titles=el('div'),h=el('h2','page-title');if(p.live)h.append(el('span','live-dot'));h.append(document.createTextNode(p.title));titles.append(h,el('div','page-sub',p.sub));head.append(titles);
-   if(!p.live&&(board.canSnapshot||board.admin)){const actions=el('div','page-actions');
-    if(board.canSnapshot){const b=el('button','','Đổi tên');b.type='button';b.dataset.rename=p.id;actions.append(b)}
-    if(board.admin){const b=el('button','danger','Xóa');b.type='button';b.dataset.remove=p.id;actions.append(b)}
-    head.append(actions)}
+   const head=el('div','page-head'),titles=el('div','page-titles'),row=el('div','title-row'),h=el('h2','page-title');if(p.live)h.append(el('span','live-dot'));h.append(document.createTextNode(p.title));row.append(h);
+   // Rename: pencil right next to the name. Delete (admins): trash at the far right, away from it, and confirmed.
+   if(!p.live&&board.canSnapshot)row.append(iconButton('pencil','Đổi tên snapshot',{rename:p.id}));
+   titles.append(row,el('div','page-sub',p.sub));head.append(titles);
+   if(!p.live&&board.admin)head.append(iconButton('trash','Xóa snapshot',{remove:p.id},'danger'));
    if(mode==='overall'&&p.rows.some(r=>r.overall==null))page.append(head,el('div','old-note','Snapshot cũ chưa lưu số Tổng cộng.'));else page.append(head);
    const body=el('div','page-body');body.append(list('Tổng theo nhóm',p.groups,true),list('Xếp hạng talent',p.rows,false));page.append(body);box.append(page);
    const dot=el('button');dot.type='button';dot.setAttribute('aria-label',p.title);dot.dataset.page=String(i);dots.append(dot);
