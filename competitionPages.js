@@ -7,7 +7,8 @@ const crypto=require('node:crypto'),fs=require('node:fs'),path=require('node:pat
 const {ObjectId}=require('mongodb');
 const ACCESS='competition_access',SNAPSHOTS='competition_snapshots',COOKIE='helios_comp',COOKIE_AGE=180*86400000;
 const ROLES=['viewer','snapshot'],MAX_PENDING_PER_BROWSER=3,MAX_REQUESTS_PER_COMPETITION=200,MAX_SNAPSHOTS=100,NAME_MAX=60;
-const LIST_TTL=30000,MISS_REFRESH=10000,LIVE_TTL=8000,ENDED_TTL=60000;
+const LIST_TTL=30000,MISS_REFRESH=10000,LIVE_TTL=8000,ENDED_TTL=60000,WINDOW_LIVE_TTL=30000,WINDOW_TTL=60000;
+const GIFT_FIELDS={_id:1,cost:1,timeStamp:1,receivedTalent:1,receivedTalentUid:1,receivedTalents:1};
 // Single-segment paths that belong to the board itself; a competition never takes them.
 const RESERVED=new Set(['old','new','auth','api','privacy','userdata','avatars','overlay','v1','index','competition','public','static','health','admin']);
 const STATIC_FILES=['competition.js','competition.css','helios-asset-23.png'];
@@ -24,8 +25,9 @@ function assignSlugs(competitions){
   for(const comp of sorted){const base=slugify(comp.name);let slug=RESERVED.has(base)?`${base}-cuoc-thi`:base;for(let n=2;used.has(slug);n++)slug=`${base}-${n}`;used.add(slug);out.set(String(comp._id),slug)}
   return out;
 }
-// HeliosControl scoring, replicated from its control panel (public/newcontrol.js competition mode ->
-// modules/giftProcessor.js processGiftsAndTalents):
+// Two scores per participant.
+// "Cuộc thi" (competition) = HeliosControl scoring, replicated from its control panel (public/newcontrol.js
+// competition mode -> modules/giftProcessor.js processGiftsAndTalents):
 //  * only gifts recorded in the competition's own sessions (sessions.profileId "competition_<id>"
 //    from the server or "comp_<id>" from the panel) count. HeliosControl also stamps competitionId
 //    on gifts of OTHER groups' sessions while its in-memory active competition lingers; the panel never shows those.
@@ -33,31 +35,59 @@ function assignSlugs(competitions){
 //    each talent gets Math.floor(cost / talentCount). Manual corrections (negative cost) count the same way.
 //  * a participant scores the sum for its exact talentName (HeliosControl keys scores by name, not uid);
 //    group gifts addressed to the competition/group name count for nobody (auto-split is off in competition mode).
+// "Tổng cộng" (overall) = revenue view: every gift a participant received during the competition window
+// [startedAt||createdAt, endedAt||now], also outside the competition (own group's sessions, battles ...):
+//  * gifts = the competition gifts above UNION gifts of every session overlapping the window (createdAt or
+//    sessionStartedAt <= window end and updatedAt >= window start) whose timeStamp lies inside the window,
+//    deduplicated by gift _id (read through the gifts {sessionId,timeStamp} index, never a range scan over all gifts).
+//  * receivers are receivedTalents[] ({name,uid}) else receivedTalent/receivedTalentUid; each receiver gets
+//    Math.floor(cost / receiverCount); a receiver counts for a participant when its uid equals the participant's
+//    talentUid (both non-empty) OR its name equals talentName. Negative manual corrections count too.
 function giftTalents(gift){
   if(Array.isArray(gift.receivedTalents)&&gift.receivedTalents.length)return gift.receivedTalents.map(t=>t&&typeof t==='object'&&t.name?t.name:String(t));
   return gift.receivedTalent?[gift.receivedTalent]:['Unassigned'];
 }
-function scoreGifts(gifts,from=-Infinity,to=Infinity){
+function giftReceivers(gift){
+  if(Array.isArray(gift.receivedTalents)&&gift.receivedTalents.length)return gift.receivedTalents.map(t=>t&&typeof t==='object'?{name:String(t.name||''),uid:String(t.uid||'')}:{name:String(t),uid:''});
+  return gift.receivedTalent?[{name:String(gift.receivedTalent),uid:String(gift.receivedTalentUid||'')}]:[{name:'Unassigned',uid:''}];
+}
+function scoreGifts(gifts){
   const scores=new Map();
-  for(const gift of gifts){const at=Number(gift.timeStamp)||0;if(!(at>from&&at<=to))continue;const names=giftTalents(gift),share=Math.floor((Number(gift.cost)||0)/names.length);for(const name of names)scores.set(name,(scores.get(name)||0)+share)}
+  for(const gift of gifts){const names=giftTalents(gift),share=Math.floor((Number(gift.cost)||0)/names.length);for(const name of names)scores.set(name,(scores.get(name)||0)+share)}
   return scores;
 }
-// round = gifts in (roundFrom, at]; total = everything up to at.
-function buildBoard(participants,gifts,{roundFrom=-Infinity,at=Infinity}={}){
-  const total=scoreGifts(gifts,-Infinity,at),round=scoreGifts(gifts,roundFrom,at);
-  const rows=(participants||[]).map(p=>({talentName:p.talentName||'',talentUid:String(p.talentUid||''),profileId:String(p.profileId||''),profileName:p.profileName||'',round:round.get(p.talentName)||0,total:total.get(p.talentName)||0}));
-  rows.sort((a,b)=>b.total-a.total||b.round-a.round||a.talentName.localeCompare(b.talentName));
-  const groups=new Map();
-  for(const row of rows){const key=row.profileId||row.profileName,group=groups.get(key)||{profileId:row.profileId,profileName:row.profileName,round:0,total:0};group.round+=row.round;group.total+=row.total;groups.set(key,group)}
-  return{rows,groups:[...groups.values()].sort((a,b)=>b.total-a.total||b.round-a.round)};
+// Overall scores by participant index. Gifts whose _id is in skip (or already seen here) are counted once only.
+function scoreOverall(participants,gifts,{skip=null,scores=null}={}){
+  const byUid=new Map(),byName=new Map(),ids=new Set(),out=scores?[...scores]:(participants||[]).map(()=>0);
+  const add=(map,key,i)=>{if(!key)return;const list=map.get(key);if(list)list.push(i);else map.set(key,[i])};
+  (participants||[]).forEach((p,i)=>{add(byUid,String(p.talentUid||''),i);add(byName,String(p.talentName||''),i)});
+  for(const gift of gifts){
+    const id=gift._id==null?null:String(gift._id);if(id!==null){if(ids.has(id)||skip?.has(id))continue;ids.add(id)}
+    const receivers=giftReceivers(gift),share=Math.floor((Number(gift.cost)||0)/receivers.length);
+    for(const r of receivers){const hit=new Set([...(r.uid&&byUid.get(r.uid)||[]),...(byName.get(r.name)||[])]);for(const i of hit)out[i]+=share}
+  }
+  return{scores:out,ids};
 }
+function overallScores(participants,gifts,windowGifts=[]){const window=scoreOverall(participants,windowGifts);return scoreOverall(participants,gifts,{skip:window.ids,scores:window.scores}).scores}
+// rows/groups carry both modes; overall (array by participant index) defaults to the competition gifts alone.
+function buildBoard(participants,gifts,{windowGifts=[],overall=null}={}){
+  const competition=scoreGifts(gifts),total=overall||overallScores(participants,gifts,windowGifts);
+  const rows=(participants||[]).map((p,i)=>({talentName:p.talentName||'',talentUid:String(p.talentUid||''),profileId:String(p.profileId||''),profileName:p.profileName||'',competition:competition.get(p.talentName)||0,overall:total[i]||0}));
+  rows.sort((a,b)=>b.competition-a.competition||b.overall-a.overall||a.talentName.localeCompare(b.talentName));
+  const groups=new Map();
+  for(const row of rows){const key=row.profileId||row.profileName,group=groups.get(key)||{profileId:row.profileId,profileName:row.profileName,competition:0,overall:0};group.competition+=row.competition;group.overall+=row.overall;groups.set(key,group)}
+  return{rows,groups:[...groups.values()].sort((a,b)=>b.competition-a.competition||b.overall-a.overall)};
+}
+// Snapshots taken before the two modes only stored rows[].total (= competition); overall is then unknown (null).
+const num=v=>v==null||v===''||!Number.isFinite(Number(v))?null:Number(v);
+function snapshotEntry(entry,row){const out={profileId:String(entry?.profileId||''),profileName:entry?.profileName||'',competition:num(entry?.competition)??num(entry?.total)??0,overall:num(entry?.overall)};return row?{talentName:entry?.talentName||'',talentUid:String(entry?.talentUid||''),...out}:out}
 function cookieSecret(req){for(const part of (req.headers.cookie||'').split(';')){const i=part.indexOf('=');if(i>0&&part.slice(0,i).trim()===COOKIE)return part.slice(i+1).trim()}return ''}
 // Small in-memory budget; behind the Cloudflare tunnel every visitor shares one IP, so it is global.
 function createBudget(max,windowMs,clock){let hits=[];return()=>{const now=clock();hits=hits.filter(t=>now-t<windowMs);if(hits.length>=max)return false;hits.push(now);return true}}
 function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'public'),assetVersion=()=>'',clock=Date.now}){
   const router=express.Router(),json=express.json({limit:'4kb'});
   const requestBudget=createBudget(40,600000,clock),snapshotBudget=createBudget(30,600000,clock);
-  let list=null,listAt=0,listLoading=null,missAt=0;const giftCache=new Map();
+  let list=null,listAt=0,listLoading=null,missAt=0;const giftCache=new Map(),windowCache=new Map(),windowLoading=new Map();
   const db=()=>{const d=getDb();if(!d)throw Object.assign(Error('Database unavailable'),{status:503});return d};
   const noStore=res=>res.set({'Cache-Control':'private, no-store, max-age=0','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','X-Frame-Options':'DENY'});
   const fail=(res,code,error)=>noStore(res).status(code).json({status:'error',error});
@@ -81,9 +111,29 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
     const query={competitionId:comp._id};
     // Competitions recorded before session tagging fall back to every gift stamped with the competition.
     if(sessions.length){const ids=sessions.map(s=>s._id);query.sessionId={$in:[...ids,...ids.map(String)]}}
-    const gifts=await d.collection('gifts').find(query,{projection:{_id:0,cost:1,timeStamp:1,receivedTalent:1,receivedTalents:1}}).toArray();
+    const gifts=await d.collection('gifts').find(query,{projection:GIFT_FIELDS}).toArray();
     giftCache.delete(key);giftCache.set(key,{at:clock(),gifts});if(giftCache.size>6)giftCache.delete(giftCache.keys().next().value);
     return gifts;
+  }
+  // "Tổng cộng" part outside the competition gifts: scores of every gift in sessions overlapping the window.
+  // Heavier, so it is cached longer and concurrent loads share one query; the competition gifts are added per request.
+  const participantSig=comp=>JSON.stringify((comp.participants||[]).map(p=>[p.talentName||'',String(p.talentUid||'')]));
+  async function loadWindow(comp,fresh=false){
+    const key=String(comp._id),sig=participantSig(comp),cached=windowCache.get(key),ttl=comp.status==='active'?WINDOW_LIVE_TTL:WINDOW_TTL;
+    if(!fresh&&cached&&cached.sig===sig&&clock()-cached.at<ttl)return cached;
+    if(!fresh&&windowLoading.has(key))return windowLoading.get(key);
+    const load=(async()=>{
+      const start=+new Date(comp.startedAt||comp.createdAt||0),end=comp.endedAt?+new Date(comp.endedAt):clock();let gifts=[];
+      if(start>0&&end>=start){
+        const d=db(),from=new Date(start),to=new Date(end);
+        const sessions=await d.collection('sessions').find({$and:[{$or:[{createdAt:{$lte:to}},{sessionStartedAt:{$lte:to}}]},{updatedAt:{$gte:from}}]},{projection:{_id:1}}).toArray();
+        if(sessions.length){const ids=sessions.map(s=>s._id);gifts=await d.collection('gifts').find({sessionId:{$in:[...ids,...ids.map(String)]},timeStamp:{$gte:start,$lte:end}},{projection:GIFT_FIELDS}).toArray()}
+      }
+      const {scores,ids}=scoreOverall(comp.participants,gifts),entry={at:clock(),sig,scores,ids};
+      windowCache.delete(key);windowCache.set(key,entry);if(windowCache.size>6)windowCache.delete(windowCache.keys().next().value);
+      return entry;
+    })().finally(()=>{if(windowLoading.get(key)===load)windowLoading.delete(key)});
+    windowLoading.set(key,load);return load;
   }
   async function snapshotsOf(comp){return db().collection(SNAPSHOTS).find({competitionId:String(comp._id)}).sort({at:-1}).limit(MAX_SNAPSHOTS).toArray()}
   async function access(req,comp){
@@ -106,9 +156,13 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
     return{admin:false,by:grant.request.name};
   }
   const publicCompetition=comp=>({id:String(comp._id),name:comp.name||'',slug:comp.slug,status:comp.status||'created',createdAt:comp.createdAt||null,startedAt:comp.startedAt||null,endedAt:comp.endedAt||null});
-  const publicSnapshot=(snap,admin)=>({id:String(snap._id),name:snap.name,at:snap.at,createdAt:snap.createdAt,createdBy:admin?snap.createdBy:undefined,rows:snap.rows,groups:snap.groups});
+  const publicSnapshot=(snap,admin)=>({id:String(snap._id),name:snap.name,at:snap.at,createdAt:snap.createdAt,createdBy:admin?snap.createdBy:undefined,rows:(snap.rows||[]).map(r=>snapshotEntry(r,true)),groups:(snap.groups||[]).map(g=>snapshotEntry(g,false))});
   const competitionFor=handler=>endpoint(async(req,res)=>{const comp=await bySlug(req.params.slug);if(!comp)return fail(res,404,'not_found');return handler(req,res,comp)});
-  async function liveBoard(comp,snaps,fresh=false){const gifts=await loadGifts(comp,fresh),at=clock(),roundFrom=snaps[0]?.at??-Infinity;return{at,roundFrom:Number.isFinite(roundFrom)?roundFrom:null,...buildBoard(comp.participants,gifts,{roundFrom,at})}}
+  async function liveBoard(comp,fresh=false){
+    const [gifts,window]=await Promise.all([loadGifts(comp,fresh),loadWindow(comp,fresh)]);
+    const overall=scoreOverall(comp.participants,gifts,{skip:window.ids,scores:window.scores}).scores;
+    return{at:clock(),...buildBoard(comp.participants,gifts,{overall})};
+  }
 
   for(const file of STATIC_FILES)router.get(`/${file}`,(req,res)=>{res.set({'Cache-Control':'public, max-age=3600','X-Content-Type-Options':'nosniff'});res.sendFile(file,{root:publicDir})});
   router.get('/api/competitions',endpoint(async(req,res)=>{
@@ -139,7 +193,7 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
   }));
   router.get('/api/competitions/:slug/board',competitionFor(async(req,res,comp)=>{
     const grant=await access(req,comp);if(!grant.role)return fail(res,401,'access_required');
-    const snaps=await snapshotsOf(comp),live=await liveBoard(comp,snaps);
+    const [snaps,live]=await Promise.all([snapshotsOf(comp),liveBoard(comp)]);
     noStore(res).json({status:'ok',competition:publicCompetition(comp),admin:grant.admin,role:grant.role,canSnapshot:grant.admin||grant.role==='snapshot',live,snapshots:snaps.map(s=>publicSnapshot(s,grant.admin))});
   }));
   router.post('/api/competitions/:slug/snapshots',json,competitionFor(async(req,res,comp)=>{
@@ -148,7 +202,7 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
     if(!snapshotBudget())return fail(res,429,'rate_limited');
     const col=db().collection(SNAPSHOTS),competitionId=String(comp._id);
     if(await col.countDocuments({competitionId})>=MAX_SNAPSHOTS)return fail(res,409,'too_many_snapshots');
-    const snaps=await snapshotsOf(comp),board=await liveBoard(comp,snaps,true);
+    const board=await liveBoard(comp,true);
     const doc={_id:new ObjectId(),competitionId,name,at:board.at,createdAt:new Date(board.at),createdBy:who.by,rows:board.rows,groups:board.groups};
     await col.insertOne(doc);noStore(res).json({status:'ok',snapshot:publicSnapshot(doc,who.admin)});
   }));
@@ -188,6 +242,6 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
     noStore(res).set('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'").type('html').send(html);
   }));
   async function ensureIndexes(){const d=db();await Promise.all([d.collection(ACCESS).createIndex({competitionId:1,secretHash:1}),d.collection(ACCESS).createIndex({secretHash:1,status:1}),d.collection(SNAPSHOTS).createIndex({competitionId:1,at:-1})])}
-  return{router,ensureIndexes,competitions,bySlug,loadGifts,reset(){list=null;listAt=0;missAt=0;giftCache.clear()}};
+  return{router,ensureIndexes,competitions,bySlug,loadGifts,reset(){list=null;listAt=0;missAt=0;giftCache.clear();windowCache.clear()}};
 }
-module.exports={createCompetitionPages,slugify,assignSlugs,scoreGifts,buildBoard,giftTalents,validName,RESERVED};
+module.exports={createCompetitionPages,slugify,assignSlugs,scoreGifts,scoreOverall,overallScores,buildBoard,snapshotEntry,giftTalents,giftReceivers,validName,RESERVED};

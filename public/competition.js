@@ -4,9 +4,12 @@
 (()=>{
  const slug=location.pathname.replace(/^\/+|\/+$/g,''),api=p=>`/api/competitions/${encodeURIComponent(slug)}${p}`,$=id=>document.getElementById(id);
  const number=new Intl.NumberFormat('vi-VN'),clock=new Intl.DateTimeFormat('vi-VN',{timeZone:'Asia/Ho_Chi_Minh',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
- const fmt=n=>number.format(Number(n)||0),when=v=>v==null?'':clock.format(new Date(v));
- const VIEWS=['loading-view','missing-view','request-view','pending-view','board-view'];
- let board=null,csrf='',sort='total',timer=0,current='live',pageSig='',adminSig='',dialogMode=null,toastTimer=0;
+ // Negative scores (manual corrections) use a true minus sign U+2212; unknown values (old snapshots) show an en dash.
+ const fmt=n=>n==null?'–':(Number(n)<0?'−':'')+number.format(Math.abs(Number(n)||0)),when=v=>v==null?'':clock.format(new Date(v));
+ const VIEWS=['loading-view','missing-view','request-view','pending-view','board-view'],MODES={competition:'Cuộc thi',overall:'Tổng cộng'};
+ // Per-browser view preferences; storage can be unavailable (private mode, blocked site data).
+ const stored=key=>{try{return localStorage.getItem(`heliosComp.${key}`)}catch{return null}},store=(key,value)=>{try{localStorage.setItem(`heliosComp.${key}`,value)}catch{}};
+ let board=null,csrf='',mode=MODES[stored('mode')]?stored('mode'):'competition',showGroups=stored('groups')==='1',timer=0,current='live',pageSig='',adminSig='',dialogMode=null,toastTimer=0;
  function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
  function toast(message){const t=$('toast');t.textContent=message;t.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.hidden=true,3500)}
  async function call(url,{method='GET',body}={}){
@@ -39,22 +42,27 @@
  }
  async function loadCsrf(){try{csrf=(await call('/auth/status')).csrf||''}catch{csrf=''}}
  function pages(){
-  const live=board.live,list=[{id:'live',live:true,title:'LIVE',sub:live.roundFrom?`Vòng hiện tại từ ${when(live.roundFrom)}`:'Từ đầu cuộc thi',rows:live.rows,groups:live.groups}];
+  const live=board.live,list=[{id:'live',live:true,title:'LIVE',sub:'Cộng dồn từ đầu cuộc thi',rows:live.rows,groups:live.groups}];
   for(const s of board.snapshots)list.push({id:s.id,title:s.name,sub:`${when(s.at)}${s.createdBy?` · ${s.createdBy}`:''}`,rows:s.rows,groups:s.groups});
   return list;
  }
- function ranked(rows){return [...rows].sort((a,b)=>b[sort]-a[sort]||b[sort==='total'?'round':'total']-a[sort==='total'?'round':'total']||String(a.talentName||a.profileName).localeCompare(String(b.talentName||b.profileName)))}
- function nums(row){const box=el('div','nums');for(const [key,label] of [['round','Vòng'],['total','Tổng']]){box.append(el('span','',label));box.append(el('b',key===sort?'sorted':'',fmt(row[key])))}return box}
+ // Sorted by the selected mode; unknown values (old snapshots in "Tổng cộng") go last.
+ const value=(row,key=mode)=>row[key]==null?-Infinity:Number(row[key])||0,other=()=>mode==='competition'?'overall':'competition';
+ function ranked(rows){return [...rows].sort((a,b)=>value(b)-value(a)||value(b,other())-value(a,other())||String(a.talentName||a.profileName).localeCompare(String(b.talentName||b.profileName)))}
+ function score(row){const v=row[mode];return el('b',`score${v!=null&&Number(v)<0?' neg':''}`,fmt(v))}
  function list(title,rows,group){
-  const wrap=el('div',group?'groups':'talents');wrap.append(el('div','section-title',title));const ol=el('ol','rows');
+  const wrap=el(group?'aside':'div',group?'groups':'talents');if(group)wrap.setAttribute('aria-label',title);
+  wrap.append(el('div','section-title',`${title} · ${MODES[mode]}`));const ol=el('ol','rows');
   if(!rows.length)ol.append(el('li','empty','Chưa có dữ liệu'));
   ranked(rows).forEach((row,i)=>{const li=el('li',`row${i<3?` top${i+1}`:''}`);li.append(el('span','rank',String(i+1)));const name=group?row.profileName:row.talentName;
    if(!group)li.append(el('span','avatar',Array.from(name||'?')[0]||'?'));
-   const who=el('div','who');who.append(el('b','',name||'—'));if(!group)who.append(el('small','',row.profileName||''));li.append(who,nums(row));ol.append(li)});
+   const who=el('div','who');who.append(el('b','',name||'—'));if(!group)who.append(el('small','',row.profileName||''));li.append(who,score(row));ol.append(li)});
   wrap.append(ol);return wrap;
  }
+ function applyGroups(){$('board-view').classList.toggle('groups-on',showGroups);$('groups-toggle').setAttribute('aria-pressed',String(showGroups))}
+ function applyMode(){for(const b of document.querySelectorAll('.modes button'))b.setAttribute('aria-pressed',String(b.dataset.mode===mode))}
  function renderPages(){
-  const all=pages(),sig=JSON.stringify([sort,board.canSnapshot,board.admin,all]);if(sig===pageSig)return;pageSig=sig;
+  const all=pages(),sig=JSON.stringify([mode,board.canSnapshot,board.admin,all]);if(sig===pageSig)return;pageSig=sig;
   const box=$('pages'),dots=$('dots');box.replaceChildren();dots.replaceChildren();
   all.forEach((p,i)=>{
    const page=el('article',`page${p.live?' live':''}`);page.dataset.id=p.id;page.setAttribute('aria-label',p.title);
@@ -63,7 +71,8 @@
     if(board.canSnapshot){const b=el('button','','Đổi tên');b.type='button';b.dataset.rename=p.id;actions.append(b)}
     if(board.admin){const b=el('button','danger','Xóa');b.type='button';b.dataset.remove=p.id;actions.append(b)}
     head.append(actions)}
-   const body=el('div','page-body');body.append(list('Xếp hạng talent',p.rows,false),list('Tổng theo nhóm',p.groups,true));page.append(head,body);box.append(page);
+   if(mode==='overall'&&p.rows.some(r=>r.overall==null))page.append(head,el('div','old-note','Snapshot cũ chưa lưu số Tổng cộng.'));else page.append(head);
+   const body=el('div','page-body');body.append(list('Tổng theo nhóm',p.groups,true),list('Xếp hạng talent',p.rows,false));page.append(body);box.append(page);
    const dot=el('button');dot.type='button';dot.setAttribute('aria-label',p.title);dot.dataset.page=String(i);dots.append(dot);
   });
   const index=Math.max(0,all.findIndex(p=>p.id===current));current=all[index].id;
@@ -76,7 +85,9 @@
  $('pages').addEventListener('keydown',e=>{if(e.key==='ArrowRight'){e.preventDefault();go(indexNow()+1)}else if(e.key==='ArrowLeft'){e.preventDefault();go(indexNow()-1)}});
  $('prev-page').addEventListener('click',()=>go(indexNow()-1));$('next-page').addEventListener('click',()=>go(indexNow()+1));
  $('dots').addEventListener('click',e=>{const b=e.target.closest('button[data-page]');if(b)go(Number(b.dataset.page))});
- document.querySelector('.sort').addEventListener('click',e=>{const b=e.target.closest('button[data-sort]');if(!b)return;sort=b.dataset.sort;for(const x of document.querySelectorAll('.sort button'))x.setAttribute('aria-pressed',String(x===b));if(board)renderPages()});
+ document.querySelector('.modes').addEventListener('click',e=>{const b=e.target.closest('button[data-mode]');if(!b||!MODES[b.dataset.mode])return;mode=b.dataset.mode;store('mode',mode);applyMode();if(board)renderPages()});
+ $('groups-toggle').addEventListener('click',()=>{showGroups=!showGroups;store('groups',showGroups?'1':'0');applyGroups()});
+ applyMode();applyGroups();
  $('pages').addEventListener('click',async e=>{
   const rename=e.target.closest('button[data-rename]'),remove=e.target.closest('button[data-remove]');
   if(rename){const snap=board.snapshots.find(s=>s.id===rename.dataset.rename);if(snap)openDialog({mode:'rename',id:snap.id,value:snap.name})}
@@ -84,7 +95,7 @@
    try{await call(api(`/snapshots/${snap.id}/delete`),{method:'POST',body:{}});toast('Đã xóa snapshot');pageSig='';await loadBoard()}catch(err){toast(errorText(err))}}
  });
  function openDialog({mode,id,value}){dialogMode={mode,id};$('name-title').textContent=mode==='create'?'Chụp snapshot':'Đổi tên snapshot';$('name-input').value=value||'';$('name-dialog').showModal();$('name-input').select()}
- $('snapshot-button').addEventListener('click',()=>openDialog({mode:'create',value:`Vòng ${(board?.snapshots.length||0)+1}`}));
+ $('snapshot-button').addEventListener('click',()=>openDialog({mode:'create',value:`Snapshot ${(board?.snapshots.length||0)+1}`}));
  $('name-cancel').addEventListener('click',()=>{dialogMode=null;$('name-dialog').close()});
  $('name-form').addEventListener('submit',async e=>{
   e.preventDefault();const name=$('name-input').value.trim(),mode=dialogMode;if(!name||!mode)return;const button=$('name-confirm');button.disabled=true;

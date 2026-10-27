@@ -1,5 +1,5 @@
 const test=require('node:test'),assert=require('node:assert/strict');
-const {slugify,assignSlugs,scoreGifts,buildBoard,validName}=require('../competitionPages');
+const {slugify,assignSlugs,scoreGifts,overallScores,buildBoard,snapshotEntry,validName}=require('../competitionPages');
 const {createCompetitionFixture}=require('./support/competition-server');
 test('slugs fold Vietnamese, styled letters and emoji; the newest namesake keeps the plain slug',()=>{
  assert.equal(slugify('PK BATTLE 16/10'),'pk-battle-16-10');assert.equal(slugify('  Cuộc thi Đại chiến 🔥 Mùa 2 '),'cuoc-thi-dai-chien-mua-2');
@@ -9,15 +9,21 @@ test('slugs fold Vietnamese, styled letters and emoji; the newest namesake keeps
  assert.equal(slugs.get('d'),'old-cuoc-thi','reserved paths are never shadowed');assert.equal(slugs.get('e'),'api-cuoc-thi');
  assert.equal(validName('  Kế   toán\u0000 A '),'Kế toán A');assert.equal(validName('x'.repeat(61)),'');assert.equal(validName(42),'');
 });
-test('scoring matches HeliosControl: name match, floor split, negative manual gifts, group gifts ignored, rounds by time',()=>{
- const participants=[{talentName:'A',profileId:'g1',profileName:'G1'},{talentName:'B',profileId:'g1',profileName:'G1'},{talentName:'C',profileId:'g2',profileName:'G2'}];
- const gifts=[{receivedTalents:[{name:'A',uid:'1'}],cost:100,timeStamp:10},{receivedTalents:['A','B'],cost:7,timeStamp:20},{receivedTalent:'C',cost:50,timeStamp:30},
-  {receivedTalent:'G1',cost:900,timeStamp:31},{id:'Manual_manual_1',receivedTalents:[{name:'A'}],cost:-30,timeStamp:40},{receivedTalents:[{name:'B'},{name:'C'}],cost:-5,timeStamp:50},{cost:8,timeStamp:60}];
+test('Cuộc thi matches HeliosControl (name match, floor split, negative manual gifts, group gifts ignored); Tổng cộng adds window gifts by uid or name, once per gift',()=>{
+ const participants=[{talentName:'A',talentUid:'1',profileId:'g1',profileName:'G1'},{talentName:'B',talentUid:'2',profileId:'g1',profileName:'G1'},{talentName:'C',talentUid:'',profileId:'g2',profileName:'G2'}];
+ const gifts=[{_id:'c1',receivedTalents:[{name:'A',uid:'1'}],cost:100,timeStamp:10},{_id:'c2',receivedTalents:['A','B'],cost:7,timeStamp:20},{_id:'c3',receivedTalent:'C',cost:50,timeStamp:30},
+  {_id:'c4',receivedTalent:'G1',cost:900,timeStamp:31},{_id:'c5',id:'Manual_manual_1',receivedTalents:[{name:'A'}],cost:-30,timeStamp:40},{_id:'c6',receivedTalents:[{name:'B'},{name:'C'}],cost:-5,timeStamp:50},{_id:'c7',cost:8,timeStamp:60}];
  const all=scoreGifts(gifts);assert.equal(all.get('A'),100+3-30);assert.equal(all.get('B'),3-3);assert.equal(all.get('C'),50-3);assert.equal(all.get('Unassigned'),8);
- const board=buildBoard(participants,gifts,{roundFrom:30,at:50});
- assert.deepEqual(board.rows.map(r=>[r.talentName,r.round,r.total]),[['A',-30,73],['C',-3,47],['B',-3,0]]);
- assert.deepEqual(board.groups.map(g=>[g.profileName,g.round,g.total]),[['G1',-33,73],['G2',-3,47]]);
- assert.deepEqual(buildBoard(participants,gifts,{at:20}).rows.map(r=>r.total),[103,3,0],'total stops at the snapshot time');
+ const windowGifts=[{_id:'c1',receivedTalents:[{name:'A',uid:'1'}],cost:100},{_id:'w1',receivedTalents:[{name:'A tên cũ',uid:'1'}],cost:40},{_id:'w2',receivedTalent:'B',receivedTalentUid:'999',cost:11},
+  {_id:'w3',receivedTalent:'Someone',receivedTalentUid:'2',cost:6},{_id:'w4',receivedTalents:[{name:'C',uid:''},{name:'X',uid:''}],cost:-9},{_id:'w5',receivedTalents:[{name:'Q',uid:''}],cost:1000}];
+ assert.deepEqual(overallScores(participants,gifts,windowGifts),[73+40,0+11+6,47-5],'uid or name match; c1 is both a competition and a window gift and counts once; empty uids never match');
+ const board=buildBoard(participants,gifts,{windowGifts});
+ assert.deepEqual(board.rows.map(r=>[r.talentName,r.competition,r.overall]),[['A',73,113],['C',47,42],['B',0,17]]);
+ assert.deepEqual(board.groups.map(g=>[g.profileName,g.competition,g.overall]),[['G1',73,130],['G2',47,42]]);
+ assert.ok(board.rows.every(r=>!('round' in r)&&!('total' in r)),'no round split any more');
+ assert.deepEqual(buildBoard(participants,gifts).rows.map(r=>r.overall),[73,47,0],'without window gifts overall is the competition gifts');
+ assert.deepEqual(snapshotEntry({talentName:'A',talentUid:'1',profileId:'g1',profileName:'G1',round:5,total:73},true),{talentName:'A',talentUid:'1',profileId:'g1',profileName:'G1',competition:73,overall:null},'old snapshot rows: total is the competition score');
+ assert.deepEqual(snapshotEntry({profileId:'g1',profileName:'G1',round:1,total:9},false),{profileId:'g1',profileName:'G1',competition:9,overall:null});
 });
 async function server(t){
  let now=Date.parse('2026-10-27T12:00:00Z');const {app,state}=createCompetitionFixture({clock:()=>now}),srv=app.listen(0,'127.0.0.1');await new Promise(r=>srv.once('listening',r));
@@ -46,32 +52,39 @@ test('access requests, roles, revocation and same-origin checks',async t=>{
  assert.equal((await call(`${slug}/requests/${id}`,{method:'POST',body:{action:'viewer'},cookie:admin.cookie})).status,403,'admin actions need CSRF');
  assert.equal((await call(`${slug}/requests/${id}`,{method:'POST',body:{action:'viewer'},...admin})).status,200);
  const board=await call(slug+'/board',{cookie:visitor});assert.equal(board.status,200);assert.equal(board.json.role,'viewer');assert.equal(board.json.canSnapshot,false);
- assert.deepEqual(board.json.live.rows.map(r=>[r.talentName,r.total]),[['LILY 🍉',104],['RYAN',40],['Chanee🌸',4]],'foreign-session gift with the same competitionId is ignored');
- assert.deepEqual(board.json.live.groups.map(g=>[g.profileName,g.total]),[['HT - DPM',108],['HT - ICONZ',40]]);
- assert.equal((await call(slug+'/snapshots',{method:'POST',body:{name:'Vòng 1'},cookie:visitor})).json.error,'role_required');
+ assert.deepEqual(Object.keys(board.json.live).sort(),['at','groups','rows']);assert.deepEqual(Object.keys(board.json.live.rows[0]).sort(),['competition','overall','profileId','profileName','talentName','talentUid']);
+ assert.deepEqual(board.json.live.rows.map(r=>[r.talentName,r.competition,r.overall]),[['LILY 🍉',104,154],['RYAN',40,1039],['Chanee🌸',4,4]],
+  'Cuộc thi ignores the foreign-session gift with the same competitionId; Tổng cộng counts it, the uid-matched gift once, and nothing outside the window');
+ assert.deepEqual(board.json.live.groups.map(g=>[g.profileName,g.competition,g.overall]),[['HT - DPM',108,158],['HT - ICONZ',40,1039]]);
+ assert.equal((await call(slug+'/snapshots',{method:'POST',body:{name:'Snapshot 1'},cookie:visitor})).json.error,'role_required');
  const other=await call(slug+'/state',{cookie:'helios_comp='+'A'.repeat(43)});assert.equal(other.json.role,null,'another browser has no grant');
  assert.equal((await call(`${slug}/requests/${id}`,{method:'POST',body:{action:'revoke'},...admin})).status,200);
  assert.equal((await call(slug+'/board',{cookie:visitor})).status,401);assert.equal((await call(slug+'/state',{cookie:visitor})).json.request.status,'revoked');
  const listing=await call('/api/competitions',admin);assert.equal(listing.json.competitions[0].slug,'pk-battle-16-10');assert.equal(listing.json.competitions[0].url,'/pk-battle-16-10');
 });
-test('snapshots freeze rounds and totals; live shows the round since the last snapshot',async t=>{
- const {state,call,advance,now}=await server(t),slug='/api/competitions/pk-battle-16-10';
+test('snapshots freeze both modes and groups; live stays cumulative; old snapshots still render',async t=>{
+ const {state,call,advance,now}=await server(t),slug='/api/competitions/pk-battle-16-10',{ObjectId}=require('mongodb');
+ state.db.rows('competition_snapshots').push({_id:new ObjectId(),competitionId:String(state.id),name:'Bản cũ',at:now()-600000,createdAt:new Date(now()-600000),createdBy:'x',
+  rows:[{talentName:'RYAN',talentUid:'3',profileId:'g2',profileName:'HT - ICONZ',round:5,total:40}],groups:[{profileId:'g2',profileName:'HT - ICONZ',round:5,total:40}]});
  const sent=await call(slug+'/request',{method:'POST',body:{name:'Linh'}}),visitor=sent.headers.get('set-cookie').split(';')[0];
  const id=(await call(slug+'/requests',admin)).json.requests[0].id;await call(`${slug}/requests/${id}`,{method:'POST',body:{action:'snapshot'},...admin});
- const first=await call(slug+'/snapshots',{method:'POST',body:{name:'Vòng 1'},cookie:visitor});assert.equal(first.status,200);
- assert.deepEqual(first.json.snapshot.rows.map(r=>[r.talentName,r.round,r.total]),[['LILY 🍉',104,104],['RYAN',40,40],['Chanee🌸',4,4]]);
- assert.equal(state.db.rows('competition_snapshots')[0].createdBy,'Linh');assert.equal(first.json.snapshot.createdBy,undefined,'creator names are for admins only');
- advance(60000);state.db.rows('gifts').push(state.gift(['RYAN'],200,now()-1000),state.gift(['Chanee🌸'],-4,now()-500,state.session));
- const live=(await call(slug+'/board',{cookie:visitor})).json.live;
- assert.deepEqual(live.rows.map(r=>[r.talentName,r.round,r.total]),[['RYAN',200,240],['LILY 🍉',0,104],['Chanee🌸',-4,0]]);assert.equal(live.roundFrom,first.json.snapshot.at);
- advance(1000);const second=(await call(slug+'/snapshots',{method:'POST',body:{name:'Vòng 2'},...admin})).json.snapshot;
- assert.deepEqual(second.groups.map(g=>[g.profileName,g.round,g.total]),[['HT - ICONZ',200,240],['HT - DPM',-4,104]]);assert.equal(second.createdBy,'admin@example.test');
- const board=(await call(slug+'/board',{cookie:visitor})).json;assert.deepEqual(board.snapshots.map(s=>s.name),['Vòng 2','Vòng 1'],'newest first');assert.ok(board.live.rows.every(r=>r.round===0));
+ const first=await call(slug+'/snapshots',{method:'POST',body:{name:'Snapshot 1'},cookie:visitor});assert.equal(first.status,200);
+ assert.deepEqual(first.json.snapshot.rows.map(r=>[r.talentName,r.competition,r.overall]),[['LILY 🍉',104,154],['RYAN',40,1039],['Chanee🌸',4,4]]);
+ assert.equal(state.db.rows('competition_snapshots')[1].createdBy,'Linh');assert.equal(first.json.snapshot.createdBy,undefined,'creator names are for admins only');
+ advance(60000);state.db.rows('gifts').push(state.gift(['RYAN'],200,now()-1000),state.gift(['Chanee🌸'],-4,now()-500,state.session),state.gift([{name:'Chanee cũ',uid:'2'}],30,now()-400,state.foreign,null));
+ const live=(await call(slug+'/board',{cookie:visitor})).json.live;assert.equal(live.roundFrom,undefined);
+ assert.deepEqual(live.rows.map(r=>[r.talentName,r.competition,r.overall]),[['RYAN',240,1239],['LILY 🍉',104,154],['Chanee🌸',0,30]],'live is cumulative, not since the last snapshot');
+ advance(1000);const second=(await call(slug+'/snapshots',{method:'POST',body:{name:'Snapshot 2'},...admin})).json.snapshot;
+ assert.deepEqual(second.groups.map(g=>[g.profileName,g.competition,g.overall]),[['HT - ICONZ',240,1239],['HT - DPM',104,184]]);assert.equal(second.createdBy,'admin@example.test');
+ const board=(await call(slug+'/board',{cookie:visitor})).json;assert.deepEqual(board.snapshots.map(s=>s.name),['Snapshot 2','Snapshot 1','Bản cũ'],'newest first');
+ assert.deepEqual(board.snapshots[1].rows.map(r=>[r.talentName,r.competition,r.overall]),[['LILY 🍉',104,154],['RYAN',40,1039],['Chanee🌸',4,4]],'a snapshot stays frozen');
+ assert.deepEqual(board.snapshots[2].rows,[{talentName:'RYAN',talentUid:'3',profileId:'g2',profileName:'HT - ICONZ',competition:40,overall:null}],'old snapshot: total -> competition, overall unknown');
+ assert.deepEqual(board.snapshots[2].groups,[{profileId:'g2',profileName:'HT - ICONZ',competition:40,overall:null}]);
  assert.equal((await call(`${slug}/snapshots/${second.id}/rename`,{method:'POST',body:{name:'Chung kết'},cookie:visitor})).status,200);
  assert.equal((await call(`${slug}/snapshots/${second.id}/delete`,{method:'POST',body:{},cookie:visitor})).status,403,'only admins delete');
  assert.equal((await call(slug+'/board',{cookie:visitor})).json.snapshots[0].name,'Chung kết');
  assert.equal((await call(`${slug}/snapshots/${second.id}/delete`,{method:'POST',body:{},...admin})).status,200);
- assert.deepEqual((await call(slug+'/board',{cookie:visitor})).json.snapshots.map(s=>s.name),['Vòng 1']);
+ assert.deepEqual((await call(slug+'/board',{cookie:visitor})).json.snapshots.map(s=>s.name),['Snapshot 1','Bản cũ']);
 });
 test('a browser may hold only a few pending requests',async t=>{
  const {state,call}=await server(t),{ObjectId}=require('mongodb');

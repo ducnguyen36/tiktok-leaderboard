@@ -1,11 +1,15 @@
 const express=require('express'),{ObjectId}=require('mongodb');
 const {createCompetitionPages}=require('../../competitionPages');
-// Minimal in-memory Mongo: equality, $in and $ne on (dotted) fields, sort/limit, $set updates.
+// Minimal in-memory Mongo: equality, $in, $ne, $gte/$lte, $exists, $or/$and on (dotted) fields, sort/limit, $set updates.
 const same=(a,b)=>a===b||(a!=null&&b!=null&&typeof a==='object'&&typeof b==='object'&&String(a)===String(b));
 const clone=v=>Array.isArray(v)?v.map(clone):v&&typeof v==='object'&&v.constructor===Object?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,clone(x)])):v;
 const field=(doc,key)=>key.split('.').reduce((v,k)=>v==null?v:v[k],doc);
-function matches(doc,query){return Object.entries(query||{}).every(([key,want])=>{const have=field(doc,key);
- if(want&&typeof want==='object'&&!(want instanceof ObjectId)&&!(want instanceof Date)){if('$in' in want)return want.$in.some(v=>same(v,have));if('$ne' in want)return !same(want.$ne,have)}
+const OPS=['$in','$ne','$gte','$lte','$exists'];
+function matches(doc,query){return Object.entries(query||{}).every(([key,want])=>{
+ if(key==='$or')return want.some(q=>matches(doc,q));if(key==='$and')return want.every(q=>matches(doc,q));
+ const have=field(doc,key);
+ if(want&&typeof want==='object'&&!(want instanceof ObjectId)&&!(want instanceof Date)&&Object.keys(want).some(k=>OPS.includes(k)))return Object.entries(want).every(([op,v])=>
+  op==='$in'?v.some(x=>same(x,have)):op==='$ne'?!same(v,have):op==='$exists'?(have!==undefined)===Boolean(v):have!=null&&(op==='$gte'?+have>=+v:+have<=+v));
  return same(want,have)})}
 function memoryDb(){
  const data=new Map(),rows=name=>{if(!data.has(name))data.set(name,[]);return data.get(name)};
@@ -19,14 +23,18 @@ function memoryDb(){
   async createIndex(){return 'ok'}}}};
 }
 // One competition "PK BATTLE 16/10" with three participants in two groups, its own session and a
-// foreign group session whose gifts also carry the competitionId (HeliosControl leak) and must not count.
+// foreign group session whose gifts also carry the competitionId (HeliosControl leak) and must not count
+// for "Cuộc thi" but do count for "Tổng cộng" (revenue in the competition window), plus gifts outside the window.
+// Cuộc thi: LILY 104, RYAN 40, Chanee 4. Tổng cộng: RYAN 1039, LILY 154 (50 matched by uid), Chanee 4.
 function seed(db,now){
- const id=new ObjectId(),session=new ObjectId(),foreign=new ObjectId();
- db.rows('competitions').push({_id:id,name:'PK BATTLE 16/10',status:'active',createdAt:new Date(now-3600000),startedAt:new Date(now-3600000),endedAt:null,participants:[
+ const id=new ObjectId(),session=new ObjectId(),foreign=new ObjectId(),old=new ObjectId(),start=now-3600000;
+ db.rows('competitions').push({_id:id,name:'PK BATTLE 16/10',status:'active',createdAt:new Date(start),startedAt:new Date(start),endedAt:null,participants:[
   {talentName:'LILY 🍉',talentUid:'1',profileId:'g1',profileName:'HT - DPM'},{talentName:'Chanee🌸',talentUid:'2',profileId:'g1',profileName:'HT - DPM'},{talentName:'RYAN',talentUid:'3',profileId:'g2',profileName:'HT - ICONZ'}]});
- db.rows('sessions').push({_id:session,profileId:`competition_${id}`},{_id:foreign,profileId:'g9'});
- const gift=(talents,cost,at,sessionId=session)=>({competitionId:id,sessionId,cost,timeStamp:at,receivedTalent:talents[0],receivedTalents:talents.map(name=>({name,uid:''}))});
- db.rows('gifts').push(gift(['LILY 🍉'],100,now-5000),gift(['RYAN'],40,now-4000),gift(['LILY 🍉','Chanee🌸'],9,now-3000),gift(['PK BATTLE 16/10'],500,now-2000),gift(['RYAN'],999,now-1000,foreign));
+ db.rows('sessions').push({_id:session,profileId:`competition_${id}`,createdAt:new Date(start),updatedAt:new Date(now)},{_id:foreign,profileId:'g9',createdAt:new Date(now-7200000),updatedAt:new Date(now)},
+  {_id:old,profileId:'g1',createdAt:new Date(now-90000000),updatedAt:new Date(now-80000000)});
+ const gift=(talents,cost,at,sessionId=session,competitionId=id)=>({_id:new ObjectId(),...(competitionId?{competitionId}:{}),sessionId,cost,timeStamp:at,receivedTalent:typeof talents[0]==='object'?talents[0].name:talents[0],receivedTalents:talents.map(t=>typeof t==='object'?t:{name:t,uid:''})});
+ db.rows('gifts').push(gift(['LILY 🍉'],100,now-5000),gift(['RYAN'],40,now-4000),gift(['LILY 🍉','Chanee🌸'],9,now-3000),gift(['PK BATTLE 16/10'],500,now-2000),gift(['RYAN'],999,now-1000,foreign),
+  gift([{name:'Lily tên cũ',uid:'1'}],50,now-2500,foreign,null),gift(['RYAN'],10,start-60000,foreign,null),gift(['LILY 🍉'],1000,now-85000000,old,null));
  return{id,session,foreign,gift};
 }
 function createCompetitionFixture({clock=Date.now}={}){
