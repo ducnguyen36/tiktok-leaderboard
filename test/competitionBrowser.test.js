@@ -89,7 +89,7 @@ test('eliminated talents are left out of the ranking; the toolbar eye shows thei
  const eye=page.locator('#out-toggle');assert.equal(await eye.isVisible(),true);assert.equal((await eye.textContent()).trim(),'1','eye icon shows only the count');assert.equal(await live.locator('.out-toggle').count(),0,'no text button in the list');
  const [eyeBox,groupsBox]=await Promise.all([eye.boundingBox(),page.getByRole('button',{name:'Nhóm'}).boundingBox()]);assert.ok(Math.abs(eyeBox.y-groupsBox.y)<4,'eye sits on the toolbar row with Nhóm');
  assert.equal(await eye.getAttribute('aria-label'),'Hiện 1 người bị loại');await eye.click();
- assert.deepEqual(await rows(),[['1','LILY 🍉',false],['–','RYAN',true],['2','Chanee🌸',false]],'shown in score order, unnumbered');
+ assert.deepEqual(await rows(),[['1','LILY 🍉',false],['2','Chanee🌸',false],['3','RYAN',true]],'eliminated at the bottom with the rank they went out at, never between players still in');
  const out=live.locator('.talents .row.out');assert.match(await out.textContent(),/Đã loại/);assert.ok(Number(await out.evaluate(e=>getComputedStyle(e).opacity))<0.7,'dimmed');
  assert.match(await out.locator('.score').textContent(),/40/,'score still visible');
  await page.getByRole('button',{name:'Nhóm'}).click();assert.match(await live.locator('.groups').textContent(),/HT - ICONZ\s*40/,'groups still count eliminated points');
@@ -113,7 +113,7 @@ test('earlier-round eliminations vanish from LIVE, this round ones are behind th
  for(const [label] of [['Cuộc thi'],['Tổng cộng'],['Nhóm']]){const b=page.getByRole('button',{name:label,exact:true});assert.equal((await b.textContent()).trim(),'',label+' is an icon');assert.equal(await b.getAttribute('title'),label)}
  const eye=page.locator('#out-toggle');assert.equal((await eye.textContent()).trim(),'1','only this round\'s elimination is counted');
  assert.deepEqual(await names(live),[['1','LILY 🍉']]);
- await eye.click();assert.deepEqual(await names(live),[['1','LILY 🍉'],['–','Chanee🌸']],'RYAN (out since round 1) stays gone');
+ await eye.click();assert.deepEqual(await names(live),[['1','LILY 🍉'],['2','Chanee🌸']],'RYAN (out since round 1) stays gone');
  await page.getByRole('button',{name:'Tổng cộng',exact:true}).click();assert.equal(await eye.isVisible(),false,'no eye in Tổng cộng');
  assert.equal(await live.locator('.talents .row.out').count(),0);assert.deepEqual((await names(live)).map(r=>r[1]).sort(),['Chanee🌸','LILY 🍉','RYAN'].sort(),'Tổng cộng lists everyone');
  assert.deepEqual((await names(live)).map(r=>r[0]),['1','2','3']);
@@ -123,4 +123,20 @@ test('earlier-round eliminations vanish from LIVE, this round ones are behind th
  await page.waitForFunction(()=>document.querySelectorAll('.dots button')[1].getAttribute('aria-current')==='true');
  assert.equal((await eye.textContent()).trim(),'1');assert.deepEqual(await names(page.locator('.page').nth(1)),[['1','LILY 🍉'],['2','Chanee🌸']]);
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+});
+test('eliminated players rank by elimination order below everyone still in, not by score',async t=>{
+ const {app,state}=createCompetitionFixture(),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base=`http://127.0.0.1:${server.address().port}`;
+ // Scores: LILY 104, RYAN 40, Chanee 4. RYAN went out first (2 min ago), Chanee later (10 s ago).
+ state.db.rows('competitions')[0].eliminated=[{talentName:'RYAN',at:new Date(Date.now()-120000)},{talentName:'Chanee🌸',at:new Date(Date.now()-10000)}];
+ const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']}),errors=[];
+ t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});
+ const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);
+ const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();
+ const rows=()=>live.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.rank').textContent,r.querySelector('.who b').textContent,r.classList.contains('out')]));
+ assert.deepEqual(await rows(),[['1','LILY 🍉',false]]);
+ await page.locator('#out-toggle').click();
+ assert.deepEqual(await rows(),[['1','LILY 🍉',false],['2','Chanee🌸',true],['3','RYAN',true]],'later out ranks higher even with fewer points');
+ await page.getByRole('button',{name:'Tổng cộng',exact:true}).click();
+ assert.deepEqual((await rows()).map(r=>r[1]),['RYAN','LILY 🍉','Chanee🌸'],'Tổng cộng stays a plain score ranking');
 });
