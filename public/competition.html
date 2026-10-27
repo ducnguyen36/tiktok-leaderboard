@@ -1,0 +1,20 @@
+<!DOCTYPE html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#171614"><meta name="robots" content="noindex,nofollow"><title>Helios Talent · Cuộc thi</title><link rel="stylesheet" href="/competition.css"><script defer src="/competition.js"></script></head><body>
+<header class="top"><img class="logo" src="/helios-asset-23.png" alt=""><div class="top-text"><div class="brand">Helios Talent</div><h1 id="comp-name">Cuộc thi</h1><p class="meta"><span id="comp-status" class="badge" hidden></span><span id="updated"></span></p></div></header>
+<main>
+  <section id="loading-view" class="card center">Đang tải…</section>
+  <section id="missing-view" class="card center" hidden>Không tìm thấy cuộc thi.</section>
+  <section id="request-view" class="card" hidden>
+    <form id="request-form" autocomplete="on"><label for="request-name">Nhập tên của bạn</label><input id="request-name" name="name" maxlength="60" required autocomplete="name"><button type="submit" class="primary">Gửi yêu cầu xem</button></form>
+    <p id="request-note" class="note">Quản trị viên Helios sẽ duyệt yêu cầu của bạn.</p>
+  </section>
+  <section id="pending-view" class="card center" hidden><p>Đã gửi yêu cầu với tên <b id="pending-name"></b>.</p><p class="note">Vui lòng chờ quản trị viên duyệt. Trang sẽ tự mở bảng điểm khi được duyệt.</p></section>
+  <section id="board-view" hidden>
+    <div class="toolbar"><div class="sort" role="group" aria-label="Xếp hạng theo"><button type="button" data-sort="total" aria-pressed="true">Tổng</button><button type="button" data-sort="round" aria-pressed="false">Vòng</button></div><button type="button" id="snapshot-button" class="primary" hidden>Chụp snapshot</button></div>
+    <div class="pager"><button type="button" id="prev-page" class="arrow" aria-label="Trang trước">‹</button><div id="dots" class="dots"></div><button type="button" id="next-page" class="arrow" aria-label="Trang sau">›</button></div>
+    <div id="pages" class="pages" tabindex="0" aria-label="Bảng điểm"></div>
+  </section>
+  <section id="admin-view" class="card" hidden><h2>Quản lý người xem</h2><div id="admin-list" class="admin-list"></div></section>
+</main>
+<div id="toast" class="toast" role="status" hidden></div>
+<dialog id="name-dialog"><form method="dialog" id="name-form"><h2 id="name-title">Chụp snapshot</h2><label for="name-input">Tên snapshot</label><input id="name-input" maxlength="60" required><div class="actions"><button type="button" id="name-cancel">Hủy</button><button type="submit" class="primary" id="name-confirm">Xác nhận</button></div></form></dialog>
+</body></html>

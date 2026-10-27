@@ -6,6 +6,7 @@ const express = require('express');
 const { createLeaderboardAuth } = require('./leaderboardAuth');
 const { createNextRanking, DEFAULT_CONTEXT: nextRankingDefaults } = require('./rankingNext');
 const { createBoardSettings } = require('./boardSettings');
+const { createCompetitionPages } = require('./competitionPages');
 const { createSheetReconciliation } = require('./sheetReconciliation');
 const { createDailyReport, renderMarkdown } = require('./reconciliationReport');
 const { privateHtmlName, safeAvatarPath } = require('./privateAssets');
@@ -57,6 +58,10 @@ app.get(['/privacy', '/privacy.html'], (req, res) => {
     res.set({ 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'", 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=3600' });
     res.sendFile('privacy.html', { root: path.join(__dirname, 'public') });
 });
+// Competition score pages (/<slug>) for outside accounting staff: mounted before the TV access
+// middleware because visitors are not paired TVs; the router enforces its own per-competition grants.
+const competitionPages = createCompetitionPages({ getDb: () => db, auth: leaderboardAuth, assetVersion: () => ASSET_VERSION });
+app.use(competitionPages.router);
 if (accessControlEnabled) app.use(leaderboardAuth.middleware);
 else {
     app.get('/auth/status', (req, res) => res.set('Cache-Control', 'no-store').json({ authorized: true, admin: false, accessControlEnabled: false }));
@@ -72,7 +77,7 @@ app.use(express.json({ limit: '16kb' }));
 function computeAssetVersion() {
     try {
         const h = crypto.createHash('sha1');
-        for (const file of ['app.js', 'style.css', 'leaderboard-core.js', 'keep-awake.js', 'i18n.js', 'access-guard.js', 'ui-version.js', 'v1.html', 'v1-app.js', 'v1-style.css','next-app.js','next-style.css','next-core.js','new.html']) {
+        for (const file of ['app.js', 'style.css', 'leaderboard-core.js', 'keep-awake.js', 'i18n.js', 'access-guard.js', 'ui-version.js', 'v1.html', 'v1-app.js', 'v1-style.css','next-app.js','next-style.css','next-core.js','new.html','competition.html','competition.js','competition.css']) {
             const filePath = path.join(__dirname, 'public', file);
             if (fs.existsSync(filePath)) h.update(fs.readFileSync(filePath));
         }
@@ -210,6 +215,7 @@ async function connectDB() {
         await db.collection('gifts').createIndex({ sessionId: 1, timeStamp: 1 });
         await db.collection('gifts').createIndex({ receivedTalent: 1 });
         await db.collection('profiles').createIndex({ updatedAt: -1 });
+        await competitionPages.ensureIndexes().catch(err => console.error('[Competition] index setup failed:', err.message));
         await db.collection('leaderboard_monthly_snapshots').createIndex(
             { month: 1, aggregationVersion: 1, timezone: 1, periodStart: 1, periodEnd: 1 },
             { unique: true }

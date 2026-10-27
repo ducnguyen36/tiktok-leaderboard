@@ -26,6 +26,7 @@ COPY leaderboardAggregation.js ./
 COPY leaderboardPerformance.js ./
 COPY rankingNext.js sheetReconciliation.js ./
 COPY reconciliationReport.js reconciliationKnownIssues.js boardSettings.js ./
+COPY competitionPages.js ./
 COPY public/ ./public/
 
 # Create local avatars cache directory
