@@ -239,3 +239,8 @@ test('actual server locks every private route and serves only a setup shell with
  assert.deepEqual(await (await fetch(base+'/api/health')).json(),{status:'ok',version:'dev'});
  const privacy=await fetch(base+'/privacy');assert.equal(privacy.status,200,'privacy policy is public');assert.match(await privacy.text(),/Privacy Policy/);
 });
+test('administrator cookie persists across browser restarts (phones drop session cookies)',async t=>{
+ const h=await harness(t);const b=h.browser();const {response}=await b.login();assert.equal(response.status,302);
+ const admin=response.headers.getSetCookie().find(c=>c.startsWith('helios_access='));assert.match(admin,/Max-Age=\d+/i,'login cookie has a lifetime');
+ const status=await b.request('/auth/status');const again=status.headers.getSetCookie().find(c=>c.startsWith('helios_access='));assert.match(again,/Max-Age=\d+/i,'refreshed with a lifetime');
+});

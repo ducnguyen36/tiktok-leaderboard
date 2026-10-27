@@ -118,7 +118,8 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
       secret = random(); record = { _id: `session:${hash(secret)}`, kind: 'pending', expiresAt: new Date(+now() + TEN_MINUTES) };
       await store.put(record); setCookie(res, COOKIE, secret, DEVICE_LIFETIME);
     }
-    if (record.kind === 'admin') setCookie(res, COOKIE, secret);
+    // A persistent cookie: phone browsers drop session cookies when the app is closed, silently signing admins out.
+    if (record.kind === 'admin') setCookie(res, COOKIE, secret, DEVICE_LIFETIME);
     res.json({ authorized: Boolean(authorized(record)), admin: record.kind === 'admin', email: record.kind === 'admin' ? record.email : undefined,
       setupRequired: false, csrf: csrfFor(secret), expiresAt: record.expiresAt,
       sheets: record.kind === 'admin' ? await sheets.status() : undefined });
@@ -157,7 +158,7 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     // Administrator access is revoked explicitly from the device manager; it is not a 12-hour lease.
     // Omitting expiresAt also prevents MongoDB's TTL index from deleting the admin session.
     await store.put({ _id: `session:${hash(session)}`, kind: 'admin', email, subject: claims.sub });
-    setCookie(res, COOKIE, session); res.redirect(transaction.pair ? `/auth?pair=${encodeURIComponent(transaction.pair)}` : '/auth');
+    setCookie(res, COOKIE, session, DEVICE_LIFETIME); res.redirect(transaction.pair ? `/auth?pair=${encodeURIComponent(transaction.pair)}` : '/auth');
   }));
   router.use(['/auth/pair', '/auth/approve', '/auth/revoke', '/auth/logout', '/auth/sheets/connect', '/auth/sheets/disconnect', '/auth/sheets/test'], express.json({ limit: '4kb' }));
   router.post('/auth/sheets/connect', endpoint(async (req, res) => {
