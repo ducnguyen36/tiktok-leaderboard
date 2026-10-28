@@ -14,7 +14,11 @@ test('outside viewer requests access, admin approves, viewer switches modes, tog
  assert.equal(await visitor.locator('#comp-name').textContent(),'PK BATTLE 16/10');assert.match(await visitor.locator('#request-view').textContent(),/Nhập tên của bạn/);
  await visitor.locator('#request-name').fill('<b>Kế toán</b>');await visitor.getByRole('button',{name:'Gửi yêu cầu xem'}).click();
  await visitor.locator('#pending-view').waitFor();assert.equal(await visitor.locator('#pending-name').textContent(),'<b>Kế toán</b>','names are shown as text');
- await admin.goto(`${base}/pk-battle-16-10`);await admin.locator('#admin-view .request').waitFor();
+ await admin.goto(`${base}/pk-battle-16-10`);const adminIcon=admin.locator('#admin-toggle');await adminIcon.waitFor();
+ assert.equal(await admin.locator('#admin-pending').textContent(),'1','icon shows how many wait');assert.equal(await admin.locator('#admin-view').isVisible(),false,'panel closed until tapped');
+ await adminIcon.click();await admin.locator('#admin-view .request').waitFor();
+ const [panelBox,pagesBox]=await Promise.all([admin.locator('#admin-view').boundingBox(),admin.locator('#pages').boundingBox()]);assert.ok(panelBox.y<pagesBox.y,'panel opens at the top, above the boards');
+ assert.equal(await visitor.locator('#admin-toggle').isVisible(),false,'icon is for admins only');
  assert.match(await admin.locator('#admin-view').textContent(),/<b>Kế toán<\/b>/);await admin.getByRole('button',{name:'Duyệt xem + snapshot'}).click();
  await admin.locator('#admin-view .request button[data-action="snapshot"][disabled]').waitFor();
  await visitor.locator('#board-view').waitFor();await visitor.locator('.page.live .talents .row').first().waitFor();

@@ -98,3 +98,4 @@ dialog h2{margin:0;font-size:18px}
 
 .chip.eye{display:inline-flex;align-items:center;gap:5px;padding-inline:10px}.chip.eye #out-count{font-weight:800;font-variant-numeric:tabular-nums}.chip.eye .eye-slash{display:none}.chip.eye:not(.on) .eye-slash{display:inline}
 .modes button,.chip.icon-chip{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:36px}.modes button svg,.chip svg{display:block}
+.admin-chip{position:relative}.badge-count{position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#d9534f;color:#fff;font-size:11px;font-weight:800;line-height:18px;text-align:center;box-sizing:border-box}.admin-panel{margin:10px 0}

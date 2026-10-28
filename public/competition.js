@@ -9,7 +9,7 @@
  const VIEWS=['loading-view','missing-view','request-view','pending-view','board-view'],MODES={competition:'Cuộc thi',overall:'Tổng cộng'};
  // Per-browser view preferences; storage can be unavailable (private mode, blocked site data).
  const stored=key=>{try{return localStorage.getItem(`heliosComp.${key}`)}catch{return null}},store=(key,value)=>{try{localStorage.setItem(`heliosComp.${key}`,value)}catch{}};
- let board=null,csrf='',mode=MODES[stored('mode')]?stored('mode'):'competition',showGroups=stored('groups')==='1',showOut=stored('out')==='1',standingsPref=stored('standings'),timer=0,current='live',pageSig='',adminSig='',dialogMode=null,toastTimer=0;
+ let board=null,csrf='',mode=MODES[stored('mode')]?stored('mode'):'competition',showGroups=stored('groups')==='1',showOut=stored('out')==='1',standingsPref=stored('standings'),showAdmin=false,timer=0,current='live',pageSig='',adminSig='',dialogMode=null,toastTimer=0;
  function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
  const ICONS={pencil:'M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4',trash:'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6'};
  function iconButton(icon,label,data,cls=''){
@@ -43,7 +43,7 @@
   show('request-view');clearTimeout(timer);
  }
  async function loadBoard(){
-  let data;try{data=await call(api('/board'))}catch(e){if(e.status===401||e.status===403){board=null;$('admin-view').hidden=true;return refresh()}toast('Mất kết nối, đang thử lại…');return schedule(10000)}
+  let data;try{data=await call(api('/board'))}catch(e){if(e.status===401||e.status===403){board=null;$('admin-view').hidden=true;$('admin-toggle').hidden=true;return refresh()}toast('Mất kết nối, đang thử lại…');return schedule(10000)}
   board=data;header(data.competition);$('updated').textContent=`Cập nhật ${when(data.live.at)}`;$('snapshot-button').hidden=!data.canSnapshot;show('board-view');renderPages();
   if(data.admin){if(!csrf)await loadCsrf();loadRequests()}
   schedule(10000);
@@ -150,9 +150,14 @@
   e.preventDefault();const name=$('request-name').value.trim();if(!name)return;const button=e.target.querySelector('button');button.disabled=true;
   try{await call(api('/request'),{method:'POST',body:{name}});await refresh()}catch(err){toast(errorText(err))}finally{button.disabled=false}
  });
+ function applyAdmin(){$('admin-view').hidden=!showAdmin;$('admin-toggle').setAttribute('aria-pressed',String(showAdmin))}
+ $('admin-toggle').addEventListener('click',()=>{showAdmin=!showAdmin;applyAdmin()});
  async function loadRequests(){
   let data;try{data=await call(api('/requests'))}catch{return}
-  const sig=JSON.stringify(data.requests);$('admin-view').hidden=false;if(sig===adminSig)return;adminSig=sig;
+  // Admins only: the toolbar icon shows how many wait for approval and opens the panel under the toolbar.
+  const pending=data.requests.filter(r=>r.status==='pending').length,badge=$('admin-pending');$('admin-toggle').hidden=false;badge.hidden=!pending;badge.textContent=String(pending);
+  $('admin-toggle').setAttribute('aria-label',pending?`Quản lý người xem · ${pending} chờ duyệt`:'Quản lý người xem');applyAdmin();
+  const sig=JSON.stringify(data.requests);if(sig===adminSig)return;adminSig=sig;
   const box=$('admin-list');box.replaceChildren();if(!data.requests.length)box.append(el('div','empty','Chưa có yêu cầu nào'));
   for(const r of data.requests){
    const item=el('div','request'),who=el('div','who');who.append(el('b','',r.name));
