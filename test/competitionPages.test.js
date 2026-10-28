@@ -158,3 +158,13 @@ test('fallback rank survives a talent revived after going out with others (still
  const rows=Object.fromEntries(buildBoard(P,gifts,{eliminated:[{talentName:'B',at:new Date(100)}],eliminatedLog:log}).rows.map(r=>[r.talentName,[r.eliminated,r.eliminatedRank,r.revives]]));
  assert.deepEqual(rows,{A:[false,null,0],B:[true,2,0],C:[false,null,1]},'C left the group (revived): B still gets 2/3 by score at that moment (B 0 = C 0, name order)');
 });
+test('a competition not started yet (status created) shows Tổng cộng from competition gifts only, not revenue since it was created',async t=>{
+ const {state,call}=await server(t),slug='/api/competitions/pk-battle-16-10',comp=state.db.rows('competitions')[0];
+ const before=(await call(slug+'/board',admin)).json.live.rows.find(r=>r.talentName==='RYAN');assert.equal(before.overall,1039,'started: window gifts count');
+ const startedAt=comp.startedAt;comp.status='created';comp.startedAt=null;state.pages.reset();
+ const rows=(await call(slug+'/board',admin)).json.live.rows;
+ assert.deepEqual(rows.map(r=>[r.talentName,r.overall]),rows.map(r=>[r.talentName,r.competition]),'overall = competition gifts only');
+ assert.equal(rows.find(r=>r.talentName==='RYAN').overall,40);
+ comp.status='active';comp.startedAt=startedAt;state.pages.reset();
+ assert.equal((await call(slug+'/board',admin)).json.live.rows.find(r=>r.talentName==='RYAN').overall,1039,'after Start the window counts again');
+});

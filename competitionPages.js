@@ -36,7 +36,7 @@ function assignSlugs(competitions){
 //  * a participant scores the sum for its exact talentName (HeliosControl keys scores by name, not uid);
 //    group gifts addressed to the competition/group name count for nobody (auto-split is off in competition mode).
 // "Tổng cộng" (overall) = revenue view: every gift a participant received during the competition window
-// [startedAt||createdAt, endedAt||now], also outside the competition (own group's sessions, battles ...):
+// [startedAt, endedAt||now]; none before Start, also outside the competition (own group's sessions, battles ...):
 //  * gifts = the competition gifts above UNION gifts of every session overlapping the window (createdAt or
 //    sessionStartedAt <= window end and updatedAt >= window start) whose timeStamp lies inside the window,
 //    deduplicated by gift _id (read through the gifts {sessionId,timeStamp} index, never a range scan over all gifts).
@@ -172,7 +172,9 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
     if(!fresh&&cached&&cached.sig===sig&&clock()-cached.at<ttl)return cached;
     if(!fresh&&windowLoading.has(key))return windowLoading.get(key);
     const load=(async()=>{
-      const start=+new Date(comp.startedAt||comp.createdAt||0),end=comp.endedAt?+new Date(comp.endedAt):clock();let gifts=[];
+      // Not started yet (HeliosControl lets a competition sit in 'created' while it is prepared): no window,
+      // so "Tổng cộng" is just the competition gifts, which only exist after Start.
+      const started=comp.status!=='created'&&comp.startedAt,start=started?+new Date(comp.startedAt):0,end=comp.endedAt?+new Date(comp.endedAt):clock();let gifts=[];
       if(start>0&&end>=start){
         const d=db(),from=new Date(start),to=new Date(end);
         const sessions=await d.collection('sessions').find({$and:[{$or:[{createdAt:{$lte:to}},{sessionStartedAt:{$lte:to}}]},{updatedAt:{$gte:from}}]},{projection:{_id:1}}).toArray();
