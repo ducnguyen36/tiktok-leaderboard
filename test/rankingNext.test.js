@@ -25,8 +25,8 @@ test('session query is not constrained by gift timestamp; group points are count
 });
 test('new settings preserve visibility but isolate daily defaults and Today/Last Month source',()=>{
  const c=N.normalize({groups:{g:false},resetHour:0,freezeUntil:'09:00',showDaily:false,dailyResetVersion:2});assert.equal(c.resetHour,0);assert.equal(c.freezeUntil,'09:00');assert.equal(c.groups.g,false);assert.equal(c.showDaily,false);
- assert.equal(N.normalize({}).resetHour,6);assert.equal(N.normalize({resetHour:0,freezeUntil:'',dailyResetVersion:1}).resetHour,6,'saved 00:00 setting moves to the 06:00 workday once');assert.equal(N.normalize({resetHour:0,dailyResetVersion:1}).freezeUntil,'16:00');assert.equal(N.normalize({resetHour:7,dailyResetVersion:2}).resetHour,7,'later choices are kept');assert.equal(N.normalize(N.normalize({resetHour:0})).resetHour,6);assert.equal(N.normalize({freezeUntil:'',dailyResetVersion:2}).freezeUntil,'');assert.equal(N.normalize({}).freezeUntil,'16:00');assert.equal(N.normalize({}).layout,'podium');
- const migrated=N.migrate(null,{layout:'classic',resetHour:0,freezeUntil:'09:00',pause:5,tickerSpeed:100,celebrationSound:false});assert.equal(migrated.layout,'podium');assert.equal(migrated.resetHour,6);assert.equal(migrated.freezeUntil,'16:00');assert.equal(migrated.pause,5);assert.equal(migrated.tickerSpeed,100);assert.equal(migrated.celebrationSound,false);
+ assert.equal(N.normalize({}).resetHour,6);assert.equal(N.normalize({resetHour:0,freezeUntil:'',dailyResetVersion:1}).resetHour,6,'saved 00:00 setting moves to the 06:00 workday once');assert.equal(N.normalize({resetHour:0,dailyResetVersion:1}).freezeUntil,'14:00');assert.equal(N.normalize({resetHour:6,freezeUntil:'16:00',dailyResetVersion:2}).freezeUntil,'14:00','the old 16:00 default moves to 14:00');assert.equal(N.normalize({freezeUntil:'18:00',dailyResetVersion:2}).freezeUntil,'18:00','a chosen hold is kept');assert.equal(N.normalize({freezeUntil:'16:00',dailyResetVersion:3}).freezeUntil,'16:00','16:00 chosen after the move is kept');assert.equal(N.normalize({resetHour:7,dailyResetVersion:2}).resetHour,7,'later choices are kept');assert.equal(N.normalize(N.normalize({resetHour:0})).resetHour,6);assert.equal(N.normalize({freezeUntil:'',dailyResetVersion:2}).freezeUntil,'');assert.equal(N.normalize({}).freezeUntil,'14:00');assert.equal(N.normalize({}).layout,'podium');
+ const migrated=N.migrate(null,{layout:'classic',resetHour:0,freezeUntil:'09:00',pause:5,tickerSpeed:100,celebrationSound:false});assert.equal(migrated.layout,'podium');assert.equal(migrated.resetHour,6);assert.equal(migrated.freezeUntil,'14:00');assert.equal(migrated.pause,5);assert.equal(migrated.tickerSpeed,100);assert.equal(migrated.celebrationSound,false);
  assert.equal(N.migrate({...c,layout:'classic',appearanceVersion:1},null).layout,'classic');
  const raw={individual:{monthly:[{name:'Monthly',value:1,locationId:'loc_hcm'}],daily:[{name:'Today',value:2,locationId:'loc_hcm'}]},group:{daily:[{name:'Group',value:1,locationId:'loc_hcm'}]}};
  const cfg=N.normalize({});assert.equal(N.panels(raw,cfg,null)[4].rows[0].name,'Monthly');assert.equal(N.panels(raw,cfg,null)[5].rows[0].name,'Today');
@@ -38,14 +38,14 @@ test('new service attributes a session spanning reset to yesterday and excludes 
  const monthly={status:'ok',meta:{computedAt:new Date(now).toISOString()},data:{individual:{monthly:[{name:'Alice',value:999,groupId:'g'}]},group:{monthly:[]},locations:[],groups:[]}};
  const service=createNextRanking({getDb:()=>db,current:async()=>monthly,readProfiles:async()=>profiles,readLocations:async()=>[],clock:()=>now});
  const result=await service.get(false,{resetHour:6,freezeUntil:''});assert.equal(result.data.group.daily[0].value,100);assert.equal(result.data.group.yesterday[0].value,200);
- const byDefault=await service.get();assert.equal(byDefault.data.dailyPeriod.resetHour,6);assert.equal(byDefault.data.dailyPeriod.holdUntil,'16:00');assert.equal(byDefault.data.frozen,true,'07:00 still shows the finished workday');assert.equal(byDefault.data.group.daily[0].value,200);assert.equal(result.data.individual.monthly[0].value,999);assert.deepEqual(pipeline[0].$match.sessionId.$in,['before','after']);
+ const byDefault=await service.get();assert.equal(byDefault.data.dailyPeriod.resetHour,6);assert.equal(byDefault.data.dailyPeriod.holdUntil,'14:00');assert.equal(byDefault.data.frozen,true,'07:00 still shows the finished workday');assert.equal(byDefault.data.group.daily[0].value,200);assert.equal(result.data.individual.monthly[0].value,999);assert.deepEqual(pipeline[0].$match.sessionId.$in,['before','after']);
  assert.equal(result.data.individual.daily.find(e=>e.name==='Alice').yesterday.value,200);
  const frozen=await service.get(false,{resetHour:6,freezeUntil:'09:00'});assert.equal(frozen.data.frozen,true);assert.equal(frozen.data.group.daily[0].value,200);
  const live=await service.get(false,{resetHour:6,freezeUntil:''});assert.equal(live.data.frozen,false);assert.equal(live.data.group.daily[0].value,100);
  const midnight=await service.get(false,{resetHour:0,freezeUntil:''});assert.equal(midnight.data.group.daily[0].value,300);assert.equal(midnight.data.dailyPeriod.resetHour,0);assert.equal(midnight.data.individual.monthly[0].value,999);
  await assert.rejects(service.get(false,{resetHour:24}),RangeError);await assert.rejects(service.get(false,{freezeUntil:'24:00'}),RangeError);
 });
-test('06:00 workday keeps restarts and DPM overtime on the shift day; board holds it until 16:00',async()=>{
+test('06:00 workday keeps restarts and DPM overtime on the shift day; board holds it until 14:00',async()=>{
  const groups=[...profiles,{_id:'dpm',name:'HT - DPM ( tuyen thanh vien )',locationId:'loc_hcm',talents:{Dee:{}}}];
  const sessions=[
   {_id:'night',profileId:'g',createdAt:'2026-10-08T22:00:00+07:00',updatedAt:'2026-10-09T06:40:00+07:00'},
@@ -59,8 +59,9 @@ test('06:00 workday keeps restarts and DPM overtime on the shift day; board hold
  const monthly={status:'ok',meta:{},data:{individual:{monthly:[]},group:{monthly:[]},locations:[],groups:[]}};
  const service=createNextRanking({getDb:()=>db,current:async()=>monthly,readProfiles:async()=>groups,readLocations:async()=>[],clock:()=>now});
  const value=(r,id)=>r.data.group.daily.find(e=>e.groupId===id)?.value||0;
- now=Date.parse('2026-10-09T15:00:00+07:00');let r=await service.get(true);
+ now=Date.parse('2026-10-09T13:59:00+07:00');let r=await service.get(true);
  assert.equal(r.data.dailyPeriod.today,'2026-10-08');assert.equal(r.data.frozen,true);assert.equal(value(r,'g'),110,'restart at 07:00 stays on the night shift');assert.equal(value(r,'dpm'),220,'DPM overtime until 18:00 stays on the shift day');assert.equal(r.data.dailyPeriod.groupResetHours.dpm,18);
+ now=Date.parse('2026-10-09T14:00:00+07:00');r=await service.get(true);assert.equal(r.data.dailyPeriod.today,'2026-10-09','new day shows from 14:00');assert.equal(r.data.frozen,false);
  now=Date.parse('2026-10-09T21:00:00+07:00');r=await service.get(true);
  assert.equal(r.data.dailyPeriod.today,'2026-10-09');assert.equal(r.data.frozen,false);assert.equal(value(r,'g'),1000);assert.equal(value(r,'dpm'),2000);assert.equal(r.data.group.yesterday.find(e=>e.groupId==='dpm').value,220);
  now=Date.parse('2026-10-10T03:00:00+07:00');r=await service.get(true);assert.equal(r.data.dailyPeriod.today,'2026-10-09');assert.equal(r.data.frozen,false);

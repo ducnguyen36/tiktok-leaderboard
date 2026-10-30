@@ -1,8 +1,9 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./leaderboard-core'));else{const previous=root.HeliosCore;root.HeliosNext=factory(previous);root.HeliosCore={...previous,defaults:root.HeliosNext.normalize({}),normalize:root.HeliosNext.normalize,migrate:x=>root.HeliosNext.migrate(null,previous.migrate(x)),selectRows:root.HeliosNext.selectRows}}})(typeof globalThis==='object'?globalThis:this,function(C){
  'use strict';
  // dailyResetVersion 2: one-time move of saved new-board settings to the 06:00 workday held on the board until 16:00.
- const DAILY={resetHour:6,freezeUntil:'16:00'};
- function normalize(raw={}){const reset=raw.dailyResetVersion===2?{}:DAILY;return{...C.normalize({...DAILY,...raw,...reset}),dailyResetVersion:2,layout:['classic','studio','podium'].includes(raw.layout)?raw.layout:'podium',appearanceVersion:1,showDaily:typeof raw.showDaily==='boolean'?raw.showDaily:true,dailyMode:raw.dailyMode==='yesterday'?'yesterday':'daily'}}
+ // Version 3: the hold moved to 14:00; a saved 16:00 (the old default) follows, other choices are kept.
+ const DAILY={resetHour:6,freezeUntil:'14:00'};
+ function normalize(raw={}){const version=raw.dailyResetVersion,reset=version===2||version===3?(version===2&&raw.freezeUntil==='16:00'?{freezeUntil:DAILY.freezeUntil}:{}):DAILY;return{...C.normalize({...DAILY,...raw,...reset}),dailyResetVersion:3,layout:['classic','studio','podium'].includes(raw.layout)?raw.layout:'podium',appearanceVersion:1,showDaily:typeof raw.showDaily==='boolean'?raw.showDaily:true,dailyMode:raw.dailyMode==='yesterday'?'yesterday':'daily'}}
  function migrate(saved,legacy){return normalize(saved?{...saved,layout:saved.appearanceVersion===1?saved.layout:'podium'}:{...(legacy||{language:'vi'}),layout:'podium',...DAILY})}
  function warningFor(data,kind,period,row){return(data?.reconciliation?.warnings||[]).find(w=>w.kind===kind&&w.period===period&&String(w.groupId)===String(row.groupId)&&w.name===row.name)||null}
  function panels(raw,config,history){const selected=config.lastMonth?'history':config.dailyMode;return[

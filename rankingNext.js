@@ -49,7 +49,7 @@ function groupResetHours(profiles,resetHour,rules=null){
 }
 // Workday of a session from its shift start, using the group's own reset hour.
 function sessionWorkday(start,profileId,hours,resetHour=WORKDAY_HOUR){return dayKey(start,hours[String(profileId)]??resetHour)}
-// The board keeps showing the finished workday until the hold time (16:00), then
+// The board keeps showing the finished workday until the hold time (14:00), then
 // moves to the new one. A hold at or before the reset hour has no effect.
 function holdHours(holdUntil){const m=/^(\d{2}):(\d{2})$/.exec(holdUntil||'');return m?+m[1]+m[2]/60:0}
 function displayDay(now,resetHour=0,holdUntil=''){return dayKey(now,Math.max(resetHour,holdHours(holdUntil)))}
@@ -90,8 +90,8 @@ function createNextRankingForHour({getDb,current,readProfiles,readLocations,avat
     result.data.reconciliation=reconcile?.status()||{state:'unavailable',warnings:[]};return result;
   }};
 }
-// Default: 06:00 workday (DPM 18:00), the finished day held on the board until 16:00.
-const DEFAULT_CONTEXT={resetHour:WORKDAY_HOUR,freezeUntil:'16:00'};
+// Default: 06:00 workday (DPM 18:00), the finished day held on the board until 14:00.
+const DEFAULT_CONTEXT={resetHour:WORKDAY_HOUR,freezeUntil:'14:00'};
 function createNextRanking(options){
  const services=new Map(),clock=options.clock||Date.now;
  return{
