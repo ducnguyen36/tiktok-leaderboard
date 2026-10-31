@@ -1,10 +1,11 @@
 'use strict';
 
 const { computeMonthlyWindows, computeDailyWindows, MONTHLY_RESET_HOUR } = require('./monthlyWindows');
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 const GIFT_FIELDS = ['receivedTalent', 'receivedTalents', 'receivedTalentUid', 'toMemberUid', 'cost', 'sessionId', 'competitionId'];
 
-function createWindowContext(resetHour, freezeUntil, now = new Date()) {
+// plainFrom: month edges from this time on are plain gift time (see inMonth); null keeps the session-based edges.
+function createWindowContext(resetHour, freezeUntil, now = new Date(), { plainFrom = null } = {}) {
     const { dailyStart, yesterdayStart } = computeDailyWindows(now, resetHour);
     const monthly = computeMonthlyWindows(now, MONTHLY_RESET_HOUR);
     let frozen = false;
@@ -14,7 +15,7 @@ function createWindowContext(resetHour, freezeUntil, now = new Date()) {
         end.setHours(h, m, 0, 0);
         frozen = now < end && now >= dailyStart;
     }
-    const windows = { daily: +dailyStart, yesterday: +yesterdayStart, monthly: +monthly.displayStart, monthlyEnd: monthly.displayEnd ? +monthly.displayEnd : null };
+    const windows = { daily: +dailyStart, yesterday: +yesterdayStart, monthly: +monthly.displayStart, monthlyEnd: monthly.displayEnd ? +monthly.displayEnd : null, plainFrom };
     const queryKey = JSON.stringify(windows);
     return { resetHour, freezeUntil, windows, frozen, monthly, queryKey,
         key: JSON.stringify([CACHE_VERSION, resetHour, freezeUntil, frozen, windows]) };
@@ -26,30 +27,34 @@ function createWindowContext(resetHour, freezeUntil, now = new Date()) {
 // gifts arrive after 07:00, and a session that began 06:00–07:00 belongs to the
 // new month. The session start is read from the session's ObjectId time, so only
 // gifts near the edges are affected and nothing extra is queried.
-const HOUR = 3600000, NIGHT_SHIFT = 8 * HOUR;
-function monthEdges(start, end) {
-    return { s07: start, s06: start - HOUR, e07: end ?? null, e06: end == null ? null : end - HOUR };
+// When the board counts by gift time (admin setting), an edge at or after plainFrom
+// is plain gift time instead: gifts count until 07:00 on the 1st, whatever time their
+// session started. Gift time starts with the edge of 1 November 2026, so closed months keep their totals.
+const HOUR = 3600000, NIGHT_SHIFT = 8 * HOUR, GIFT_TIME_EDGES_FROM = Date.parse('2026-11-01T07:00:00+07:00');
+function monthEdges(start, end, plainFrom = null) {
+    const plain = edge => plainFrom != null && edge != null && edge >= plainFrom;
+    return { s07: start, s06: start - HOUR, e07: end ?? null, e06: end == null ? null : end - HOUR, plainStart: plain(start), plainEnd: plain(end) };
 }
-function inMonth(timeStamp, sessionStart, start, end) {
-    const { s07, s06, e07, e06 } = monthEdges(start, end);
+function inMonth(timeStamp, sessionStart, start, end, plainFrom = null) {
+    const { s07, s06, e07, e06, plainStart, plainEnd } = monthEdges(start, end, plainFrom);
     let inside = timeStamp >= s07 && (e07 === null || timeStamp < e07);
     if (sessionStart === null || sessionStart === undefined || !Number.isFinite(sessionStart)) return inside;
-    if (inside && sessionStart >= s06 - NIGHT_SHIFT && sessionStart < s06 && timeStamp < s06 + NIGHT_SHIFT) inside = false;
-    if (inside && e06 !== null && sessionStart >= e06 && timeStamp >= e06) inside = false;
-    if (!inside && timeStamp >= s06 && timeStamp < s07 && sessionStart >= s06 && (e06 === null || sessionStart < e06)) inside = true;
-    if (!inside && e07 !== null && timeStamp >= e07 && timeStamp < e06 + NIGHT_SHIFT && sessionStart >= e06 - NIGHT_SHIFT && sessionStart < e06) inside = true;
+    if (!plainStart && inside && sessionStart >= s06 - NIGHT_SHIFT && sessionStart < s06 && timeStamp < s06 + NIGHT_SHIFT) inside = false;
+    if (!plainEnd && inside && e06 !== null && sessionStart >= e06 && timeStamp >= e06) inside = false;
+    if (!plainStart && !inside && timeStamp >= s06 && timeStamp < s07 && sessionStart >= s06 && (e06 === null || sessionStart < e06)) inside = true;
+    if (!plainEnd && !inside && e07 !== null && timeStamp >= e07 && timeStamp < e06 + NIGHT_SHIFT && sessionStart >= e06 - NIGHT_SHIFT && sessionStart < e06) inside = true;
     return inside;
 }
-function inMonthExpr(start, end) {
-    const { s07, s06, e07, e06 } = monthEdges(start, end);
+function inMonthExpr(start, end, plainFrom = null) {
+    const { s07, s06, e07, e06, plainStart, plainEnd } = monthEdges(start, end, plainFrom);
     const ts = '$timeStamp', ss = '$$sessionStart';
     const and = (...xs) => ({ $and: xs }), gte = (a, b) => ({ $gte: [a, b] }), lt = (a, b) => ({ $lt: [a, b] });
     const window = and(gte(ts, s07), ...(e07 === null ? [] : [lt(ts, e07)]));
     const known = { $ne: [ss, null] };
-    const prevTail = and(known, gte(ss, s06 - NIGHT_SHIFT), lt(ss, s06), lt(ts, s06 + NIGHT_SHIFT));
-    const nextHead = e06 === null ? false : and(known, gte(ss, e06), gte(ts, e06));
-    const ownHead = and(known, gte(ts, s06), lt(ts, s07), gte(ss, s06), ...(e06 === null ? [] : [lt(ss, e06)]));
-    const ownTail = e07 === null ? false : and(known, gte(ts, e07), lt(ts, e06 + NIGHT_SHIFT), gte(ss, e06 - NIGHT_SHIFT), lt(ss, e06));
+    const prevTail = plainStart ? false : and(known, gte(ss, s06 - NIGHT_SHIFT), lt(ss, s06), lt(ts, s06 + NIGHT_SHIFT));
+    const nextHead = e06 === null || plainEnd ? false : and(known, gte(ss, e06), gte(ts, e06));
+    const ownHead = plainStart ? false : and(known, gte(ts, s06), lt(ts, s07), gte(ss, s06), ...(e06 === null ? [] : [lt(ss, e06)]));
+    const ownTail = e07 === null || plainEnd ? false : and(known, gte(ts, e07), lt(ts, e06 + NIGHT_SHIFT), gte(ss, e06 - NIGHT_SHIFT), lt(ss, e06));
     return { $let: { vars: { sessionStart: { $convert: { input: { $convert: { input: '$sessionId', to: 'date', onError: null, onNull: null } }, to: 'long', onError: null, onNull: null } } },
         in: { $or: [and(window, { $not: [prevTail] }, { $not: [nextHead] }), ownHead, ownTail] } } };
 }
@@ -62,7 +67,7 @@ function sessionStartOf(sessionId) {
 function windowFlags(timeStamp, windows, sessionId) {
     if (!windows) return {};
     return { daily: timeStamp >= windows.daily, yesterday: timeStamp >= windows.yesterday && timeStamp < windows.daily,
-        monthly: inMonth(timeStamp, sessionStartOf(sessionId), windows.monthly, windows.monthlyEnd) };
+        monthly: inMonth(timeStamp, sessionStartOf(sessionId), windows.monthly, windows.monthlyEnd, windows.plainFrom ?? null) };
 }
 
 // In-memory equivalent for differential fixtures. Production groups in MongoDB.
@@ -80,7 +85,7 @@ function compactGifts(gifts, windows) {
 }
 
 // month: true treats start/end as a month (history) and applies the workday edges.
-function buildGiftBucketPipeline({ windows, start, end, sessionIds, month = false } = {}) {
+function buildGiftBucketPipeline({ windows, start, end, sessionIds, month = false, plainFrom = null } = {}) {
     const minimum = start !== undefined && start !== null ? start - (month ? HOUR : 0) : Math.min(windows.daily, windows.yesterday, windows.monthly - HOUR);
     const match = { timeStamp: { $gte: minimum } };
     if (end !== undefined && end !== null) match.timeStamp.$lt = month ? end - HOUR + NIGHT_SHIFT : end;
@@ -91,9 +96,9 @@ function buildGiftBucketPipeline({ windows, start, end, sessionIds, month = fals
     if (windows) {
         identity.daily = { $gte: ['$timeStamp', windows.daily] };
         identity.yesterday = { $and: [{ $gte: ['$timeStamp', windows.yesterday] }, { $lt: ['$timeStamp', windows.daily] }] };
-        identity.monthly = inMonthExpr(windows.monthly, windows.monthlyEnd);
+        identity.monthly = inMonthExpr(windows.monthly, windows.monthlyEnd, windows.plainFrom ?? null);
     }
-    const monthFilter = month ? [{ $match: { $expr: inMonthExpr(start, end ?? null) } }] : [];
+    const monthFilter = month ? [{ $match: { $expr: inMonthExpr(start, end ?? null, plainFrom) } }] : [];
     return [{ $match: match }, ...monthFilter, { $group: { _id: identity, count: { $sum: 1 } } }, { $project: { _id: 0, gift: '$_id', count: 1 } }];
 }
 
@@ -234,4 +239,4 @@ function observeStreamCompletion(stream, isActive, onGap) {
     stream.on('end', completed);
 }
 
-module.exports = { inMonth, sessionStartOf, CACHE_VERSION, createWindowContext, compactGifts, buildGiftBucketPipeline, decodeGiftBuckets, createLeaderboardCache, createSessionBucketStore, observeStreamCompletion };
+module.exports = { inMonth, GIFT_TIME_EDGES_FROM, sessionStartOf, CACHE_VERSION, createWindowContext, compactGifts, buildGiftBucketPipeline, decodeGiftBuckets, createLeaderboardCache, createSessionBucketStore, observeStreamCompletion };

@@ -13,7 +13,10 @@ test('broadcast settings are versioned, validated and kept per administrator sav
  assert.equal(validRules({'a b':6}),null);assert.deepEqual(validRules({g:0}),{g:0});
  assert.equal(store.holdUntil(),'');const held=await store.save({holdUntil:'22:30'},'ducnguyen36@gmail.com');assert.equal(held.holdUntil,'22:30');assert.equal(store.holdUntil(),'22:30');assert.deepEqual(store.groupRules(),{},'rules kept');
  await assert.rejects(store.save({holdUntil:'25:00'}),RangeError);
+ assert.equal(store.dayCount(),'gift-time','gift time by default');await assert.rejects(store.save({dayCount:'hourly'}),RangeError);
  const reloaded=createBoardSettings({getDb:()=>db});assert.equal((await reloaded.current()).version,3);assert.equal(reloaded.holdUntil(),'22:30');
+ const counted=await reloaded.save({dayCount:'session-start'},'ducnguyen36@gmail.com');assert.equal(counted.dayCount,'session-start');assert.equal(reloaded.dayCount(),'session-start');assert.equal(counted.holdUntil,'22:30','hold kept');
+ const later=await reloaded.save({holdUntil:''},'ducnguyen36@gmail.com');assert.equal(later.dayCount,'session-start','day count kept');
 });
 test('group reset rules replace the DPM default; an empty rule set means every group resets at 06:00',()=>{
  const profiles=[{_id:'dpm',name:'HT - DPM ( tuyen thanh vien )'},{_id:'aura',name:'HT - AURA'}];

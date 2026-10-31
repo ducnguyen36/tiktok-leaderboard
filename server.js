@@ -23,7 +23,7 @@ const {
     previousCalendarMonth,
     validateRequestedHistoryMonth,
 } = require('./leaderboardHistory');
-const { createWindowContext, buildGiftBucketPipeline, decodeGiftBuckets, createLeaderboardCache, createSessionBucketStore, observeStreamCompletion } = require('./leaderboardPerformance');
+const { createWindowContext, GIFT_TIME_EDGES_FROM, buildGiftBucketPipeline, decodeGiftBuckets, createLeaderboardCache, createSessionBucketStore, observeStreamCompletion } = require('./leaderboardPerformance');
 
 // --- Global crash guards: prevent container from dying on unhandled errors ---
 process.on('uncaughtException', (err) => {
@@ -670,7 +670,7 @@ const leaderboardCache = createLeaderboardCache({
 
 async function getLeaderboardResult(resetHour, freezeUntil, { force = false } = {}) {
     for (let attempt = 0; attempt < 3; attempt++) {
-        const context = createWindowContext(resetHour, freezeUntil || '');
+        const context = createWindowContext(resetHour, freezeUntil || '', new Date(), { plainFrom: monthPlainFrom() });
         if (!force && !hydratedContexts.has(context.key)) {
             hydratedContexts.add(context.key);
             while (hydratedContexts.size > 8) hydratedContexts.delete(hydratedContexts.values().next().value);
@@ -680,7 +680,7 @@ async function getLeaderboardResult(resetHour, freezeUntil, { force = false } = 
         const result = await leaderboardCache.get(context, { force });
         // A slow cold build must not cross a freeze/month/day boundary and return
         // yesterday's context to a request completing after that boundary.
-        if (createWindowContext(resetHour, freezeUntil || '').key === context.key) return result;
+        if (createWindowContext(resetHour, freezeUntil || '', new Date(), { plainFrom: monthPlainFrom() }).key === context.key) return result;
     }
     throw new Error('Leaderboard window changed during refresh; retry shortly');
 }
@@ -855,7 +855,7 @@ async function buildHistoricalLeaderboardData(period) {
     const sessionProfileMap = await readSessionProfileMapFromDb();
 
     const allGifts = decodeGiftBuckets(await db.collection('gifts').aggregate(
-        buildGiftBucketPipeline({ start: Date.parse(period.start), end: Date.parse(period.end), month: true }),
+        buildGiftBucketPipeline({ start: Date.parse(period.start), end: Date.parse(period.end), month: true, plainFrom: monthPlainFrom() }),
         { allowDiskUse: true, maxTimeMS: 60000 }
     ).toArray());
     const individualGifts = allGifts; // Manual adjustments count for individual rankings too.
@@ -1138,8 +1138,10 @@ function debouncedBroadcast() {
 // ==========================================
 const boardSettings=createBoardSettings({getDb:()=>db});
 const groupRules=()=>boardSettings.groupRules();
+// Month edges follow the admin's day count: gift time cuts at 07:00 on the 1st (from November 2026).
+function monthPlainFrom(){try{return boardSettings.dayCount()==='gift-time'?GIFT_TIME_EDGES_FROM:null}catch{return GIFT_TIME_EDGES_FROM}}
 const sheetReconciliation=createSheetReconciliation({getDb:()=>db,sheets:leaderboardAuth.sheets,groupRules});
-const nextRanking=createNextRanking({getDb:()=>db,current:getLeaderboardResult,readProfiles:readProfilesFromDb,readLocations:readLocationsFromDb,avatar:resolveAvatarFast,reconcile:sheetReconciliation,groupRules});
+const nextRanking=createNextRanking({getDb:()=>db,current:getLeaderboardResult,readProfiles:readProfilesFromDb,readLocations:readLocationsFromDb,avatar:resolveAvatarFast,reconcile:sheetReconciliation,groupRules,dayCount:()=>boardSettings.dayCount()});
 // Daily read-only reconciliation report (admin only). Built once a day from 09:00 Vietnam time.
 const dailyReport=createDailyReport({getDb:()=>db,groupRules,sheets:leaderboardAuth.sheets,readProfiles:readProfilesFromDb,current:getLeaderboardResult,appVersion:process.env.APP_VERSION||'dev',
     // RECON_REPORT_GROUPS (comma list) limits the report; default: all eight groups.
@@ -1159,13 +1161,13 @@ app.get('/api/reconciliation/report',async(req,res)=>{
 setInterval(()=>{dailyReport.runIfDue().catch(error=>console.error('[Recon report]',error.message))},10*60000).unref?.();
 // Settings an administrator broadcasts to every approved TV, and per-group daily reset hours.
 app.get('/api/board-settings',async(req,res)=>{
-    try {const doc=await boardSettings.current();res.set('Cache-Control','no-store').json({status:'ok',version:doc?.version||0,config:doc?.config||null,groupResetHours:doc?.groupResetHours||null,holdUntil:doc?.holdUntil||'',updatedAt:doc?.updatedAt||null,updatedBy:doc?.updatedBy||null})}
+    try {const doc=await boardSettings.current();res.set('Cache-Control','no-store').json({status:'ok',version:doc?.version||0,config:doc?.config||null,groupResetHours:doc?.groupResetHours||null,holdUntil:doc?.holdUntil||'',dayCount:boardSettings.dayCount(),updatedAt:doc?.updatedAt||null,updatedBy:doc?.updatedBy||null})}
     catch {res.status(503).json({status:'error',message:'Settings unavailable'})}
 });
 app.post('/api/board-settings',async(req,res)=>{
     if(!accessControlEnabled)return res.status(403).json({status:'error',error:'admin_required'});
     const admin=await leaderboardAuth.adminMutation(req,res);if(!admin)return;
-    try {const doc=await boardSettings.save({config:req.body?.config,groupResetHours:req.body?.groupResetHours,holdUntil:req.body?.holdUntil},admin.email);
+    try {const doc=await boardSettings.save({config:req.body?.config,groupResetHours:req.body?.groupResetHours,holdUntil:req.body?.holdUntil,dayCount:req.body?.dayCount},admin.email);
         nextRanking.invalidate();sheetReconciliation.invalidate();broadcastSettings(doc.version);
         res.json({status:'ok',version:doc.version,updatedAt:doc.updatedAt,updatedBy:doc.updatedBy})}
     catch(error) {res.status(error instanceof RangeError?400:503).json({status:'error',message:error instanceof RangeError?error.message:'Settings unavailable'})}

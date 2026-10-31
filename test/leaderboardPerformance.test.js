@@ -260,6 +260,23 @@ test('month edges follow the 06:00 workday: night shifts stay with the month the
     // A reused session from the previous morning is not mistaken for a night shift.
     assert.equal(perf.inMonth(at('2026-10-01T08:00:00+07:00'), perf.sessionStartOf(sid('2026-09-30T07:00:00+07:00')), start, end), true);
 });
+test('gift-time month edges cut at 07:00 on the 1st from November 2026; earlier edges stay session-based', () => {
+    const at = s => Date.parse(s), from = perf.GIFT_TIME_EDGES_FROM;
+    const start = at('2026-10-01T07:00:00+07:00'), end = at('2026-11-01T07:00:00+07:00'), nov = end, dec = at('2026-12-01T07:00:00+07:00');
+    const sid = time => Math.floor(at(time) / 1000).toString(16).padStart(8, '0') + '0000000000000000';
+    // October ends at 07:00 on 1 Nov even for the night shift that started at 01:00.
+    assert.equal(perf.inMonth(at('2026-11-01T09:00:00+07:00'), perf.sessionStartOf(sid('2026-11-01T01:00:00+07:00')), start, end, from), false);
+    assert.equal(perf.inMonth(at('2026-11-01T06:59:00+07:00'), perf.sessionStartOf(sid('2026-11-01T01:00:00+07:00')), start, end, from), true);
+    assert.equal(perf.inMonth(at('2026-11-01T09:00:00+07:00'), perf.sessionStartOf(sid('2026-11-01T01:00:00+07:00')), nov, dec, from), true);
+    assert.equal(perf.inMonth(at('2026-11-01T06:30:00+07:00'), perf.sessionStartOf(sid('2026-11-01T06:10:00+07:00')), nov, dec, from), false);
+    // October's start edge (before November 2026) keeps the night-shift rule.
+    assert.equal(perf.inMonth(at('2026-10-01T07:12:00+07:00'), perf.sessionStartOf(sid('2026-10-01T00:39:13+07:00')), start, end, from), false);
+    // The MongoDB expression agrees: no session-based clauses for a plain edge.
+    const plain = JSON.stringify(perf.buildGiftBucketPipeline({ start: nov, end: dec, month: true, plainFrom: from })[1]);
+    const old = JSON.stringify(perf.buildGiftBucketPipeline({ start: nov, end: dec, month: true })[1]);
+    assert.ok(plain.length < old.length);
+    assert.notEqual(perf.createWindowContext(6, '', new Date('2026-11-05T10:00:00+07:00'), { plainFrom: from }).key, perf.createWindowContext(6, '', new Date('2026-11-05T10:00:00+07:00')).key);
+});
 test('the MongoDB month expression reads the session start variable', () => {
     const windows = { daily: 300, yesterday: 200, monthly: 100, monthlyEnd: null };
     const text = JSON.stringify(perf.buildGiftBucketPipeline({ windows })[1].$group._id.monthly);

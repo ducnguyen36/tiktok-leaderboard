@@ -45,7 +45,7 @@ test('new service attributes a session spanning reset to yesterday and excludes 
  const midnight=await service.get(false,{resetHour:0,freezeUntil:''});assert.equal(midnight.data.group.daily[0].value,300);assert.equal(midnight.data.dailyPeriod.resetHour,0);assert.equal(midnight.data.individual.monthly[0].value,999);
  await assert.rejects(service.get(false,{resetHour:24}),RangeError);await assert.rejects(service.get(false,{freezeUntil:'24:00'}),RangeError);
 });
-test('06:00 workday keeps restarts and DPM overtime on the shift day; board holds it until 14:00',async()=>{
+test('session-start count: 06:00 workday keeps restarts and DPM overtime on the shift day; board holds it until 14:00',async()=>{
  const groups=[...profiles,{_id:'dpm',name:'HT - DPM ( tuyen thanh vien )',locationId:'loc_hcm',talents:{Dee:{}}}];
  const sessions=[
   {_id:'night',profileId:'g',createdAt:'2026-10-08T22:00:00+07:00',updatedAt:'2026-10-09T06:40:00+07:00'},
@@ -57,7 +57,7 @@ test('06:00 workday keeps restarts and DPM overtime on the shift day; board hold
  const gifts={night:100,restart:10,fresh:1000,'dpm-night':200,'dpm-overtime':20,'dpm-new':2000};
  let now;const db={collection(name){return{find(){return{toArray:async()=>name==='sessions'?sessions:[]}},aggregate(){return{toArray:async()=>Object.entries(gifts).map(([sessionId,cost])=>({gift:{sessionId,cost,receivedTalent:sessionId.startsWith('dpm')?'Dee':'Alice'},count:1}))}}}}};
  const monthly={status:'ok',meta:{},data:{individual:{monthly:[]},group:{monthly:[]},locations:[],groups:[]}};
- const service=createNextRanking({getDb:()=>db,current:async()=>monthly,readProfiles:async()=>groups,readLocations:async()=>[],clock:()=>now});
+ const service=createNextRanking({getDb:()=>db,current:async()=>monthly,readProfiles:async()=>groups,readLocations:async()=>[],dayCount:()=>'session-start',clock:()=>now});
  const value=(r,id)=>r.data.group.daily.find(e=>e.groupId===id)?.value||0;
  now=Date.parse('2026-10-09T13:59:00+07:00');let r=await service.get(true);
  assert.equal(r.data.dailyPeriod.today,'2026-10-08');assert.equal(r.data.frozen,true);assert.equal(value(r,'g'),110,'restart at 07:00 stays on the night shift');assert.equal(value(r,'dpm'),220,'DPM overtime until 18:00 stays on the shift day');assert.equal(r.data.dailyPeriod.groupResetHours.dpm,18);
@@ -65,6 +65,23 @@ test('06:00 workday keeps restarts and DPM overtime on the shift day; board hold
  now=Date.parse('2026-10-09T21:00:00+07:00');r=await service.get(true);
  assert.equal(r.data.dailyPeriod.today,'2026-10-09');assert.equal(r.data.frozen,false);assert.equal(value(r,'g'),1000);assert.equal(value(r,'dpm'),2000);assert.equal(r.data.group.yesterday.find(e=>e.groupId==='dpm').value,220);
  now=Date.parse('2026-10-10T03:00:00+07:00');r=await service.get(true);assert.equal(r.data.dailyPeriod.today,'2026-10-09');assert.equal(r.data.frozen,false);
+});
+test('gift-time count: diamonds count until 07:00 by gift time, for every group, then belong to the new day',async()=>{
+ const groups=[...profiles,{_id:'dpm',name:'HT - DPM ( tuyen thanh vien )',locationId:'loc_hcm',talents:{Dee:{}}}];
+ const sessions=[{_id:'night',profileId:'g',createdAt:'2026-10-08T22:00:00+07:00'},{_id:'dpm',profileId:'dpm',createdAt:'2026-10-09T02:00:00+07:00'}];
+ const hour=iso=>Math.floor((Date.parse(iso)+7*3600000)/3600000);
+ const gifts=[['night','Alice',100,'2026-10-09T06:59:00+07:00'],['night','Alice',10,'2026-10-09T07:00:00+07:00'],['dpm','Dee',200,'2026-10-09T05:00:00+07:00'],['dpm','Dee',20,'2026-10-09T12:00:00+07:00'],['dpm','Dee',3,null]];
+ let pipeline;const db={collection(name){return{find(){return{toArray:async()=>name==='sessions'?sessions:[]}},aggregate(p){pipeline=p;return{toArray:async()=>gifts.map(([sessionId,receivedTalent,cost,at])=>({gift:{sessionId,cost,receivedTalent,hour:at?hour(at):null},count:1}))}}}}};
+ const monthly={status:'ok',meta:{},data:{individual:{monthly:[]},group:{monthly:[]},locations:[],groups:[]}};
+ let mode='gift-time',now=Date.parse('2026-10-09T13:00:00+07:00');
+ const service=createNextRanking({getDb:()=>db,current:async()=>monthly,readProfiles:async()=>groups,readLocations:async()=>[],groupRules:()=>({dpm:18}),dayCount:()=>mode,clock:()=>now});
+ const value=(r,period,id)=>r.data.group[period].find(e=>e.groupId===id)?.value||0;
+ let r=await service.get(true);
+ assert.ok(JSON.stringify(pipeline).includes('timeStamp'),'gift buckets carry the gift hour');
+ assert.equal(r.data.dailyPeriod.attribution,'gift-time');assert.equal(r.data.dailyPeriod.giftCutoffHour,7);
+ assert.equal(r.data.dailyPeriod.today,'2026-10-08');assert.equal(value(r,'daily','g'),100,'a gift at 06:59 stays on the night shift day');assert.equal(value(r,'daily','dpm'),203,'DPM is cut at 07:00 too; a gift without a time follows its session');
+ now=Date.parse('2026-10-09T14:00:00+07:00');r=await service.get(true);assert.equal(value(r,'daily','g'),10,'07:00 starts the new day');assert.equal(value(r,'daily','dpm'),20);
+ mode='session-start';r=await service.get();assert.equal(r.data.dailyPeriod.attribution,'session-start','a changed admin setting rebuilds at once');assert.equal(value(r,'daily','g'),0);assert.equal(value(r,'yesterday','g'),110);assert.equal(value(r,'yesterday','dpm'),223);
 });
 test('smart TV browsers get the simple live mark; phones and computers keep the animation',()=>{
  assert.equal(N.isTvDevice('Mozilla/5.0 (SMART-TV; Linux; Tizen 6.0) AppleWebKit/537.36 SamsungBrowser/4.0 TV Safari/537.36'),true);
