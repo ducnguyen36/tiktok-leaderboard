@@ -113,7 +113,10 @@ function syncBannerPlacement(){
  else if(zone.parentElement!==stage)stage.insertBefore(zone,mobileTabs);
 }
 function buildTicker(){
- const leaders=C.filtered(rawData?.group?.daily,config,allLocations).filter(e=>e.value>=100000).slice(0,5);
+ // Groups first, then idols: each from 100K, up to five, shown as their last 50K step.
+ const groups=C.filtered(rawData?.group?.daily,config,allLocations).filter(e=>e.value>=100000).slice(0,5);
+ const idols=C.filtered(rawData?.individual?.daily,config,allLocations).filter(e=>config.talents?.[e.name]!==false&&e.value>=100000).slice(0,5);
+ const leaders=[...groups,...idols];
  return leaders.length?tickerDivider+leaders.map(e=>t('ticker.congratulations',{name:e.name,points:C.formatPoints(Math.floor(e.value/50000)*50000)})).join(tickerDivider)+tickerDivider:t('ticker.fallback');
 }
 // Decorative particles stay behind text, are bounded, and stop in background tabs.
@@ -154,12 +157,12 @@ function updateCelebrations(result){
  let ledger=celebrationLedger;try{ledger=JSON.parse(localStorage.getItem(key)||'null')||ledger}catch{}
  if(!ledger||ledger.day!==day||ledger.reset!==config.resetHour)ledger={day,reset:config.resetHour,groups:{},talents:{}};
  ledger.talents??={};
- // Groups: from 100K, every 50K, while in the visible top 5. Talents: every 50K in the top 10.
+ // Groups: from 100K, every 50K, while in the visible top 5. Talents: from 100K, every 50K, in the top 10.
  const groupRows=(result.data.group?.daily||[]).map(e=>({...e,kind:'group'})),talentRows=result.data.individual?.daily||[];
  const groupVisible=new Set(C.filtered(result.data.group?.daily,config,allLocations).slice(0,5).map(e=>String(e.groupId||e.id||e.name)));
  const talentVisible=new Set(C.filtered(talentRows,config,allLocations).filter(e=>config.talents?.[e.name]!==false).slice(0,10).map(e=>String(e.id||e.name)));
  const groups=N.milestoneHits(ledger.groups,groupRows,{step:50000,minStep:2,visible:groupVisible,ready:celebrationSessionReady});
- const talents=N.milestoneHits(ledger.talents,talentRows,{step:50000,minStep:1,visible:talentVisible,ready:celebrationSessionReady});
+ const talents=N.milestoneHits(ledger.talents,talentRows,{step:50000,minStep:2,visible:talentVisible,ready:celebrationSessionReady});
  ledger.groups=groups.next;ledger.talents=talents.next;
  celebrationLedger=ledger;try{localStorage.setItem(key,JSON.stringify(ledger))}catch{}
  celebrationSessionReady=true;

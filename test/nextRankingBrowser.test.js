@@ -80,3 +80,9 @@ test('admin edits group reset exceptions and saves settings for all TVs',async t
  assert.equal(state.settings.version,1);assert.deepEqual(state.settings.groupResetHours,{g:17});assert.equal(state.settings.holdUntil,'22:30');assert.equal(state.settings.config.layout,'podium');
  assert.equal(await page.evaluate(()=>localStorage.getItem('helios_leaderboard_next_broadcast')),'1');
 });
+test('ticker congratulates groups then idols from 100K, skipping hidden idols',async t=>{
+ const{page}=await fixture(t);
+ const text=await page.evaluate(()=>{const saved=rawData,loc=allLocations[0].id;rawData={...saved,group:{...saved.group,daily:[{name:'TEST BIG GROUP',groupId:'gx',locationId:loc,value:160000},{name:'TEST SMALL GROUP',groupId:'gy',locationId:loc,value:99999}]},individual:{...saved.individual,daily:[{name:'TEST BIG IDOL',locationId:loc,value:120000},{name:'TEST HIDDEN IDOL',locationId:loc,value:300000},{name:'TEST SMALL IDOL',locationId:loc,value:99000}]}};config.talents['TEST HIDDEN IDOL']=false;const out=buildTicker();rawData=saved;delete config.talents['TEST HIDDEN IDOL'];return out});
+ assert.ok(text.indexOf('TEST BIG GROUP')>=0&&text.indexOf('TEST BIG GROUP')<text.indexOf('TEST BIG IDOL'));assert.match(text,/100[.,]000/);
+ for(const name of ['TEST SMALL GROUP','TEST HIDDEN IDOL','TEST SMALL IDOL'])assert.ok(!text.includes(name),name);
+});
