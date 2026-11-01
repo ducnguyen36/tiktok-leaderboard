@@ -73,3 +73,13 @@ test('a row with talent scores but blank totals still counts toward the group',(
  const parsed=parseSheet([headers,[],[46296,100,200,0,300,300],[null,40,60,null,null,null]],'2026-10',['Alice','Bob']);
  assert.equal(parsed.days[0].group,400);assert.equal(parsed.days[0].individual.Alice,140);
 });
+test('on the 1st the check still reads the finished month tab',async()=>{
+ const {createSheetReconciliation}=require('../sheetReconciliation'),{GROUP_SHEETS}=require('../groupSheets');
+ const empty={find:()=>({toArray:async()=>[]}),aggregate:()=>({toArray:async()=>[]})},titles=[];
+ const sheets={status:async()=>({connected:true}),version:async()=>'v1',async read({metadata,range}){
+  if(metadata)return{sheets:[{properties:{title:'Tháng 10.2026',sheetId:1,gridProperties:{rowCount:40}}}]};titles.push(range);return{values:[]}}};
+ const profiles=GROUP_SHEETS.map((s,i)=>({_id:'p'+i,name:s.group,talents:{}}));
+ const check=createSheetReconciliation({getDb:()=>({collection:()=>empty}),sheets,clock:()=>Date.parse('2026-11-01T09:00:00+07:00')});
+ await check.refresh(profiles);const result=check.status();
+ assert.equal(result.month,'2026-10');assert.ok(result.sources.every(s=>s.state!=='month_tab_missing'),JSON.stringify(result.sources));assert.ok(titles.length&&titles.every(r=>r.startsWith("'Tháng 10.2026'")));
+});

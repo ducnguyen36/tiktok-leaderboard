@@ -48,8 +48,8 @@ test('window identity changes at daily reset, freeze end, and monthly grace clos
     const key = iso => perf.createWindowContext(0, '09:00', new Date(iso)).key;
     assert.notEqual(key('2026-09-17T16:59:59Z'), key('2026-09-17T17:00:00Z'));
     assert.notEqual(key('2026-09-18T01:59:59Z'), key('2026-09-18T02:00:00Z'));
-    const before = perf.createWindowContext(7, '', new Date('2026-10-01T16:59:59Z'));
-    const after = perf.createWindowContext(7, '', new Date('2026-10-01T17:00:00Z'));
+    const before = perf.createWindowContext(7, '', new Date('2026-10-03T06:59:59Z'));
+    const after = perf.createWindowContext(7, '', new Date('2026-10-03T07:00:00Z'));
     assert.notEqual(before.windows.monthly, after.windows.monthly);
 });
 

@@ -3,6 +3,7 @@ const {GROUP_SHEETS,findMonthTab}=require('./groupSheets');
 const {dayKey,dayStart,shiftStarts,scoreRows,sessionGiftPipeline,liveGroups,groupResetHours,sessionWorkday}=require('./rankingNext');
 const {decodeGiftBuckets}=require('./leaderboardPerformance');
 const {sheetsReadError}=require('./sheetsConnection');
+const {displayMonth}=require('./monthlyWindows');
 // Sheets record a workday from 06:00: a night shift after midnight belongs to the
 // previous day, independent of the board's own daily reset hour.
 const WORKDAY_HOUR=6,workday=value=>dayKey(value,WORKDAY_HOUR);
@@ -76,7 +77,9 @@ function comparableDay(date,profileId,sessions,known,active,starts=shiftStarts(s
 function createSheetReconciliation({getDb,sheets,groupRules,clock=Date.now}){
   let result={state:'pending',warnings:[],sources:[]},pending,checked=0,version='';
   async function build(profiles,currentVersion){
-    const now=clock(),today=workday(now),month=today.slice(0,7),db=getDb();
+    // The check reads the month the monthly board shows: the finished month stays
+    // through day 2, so its last days (and their sheet rows) are still compared.
+    const now=clock(),month=displayMonth(new Date(now)),db=getDb();
     const sessions=await db.collection('sessions').find({createdAt:{$gte:new Date(dayStart(month+'-01',WORKDAY_HOUR)-86400000)}},{projection:{createdAt:1,sessionStartedAt:1,profileId:1,sessionName:1,updatedAt:1}}).toArray();
     const gifts=sessions.length?decodeGiftBuckets(await db.collection('gifts').aggregate(sessionGiftPipeline(sessions.map(s=>s._id)),{allowDiskUse:true,maxTimeMS:60000}).toArray()):[];
     const live=await db.collection('leaderboard_live').find({source:'helioscontrol',liveSince:{$gte:new Date(dayStart(month+'-01',WORKDAY_HOUR)-86400000)}}).toArray();
@@ -91,7 +94,7 @@ function createSheetReconciliation({getDb,sheets,groupRules,clock=Date.now}){
       const profile=matchingProfile(profiles,source.group);
       if(!profile){sources.push({group:source.group,state:'profile_unmatched'});continue}
       try{
-        const metadata=await sheets.read({spreadsheetId:source.spreadsheetId,metadata:true});const tab=findMonthTab(metadata,new Date(dayStart(today,WORKDAY_HOUR)));
+        const metadata=await sheets.read({spreadsheetId:source.spreadsheetId,metadata:true});const tab=findMonthTab(metadata,new Date(dayStart(month+'-01',WORKDAY_HOUR)));
         if(!tab){sources.push({group:source.group,state:'month_tab_missing'});continue}
         const data=await sheets.read({spreadsheetId:source.spreadsheetId,range:`'${tab.title.replace(/'/g,"''")}'!A1:U${Math.min(100,tab.gridProperties.rowCount)}`});
         const parsed=parseSheet(data.values||[],month,Object.keys(profile.talents||{}));
@@ -119,7 +122,7 @@ function createSheetReconciliation({getDb,sheets,groupRules,clock=Date.now}){
       }catch(error){sources.push({group:source.group,state:sheetsReadError(error)})}
     }
     if(await sheets.version()!==currentVersion)return;
-    result={state:'checked',warnings,sources,checkedAt:new Date(now).toISOString()};checked=clock();version=currentVersion;
+    result={state:'checked',month,warnings,sources,checkedAt:new Date(now).toISOString()};checked=clock();version=currentVersion;
   }
   return{status(){return result},invalidate(){checked=0;version=''},async refresh(profiles){
     const connected=await sheets.status();if(!connected.connected){result={state:'disconnected',warnings:[],sources:[]};version='';return}

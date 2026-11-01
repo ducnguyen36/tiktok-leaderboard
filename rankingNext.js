@@ -1,6 +1,7 @@
 'use strict';
 const A=require('./leaderboardAggregation');
 const {decodeGiftBuckets}=require('./leaderboardPerformance');
+const {displayMonth}=require('./monthlyWindows');
 const DAY=86400000, OFFSET=7*3600000;
 function dayKey(value,resetHour=0){const n=+new Date(value);return Number.isFinite(n)?new Date(n+OFFSET-resetHour*3600000).toISOString().slice(0,10):null}
 function dayStart(key,resetHour=0){return Date.parse(key+'T'+String(resetHour).padStart(2,'0')+':00:00+07:00')}
@@ -105,7 +106,9 @@ function createNextRankingForHour({getDb,current,readProfiles,readLocations,avat
     const result={...cached,data:structuredClone(cached.data),meta:{...cached.meta,stale:cached.meta.stale||cached.revision!==generation||clock()-cached.builtAt>15000}};
     // Expire indicators locally even when an older cached result is served.
     for(const kind of ['individual','group'])for(const period of ['daily','yesterday','monthly'])for(const row of result.data[kind][period])if(row.live&&Date.parse(row.liveExpiresAt)<=clock())row.live=false;
-    result.data.reconciliation=reconcile?.status()||{state:'unavailable',warnings:[]};return result;
+    // Warnings belong to the month the check read; once the board shows a new month they would mark the wrong rows.
+    const check=reconcile?.status()||{state:'unavailable',warnings:[]},boardMonth=displayMonth(new Date(clock()));
+    result.data.reconciliation=check.month&&check.month!==boardMonth?{...check,warnings:[]}:check;return result;
   }};
 }
 // Default: 06:00 workday (counted per the admin's dayCount), the finished day held on the board until 14:00.

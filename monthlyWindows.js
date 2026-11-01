@@ -2,6 +2,7 @@
 // All Date construction is server-local (Vietnam, TZ=Asia/Ho_Chi_Minh) time.
 
 const MONTHLY_RESET_HOUR = 7; // 07:00 on the 1st; decoupled from the daily resetHour
+const GRACE_END_HOUR = 14;
 
 /**
  * @param {Date} now
@@ -21,9 +22,10 @@ function computeMonthlyWindows(now, resetHour) {
         monthlyStart.getFullYear(), monthlyStart.getMonth() - 1, 1, resetHour, 0, 0, 0
     );
 
-    // Display grace ends at 00:00:00 on the 2nd of monthlyStart's calendar month.
+    // The finished month stays on the board through day 2: grace ends at 14:00 on
+    // the 3rd, when the board's daily view leaves day 2.
     const graceEnd = new Date(
-        monthlyStart.getFullYear(), monthlyStart.getMonth(), 2, 0, 0, 0, 0
+        monthlyStart.getFullYear(), monthlyStart.getMonth(), 3, GRACE_END_HOUR, 0, 0, 0
     );
     const inGrace = now < graceEnd;
 
@@ -56,4 +58,10 @@ function computeDailyWindows(now, resetHour) {
     return { dailyStart, yesterdayStart, yesterdayEnd };
 }
 
-module.exports = { MONTHLY_RESET_HOUR, computeMonthlyWindows, computeDailyWindows };
+// "YYYY-MM" of the month the monthly board is showing (server-local time).
+function displayMonth(now) {
+    const start = computeMonthlyWindows(now, MONTHLY_RESET_HOUR).displayStart;
+    return start.getFullYear() + '-' + String(start.getMonth() + 1).padStart(2, '0');
+}
+
+module.exports = { MONTHLY_RESET_HOUR, computeMonthlyWindows, computeDailyWindows, displayMonth };

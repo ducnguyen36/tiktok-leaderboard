@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { computeMonthlyWindows, MONTHLY_RESET_HOUR, computeDailyWindows } = require('../monthlyWindows');
+const { computeMonthlyWindows, MONTHLY_RESET_HOUR, computeDailyWindows, displayMonth } = require('../monthlyWindows');
 
 // Helper: build a server-local Date (same construction the module uses → TZ-independent)
 const d = (y, m, day, h = 0, min = 0) => new Date(y, m, day, h, min, 0, 0);
@@ -38,8 +38,18 @@ test('1st at 23:59: still in grace', () => {
     assert.equal(w.inGrace, true);
 });
 
-test('00:00 on the 2nd: grace ends, display current month', () => {
-    const w = computeMonthlyWindows(d(2026, 2, 2, 0, 0), 7); // Mar 2 00:00
+test('day 2 and the morning of the 3rd: finished month still shown', () => {
+    for (const at of [d(2026, 2, 2, 0, 0), d(2026, 2, 2, 23, 59), d(2026, 2, 3, 13, 59)]) {
+        const w = computeMonthlyWindows(at, 7);
+        assert.equal(w.inGrace, true);
+        assert.deepEqual(w.displayStart, d(2026, 1, 1, 7));
+    }
+    assert.equal(displayMonth(d(2026, 2, 3, 13, 59)), '2026-02');
+    assert.equal(displayMonth(d(2026, 2, 3, 14, 0)), '2026-03');
+});
+
+test('14:00 on the 3rd: grace ends, display current month', () => {
+    const w = computeMonthlyWindows(d(2026, 2, 3, 14, 0), 7); // Mar 3 14:00
     assert.equal(w.inGrace, false);
     assert.deepEqual(w.displayStart, d(2026, 2, 1, 7));      // Mar 1 07:00
     assert.equal(w.displayEnd, null);
@@ -74,13 +84,10 @@ test('computeDailyWindows: before reset hour rolls dailyStart back a day', () =>
     assert.deepEqual(dw.yesterdayStart, d(2026, 6, 13, 9));
 });
 
-test('C1 regression: on the 2nd at 00:00 (resetHour 0), displayStart-alone would drop yesterday', () => {
-    const now = d(2026, 6, 2, 0, 0); // Jul 2 00:00
+test('C1 regression: when grace ends (3rd 14:00, resetHour 0), the load bound covers every window', () => {
+    const now = d(2026, 6, 3, 14, 0); // Jul 3 14:00
     const mw = computeMonthlyWindows(now, 7);
     const dw = computeDailyWindows(now, 0);
-    // Precondition: the OLD buggy bound (displayStart alone) is AFTER yesterdayStart.
-    assert.ok(mw.displayStart.getTime() > dw.yesterdayStart.getTime(),
-        'displayStart should be after yesterdayStart — this is the bug being guarded');
     // The fixed bound is the 3-way min and MUST cover every window.
     const loadStart = Math.min(mw.displayStart.getTime(), dw.dailyStart.getTime(), dw.yesterdayStart.getTime());
     assert.ok(loadStart <= dw.yesterdayStart.getTime(), 'load must cover yesterday');
