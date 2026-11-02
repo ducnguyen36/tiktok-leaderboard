@@ -10,7 +10,8 @@ function createNextFixture(){
  state.broadcast=()=>streams.forEach(r=>r.write('data: '+JSON.stringify({status:'ok',invalidated:true,settingsVersion:state.settings.version})+'\n\n'));
  app.use(express.json());
  app.get('/auth/status',(req,res)=>res.json({authorized:true,admin:state.admin,csrf:state.admin?'test-csrf':undefined,email:state.admin?'admin@example.test':undefined}));
- app.get('/api/board-settings',(req,res)=>res.json({status:'ok',...state.settings}));
+ app.get('/api/board-settings',(req,res)=>res.json({status:'ok',...state.settings,admin:state.admin,device:state.device||null}));
+ state.push=device=>{state.device=device;streams.forEach(r=>r.write('data: '+JSON.stringify({status:'ok',invalidated:true,settingsVersion:state.settings.version,devicePush:device.version})+'\n\n'))};
  app.post('/api/board-settings',(req,res)=>{if(!state.admin||req.get('x-csrf-token')!=='test-csrf')return res.status(403).json({status:'error',error:'admin_required'});
   state.settings={version:state.settings.version+1,config:req.body.config,groupResetHours:req.body.groupResetHours,holdUntil:req.body.holdUntil,updatedAt:new Date().toISOString(),updatedBy:'admin@example.test'};state.broadcast();res.json({status:'ok',version:state.settings.version,updatedAt:state.settings.updatedAt,updatedBy:state.settings.updatedBy})});
  app.get('/api/leaderboard/history',(req,res)=>{state.historyRequests++;res.json({status:'ok',period:{month:req.query.month,complete:true},data:{individual:[row('TEST PRIOR TALENT',100)],group:[row('TEST PRIOR GROUP',100)]}})});

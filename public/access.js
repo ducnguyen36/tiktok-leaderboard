@@ -10,6 +10,10 @@
  Object.assign(words.en,{sheetsBadgeConnected:'Connected',sheetsChecking:'Checking sheets…',sheetsPartial:'Some sheets could not be read',sheetsUnchecked:'Connected. Reading has not been verified yet.',sheetsCheckedAt:'Last checked',sheetsSavedAt:'Connected at',source_missing:'Sheet missing',reconnect_required:'Reconnect required',permission_denied:'Account cannot read this sheet',sheet_not_found:'Sheet not found or inaccessible',invalid_range:'Invalid sheet range',rate_limited:'Google rate limit; try again later',read_failed:'Read failed'});
  Object.assign(words.vi,{sheetsBadgeConnected:'Đã kết nối',sheetsChecking:'Đang kiểm tra các sheet…',sheetsPartial:'Một số sheet chưa đọc được',sheetsUnchecked:'Đã kết nối. Chưa kiểm tra quyền đọc sheet.',sheetsCheckedAt:'Kiểm tra gần nhất',sheetsSavedAt:'Kết nối lúc',source_missing:'Thiếu sheet',reconnect_required:'Cần kết nối lại',permission_denied:'Tài khoản không đọc được sheet này',sheet_not_found:'Không tìm thấy hoặc không có quyền đọc sheet',invalid_range:'Vùng dữ liệu không hợp lệ',rate_limited:'Google giới hạn lượt đọc; thử lại sau',read_failed:'Đọc thất bại'});
  words.en.month_tab_missing='Current month tab missing';words.vi.month_tab_missing='Thiếu tab tháng hiện tại';
+ Object.assign(words.en,{sendSettings:'Send my settings',confirmSend:'Send the leaderboard settings of this browser to',settingsSent:'Settings sent. The TV switches within a few seconds.',noBoardSettings:'Open the leaderboard on this browser and set it up first.'});
+ Object.assign(words.vi,{sendSettings:'Gửi cài đặt của tôi',confirmSend:'Gửi cài đặt bảng xếp hạng của trình duyệt này cho',settingsSent:'Đã gửi cài đặt. TV sẽ đổi theo trong vài giây.',noBoardSettings:'Hãy mở bảng xếp hạng trên trình duyệt này và chỉnh cài đặt trước.'});
+ // The leaderboard settings this (admin) browser uses, sent as-is to a chosen TV.
+ function boardSettings(){try{const value=JSON.parse(localStorage.getItem('helios_leaderboard_next_current')||'null');return value&&typeof value==='object'&&!Array.isArray(value)?value:null}catch{return null}}
  let language='en',status=null,csrf='',pair=null,devices=[],deviceSignature='',busy=false,polling=false,notice='',sheetsResult=null,sheetsChecking=false;
  const normalizePair=value=>{if(typeof value!=='string'||!/^[A-Fa-f0-9\s-]{10,14}$/.test(value))return'';const normalized=value.replace(/[-\s]/g,'').toUpperCase();return/^[A-F0-9]{10}$/.test(normalized)?normalized:''};
  let scannedPair=normalizePair(new URLSearchParams(location.search).get('pair'));
@@ -33,7 +37,10 @@
    const meta=document.createElement('p');meta.className='device-meta';meta.textContent=t('lastSeen')+': '+date(device.lastSeen)+' · '+t('accessExpires')+': '+date(device.expiresAt);
    const button=document.createElement('button');button.type='button';button.textContent=t('revoke');button.setAttribute('aria-label',t('revoke')+' '+device.name);
    button.onclick=()=>run(async()=>{if(!confirm(t('confirmRevoke')+' “'+device.name+'”?'))return;await request('/auth/revoke',{id:device.id});message('revoked');await refreshDevices()});
-   info.append(name,meta);row.append(info,button);list.append(row);
+   const send=document.createElement('button');send.type='button';send.className='secondary';send.textContent=t('sendSettings');send.setAttribute('aria-label',t('sendSettings')+' → '+device.name);
+   send.onclick=()=>run(async()=>{const settings=boardSettings();if(!settings){message('noBoardSettings');return}if(!confirm(t('confirmSend')+' “'+device.name+'”?'))return;await request('/api/device-settings',{ids:[device.id],config:settings});message('settingsSent')});
+   const actions=document.createElement('div');actions.className='device-actions';actions.append(send,button);
+   info.append(name,meta);row.append(info,actions);list.append(row);
   }
  }
  function render(){

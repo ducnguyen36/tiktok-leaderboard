@@ -4,7 +4,10 @@
 // holdUntil, when set, replaces every TV's own "freeze daily scores until" time.
 // dayCount: 'gift-time' (default) counts a day's diamonds until 07:00 by gift time;
 // 'session-start' counts whole sessions by the day they started.
-const COLLECTION='board_settings',ID='broadcast',MAX_CONFIG=24000,RELOAD=60000;
+// Settings can also be pushed to single TVs ('push:<device id>' documents); a TV adopts
+// its newest push once, like a broadcast. Administrators' own browsers never adopt either.
+const COLLECTION='board_settings',ID='broadcast',MAX_CONFIG=24000,RELOAD=60000,MAX_PUSH=50;
+const validDevice=id=>typeof id==='string'&&/^session:[a-f0-9]{64}$/.test(id);
 const DAY_COUNTS=['gift-time','session-start'];
 const validHold=value=>value===''||/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(value);
 function validRules(rules){
@@ -18,10 +21,11 @@ function validConfig(config){
   try{return JSON.stringify(config).length<=MAX_CONFIG?JSON.parse(JSON.stringify(config)):null}catch{return null}
 }
 function createBoardSettings({getDb,clock=Date.now}){
-  let doc=null,loaded=0,loading=null;
+  let doc=null,loaded=0,loading=null,pushes=new Map();
   async function load(){
     const db=getDb();if(!db)return doc;
-    if(!loading)loading=db.collection(COLLECTION).findOne({_id:ID}).then(found=>{doc=found;loaded=clock();return doc}).finally(()=>loading=null);
+    if(!loading)loading=Promise.all([db.collection(COLLECTION).findOne({_id:ID}),db.collection(COLLECTION).find({_id:{$regex:'^push:'}}).toArray()])
+      .then(([found,pushed])=>{doc=found;pushes=new Map(pushed.map(p=>[p._id.slice(5),p]));loaded=clock();return doc}).finally(()=>loading=null);
     return loading;
   }
   return{
@@ -42,6 +46,17 @@ function createBoardSettings({getDb,clock=Date.now}){
       await load();
       const next={_id:ID,version:(doc?.version||0)+1,config:cleanConfig,groupResetHours:rules,holdUntil:holdUntil===undefined?doc?.holdUntil||'':holdUntil,dayCount:dayCount===undefined?doc?.dayCount||DAY_COUNTS[0]:dayCount,updatedAt:new Date(clock()).toISOString(),updatedBy:email||''};
       await db.collection(COLLECTION).replaceOne({_id:ID},next,{upsert:true});doc=next;loaded=clock();return next;
+    },
+    // The newest settings pushed to one device, or null.
+    devicePush(id){return pushes.get(id)||null},
+    async pushToDevices(ids,config,email){
+      const db=getDb();if(!db)throw Error('Database unavailable');
+      if(!Array.isArray(ids)||!ids.length||ids.length>MAX_PUSH||!ids.every(validDevice))throw new RangeError('Invalid devices');
+      const clean=validConfig(config);if(!clean)throw new RangeError('Invalid settings');
+      await load();
+      const version=Math.max(clock(),...[...pushes.values()].map(p=>p.version+1)),updatedAt=new Date(clock()).toISOString();
+      for(const id of new Set(ids)){const next={_id:'push:'+id,version,config:clean,updatedAt,updatedBy:email||''};await db.collection(COLLECTION).replaceOne({_id:next._id},next,{upsert:true});pushes.set(id,next)}
+      return{version,updatedAt};
     },
     reset(){loaded=0}
   };

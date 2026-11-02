@@ -2,7 +2,17 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {createBoardSettings,validRules}=require('../boardSettings');
 const {groupResetHours,sessionWorkday,shiftStarts}=require('../rankingNext');
 const {comparableDay}=require('../sheetReconciliation');
-function memoryDb(){const docs=new Map();return{docs,collection(){return{findOne:async q=>docs.get(q._id)||null,replaceOne:async(q,doc)=>{docs.set(q._id,doc)}}}}}
+function memoryDb(){const docs=new Map();return{docs,collection(){return{findOne:async q=>docs.get(q._id)||null,find:q=>({toArray:async()=>[...docs.values()].filter(d=>new RegExp(q._id.$regex).test(d._id))}),replaceOne:async(q,doc)=>{docs.set(q._id,doc)}}}}}
+test('settings pushed to chosen TVs are kept per device and survive a reload',async()=>{
+ let now=Date.parse('2026-11-02T03:00:00Z');const db=memoryDb(),store=createBoardSettings({getDb:()=>db,clock:()=>now});
+ const tv='session:'+'a'.repeat(64),other='session:'+'b'.repeat(64);
+ assert.equal(store.devicePush(tv),null);
+ const first=await store.pushToDevices([tv],{layout:'studio'},'ducnguyen36@gmail.com');assert.equal(store.devicePush(tv).config.layout,'studio');assert.equal(store.devicePush(other),null);
+ const second=await store.pushToDevices([tv,other],{layout:'podium'},'ducnguyen36@gmail.com');assert.ok(second.version>first.version,'a push in the same millisecond still counts as newer');
+ assert.equal(store.devicePush(other).version,second.version);
+ await assert.rejects(store.pushToDevices(['admin'],{layout:'podium'}),RangeError);await assert.rejects(store.pushToDevices([tv],[1]),RangeError);await assert.rejects(store.pushToDevices([],{}),RangeError);
+ const reloaded=createBoardSettings({getDb:()=>db});await reloaded.current();assert.equal(reloaded.devicePush(tv).config.layout,'podium');assert.equal(reloaded.version(),0,'pushes do not change the broadcast');
+});
 test('broadcast settings are versioned, validated and kept per administrator save',async()=>{
  const db=memoryDb(),store=createBoardSettings({getDb:()=>db,clock:()=>Date.parse('2026-10-26T12:00:00Z')});
  assert.equal(await store.current(),null);assert.equal(store.version(),0);assert.equal(store.groupRules(),null);

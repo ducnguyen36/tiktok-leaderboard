@@ -964,8 +964,9 @@ function broadcastLeaderboard() {
 }
 
 // TVs fetch the new broadcast settings as soon as they see a newer version.
-function broadcastSettings(settingsVersion) {
-    const message = `data: ${JSON.stringify({ status: 'ok', invalidated: true, settingsVersion })}
+// devicePush: settings were pushed to some TVs; every TV re-reads its own once.
+function broadcastSettings(settingsVersion, devicePush) {
+    const message = `data: ${JSON.stringify({ status: 'ok', invalidated: true, settingsVersion, devicePush })}
 
 `;
     for (const client of sseClients) {
@@ -1161,7 +1162,8 @@ app.get('/api/reconciliation/report',async(req,res)=>{
 setInterval(()=>{dailyReport.runIfDue().catch(error=>console.error('[Recon report]',error.message))},10*60000).unref?.();
 // Settings an administrator broadcasts to every approved TV, and per-group daily reset hours.
 app.get('/api/board-settings',async(req,res)=>{
-    try {const doc=await boardSettings.current();res.set('Cache-Control','no-store').json({status:'ok',version:doc?.version||0,config:doc?.config||null,groupResetHours:doc?.groupResetHours||null,holdUntil:doc?.holdUntil||'',dayCount:boardSettings.dayCount(),updatedAt:doc?.updatedAt||null,updatedBy:doc?.updatedBy||null})}
+    try {const doc=await boardSettings.current(),who=accessControlEnabled?await leaderboardAuth.session(req):null,push=who?.kind==='device'?boardSettings.devicePush(who.id):null;
+        res.set('Cache-Control','no-store').json({status:'ok',admin:who?.kind==='admin',device:push?{version:push.version,config:push.config,updatedAt:push.updatedAt,updatedBy:push.updatedBy}:null,version:doc?.version||0,config:doc?.config||null,groupResetHours:doc?.groupResetHours||null,holdUntil:doc?.holdUntil||'',dayCount:boardSettings.dayCount(),updatedAt:doc?.updatedAt||null,updatedBy:doc?.updatedBy||null})}
     catch {res.status(503).json({status:'error',message:'Settings unavailable'})}
 });
 app.post('/api/board-settings',async(req,res)=>{
@@ -1172,11 +1174,20 @@ app.post('/api/board-settings',async(req,res)=>{
         res.json({status:'ok',version:doc.version,updatedAt:doc.updatedAt,updatedBy:doc.updatedBy})}
     catch(error) {res.status(error instanceof RangeError?400:503).json({status:'error',message:error instanceof RangeError?error.message:'Settings unavailable'})}
 });
+// Push the admin's board settings to chosen TVs (from the device list on /auth).
+app.post('/api/device-settings',async(req,res)=>{
+    if(!accessControlEnabled)return res.status(403).json({status:'error',error:'admin_required'});
+    const admin=await leaderboardAuth.adminMutation(req,res);if(!admin)return;
+    try {const pushed=await boardSettings.pushToDevices(req.body?.ids,req.body?.config,admin.email);broadcastSettings(boardSettings.version(),pushed.version);res.json({status:'ok',...pushed})}
+    catch(error) {res.status(error instanceof RangeError?400:503).json({status:'error',message:error instanceof RangeError?error.message:'Settings unavailable'})}
+});
 app.get('/api/leaderboard/next',async(req,res)=>{
     try {await boardSettings.current();const context=parseFreshContext({resetHour:String(nextRankingDefaults.resetHour),freezeUntil:nextRankingDefaults.freezeUntil,...req.query});
         // An admin hold time applies to every TV; an empty freezeUntil ("live for 2 minutes") still wins.
         const hold=boardSettings.holdUntil();if(hold&&req.query.freezeUntil!=='')context.freezeUntil=hold;
-        const result=await nextRanking.get(req.query.fresh==='true',context);result.meta.settingsVersion=boardSettings.version();res.set('Cache-Control','no-store').json(result)}
+        const result=await nextRanking.get(req.query.fresh==='true',context);result.meta.settingsVersion=boardSettings.version();
+        if(accessControlEnabled){const who=await leaderboardAuth.session(req);result.meta.deviceSettingsVersion=who?.kind==='device'?boardSettings.devicePush(who.id)?.version||0:0}
+        res.set('Cache-Control','no-store').json(result)}
     catch(error) {res.status(error instanceof RangeError?400:db?500:503).json({status:'error',message:'New leaderboard temporarily unavailable'})}
 });
 app.get('/api/leaderboard/fresh', async (req, res) => {

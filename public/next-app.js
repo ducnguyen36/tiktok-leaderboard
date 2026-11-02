@@ -263,7 +263,7 @@ async function loadCurrent(indices=[0,1,2,3,4,5,6],manual=false){
  try{const result=await liveInFlight.get(key);if(context!==requestContext()||(!manual&&epoch!==(manualEpoch.get(context)||0)))return;
   const accepted=indices.filter(i=>columnVersion[i]===request);if(!accepted.length)return;
   rawData=result.data;dataError=false;allLocations=(rawData.locations||[]).map(l=>({...l,id:String(l.id)}));allGroups=(rawData.groups||[]).map(g=>({...g,id:String(g.id),locationId:String(g.locationId||'')}));
-  updateCelebrations(result);followBroadcast(result.meta?.settingsVersion||0);
+  updateCelebrations(result);followBroadcast(result.meta?.settingsVersion||0,result.meta?.deviceSettingsVersion||0);
   accepted.forEach(i=>{columnData[i]=rawData;columnMeta[i]=result.meta||null});let changed=false;accepted.forEach(i=>{changed=renderRows(i)||changed});if(changed)setupScroll();renderSummary();renderLocations();syncInputs();if(adminState&&!groupRules)renderAdmin();
   renderConnection();if(manual)notify(t(result.meta?.stale===true?'toast.pointsPending':'toast.pointsRefreshed'));
  }catch(e){if(context===requestContext()&&(manual||epoch===(manualEpoch.get(context)||0))){dataError=true;renderConnection();if(manual||!rawData)notify(t('toast.refreshFailed'))}}
@@ -335,21 +335,29 @@ gear.onclick=showSettings;['close-settings','done-settings'].forEach(id=>documen
 function saveDefault(){try{localStorage.setItem(storageKey+'_default',JSON.stringify(config));saved=JSON.parse(JSON.stringify(config));document.getElementById('save-status').textContent=t('settings.defaultSavedDevice');notify(t('toast.defaultSaved'))}catch(e){notify(t('toast.storageSettings'))}}
 ['save-default','save-default-page'].forEach(id=>document.getElementById(id).onclick=saveDefault);
 document.getElementById('restore-default').onclick=()=>{config=C.normalize(saved||defaults);apply();renderLocations();notify(t('toast.defaultRestored'))};
-// Administrators broadcast their settings to every approved TV; each TV adopts the
-// newest broadcast once, as its current settings and its saved default.
-const say=(vi,en)=>config.language==='vi'?vi:en,broadcastKey=storageKey+'_broadcast';
+// Administrators broadcast their settings to every approved TV, or push them to chosen
+// TVs from /auth; each TV adopts the newest of each once, as its current settings and
+// its saved default. Administrators' own browsers keep their settings.
+const say=(vi,en)=>config.language==='vi'?vi:en,broadcastKey=storageKey+'_broadcast',deviceKey=storageKey+'_device_push';
 let adminState=null,groupRules=null,sharedHold='',dayCount='gift-time',settingsInFlight=null;
 function appliedBroadcast(){try{return Number(localStorage.getItem(broadcastKey))||0}catch{return 0}}
 function markBroadcast(version){try{localStorage.setItem(broadcastKey,String(version))}catch{}}
+function appliedPush(){try{return Number(localStorage.getItem(deviceKey))||0}catch{return 0}}
+function markPush(version){try{localStorage.setItem(deviceKey,String(version))}catch{}}
+function adoptSettings(next){config=C.normalize(next);saved=C.clone(config);try{localStorage.setItem(storageKey+'_default',JSON.stringify(config))}catch{}apply();renderLocations();notify(say('Đã nhận cài đặt mới từ admin','New settings received from admin'))}
 async function readBoardSettings(){const response=await fetch('/api/board-settings',{cache:'no-store',credentials:'same-origin'});const payload=await response.json();if(!response.ok||payload.status!=='ok')throw Error('settings');return payload}
 // Until an administrator saves exceptions, the server default is DPM at 18:00.
 function defaultRules(){const rules={};for(const g of allGroups)if(/\bDPM\b/i.test(g.name||''))rules[g.id]=18;return rules}
-function followBroadcast(version){
- if(!(version>appliedBroadcast())||settingsInFlight)return;
+function followBroadcast(version,pushVersion=0){
+ if(!(version>appliedBroadcast()||pushVersion>appliedPush())||settingsInFlight)return;
  settingsInFlight=readBoardSettings().then(payload=>{
   groupRules=payload.groupResetHours;sharedHold=payload.holdUntil||'';dayCount=payload.dayCount||'gift-time';
-  if(payload.config&&payload.version>appliedBroadcast()){config=C.normalize(payload.config);saved=C.clone(config);try{localStorage.setItem(storageKey+'_default',JSON.stringify(config))}catch{}apply();renderLocations();notify(say('Đã nhận cài đặt mới từ admin','New settings received from admin'))}
-  markBroadcast(payload.version);if(adminState)adminState.lastSaved=payload;renderAdmin();
+  const push=payload.device;
+  if(!payload.admin){
+   if(payload.config&&payload.version>appliedBroadcast())adoptSettings(payload.config);
+   if(push?.config&&push.version>appliedPush())adoptSettings(push.config);
+  }
+  markBroadcast(payload.version);if(push?.version)markPush(push.version);else if(pushVersion>appliedPush())markPush(pushVersion);if(adminState)adminState.lastSaved=payload;renderAdmin();
  }).catch(()=>{}).finally(()=>settingsInFlight=null);
 }
 function renderAdmin(){
@@ -595,7 +603,7 @@ function connectStream(){
  if(!window.EventSource)return;
  stream=new EventSource('/api/leaderboard/stream');
  stream.onopen=()=>{streamConnected=true;renderConnection()};
- stream.onmessage=event=>{let message=null;try{message=JSON.parse(event.data)}catch{}if(message?.settingsVersion)followBroadcast(message.settingsVersion);streamInvalidation()};
+ stream.onmessage=event=>{let message=null;try{message=JSON.parse(event.data)}catch{}if(message?.settingsVersion||message?.devicePush)followBroadcast(message.settingsVersion||0,message.devicePush||0);streamInvalidation()};
  stream.onerror=()=>{streamConnected=false;renderConnection()};
 }
 setInterval(()=>{if(!streamConnected||columnMeta.some(meta=>meta?.stale))loadCurrent();if(unfreezeUntil&&Date.now()>=unfreezeUntil){unfreezeUntil=0;lastContext='';apply()}},10000);

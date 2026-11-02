@@ -260,9 +260,11 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     return { async send(message) { if (await check()) res.write(message); }, close };
   }
   async function isAdmin(req) { try { return (await identity(req))?.kind === 'admin'; } catch { return false; } }
+  // The signed-in browser behind a request: { id, kind } (id is the device id listed on /auth), or null.
+  async function session(req) { try { const record = await identity(req); return record ? { id: record._id, kind: record.kind } : null; } catch { return null; } }
   // Admin-only same-origin, CSRF-checked request; resolves to the admin record or null (response sent).
   async function adminMutation(req, res) { try { return await mutation(req, res, true); } catch { if (!res.headersSent) fail(res, 503, 'access_unavailable'); return null; } }
   // origin: the configured public origin (undefined when PUBLIC_ORIGIN is invalid), for same-origin checks elsewhere.
-  return { middleware: router, guardStream, sheets, isAdmin, adminMutation, origin };
+  return { middleware: router, guardStream, sheets, isAdmin, session, adminMutation, origin };
 }
 module.exports = { createLeaderboardAuth };

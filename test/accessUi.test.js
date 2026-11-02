@@ -5,7 +5,7 @@ const path=require('node:path');
 const {chromium}=require('playwright');
 
 async function fixture(t,admin=false){
- const state={admin,authorized:admin,setupRequired:false,pairs:0,approved:[],revoked:[],devices:[],qrFails:false,sheets:{configured:true,connected:false}};
+ const state={admin,authorized:admin,setupRequired:false,pairs:0,approved:[],revoked:[],pushed:[],devices:[],qrFails:false,sheets:{configured:true,connected:false}};
  const app=express();app.use(express.json());
  app.get('/auth/status',(req,res)=>res.json({...state,csrf:'test-csrf',email:admin?'ducnguyen36@gmail.com':undefined}));
  app.post('/auth/pair',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.pairs++;res.json({code:'ABCD-EF12-34',pairingUrl:'http://example.test/auth?pair=ABCDEF1234',expiresAt:new Date(Date.now()+600000).toISOString()})});
@@ -14,6 +14,7 @@ async function fixture(t,admin=false){
  app.post('/auth/sheets/test',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.sheets.lastCheck={ok:false,readable:7,total:8,checkedAt:new Date().toISOString(),results:[{group:'LEVEL X',ok:true},{group:'NEXAR',ok:false,error:'source_missing'}]};res.json(state.sheets.lastCheck)});
  app.post('/auth/sheets/disconnect',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.sheets.connected=false;res.json({ok:true})});
  app.post('/auth/approve',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.approved.push(req.body);res.json({ok:true})});
+ app.post('/api/device-settings',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.pushed.push(req.body);res.json({status:'ok',version:1})});
  app.post('/auth/revoke',(req,res)=>{assert.equal(req.get('x-csrf-token'),'test-csrf');state.revoked.push(req.body.id);state.devices=state.devices.filter(d=>d.id!==req.body.id);res.json({ok:true})});
  app.post('/auth/logout',(req,res)=>{state.admin=false;state.authorized=false;res.json({ok:true})});
  app.get('/auth',(req,res)=>res.sendFile('access.html',{root:path.resolve(__dirname,'../public')}));
@@ -87,7 +88,12 @@ test('administrator can approve and revoke named devices with safe text renderin
  assert.deepEqual(state.approved,[{code:'ABCD-EFGH',name:'TV HCM'}]);
  assert.equal(await page.locator('#device-list img').count(),0);
  assert.match(await page.locator('#device-list').textContent(),/TV <img/);
- page.once('dialog',dialog=>dialog.accept());await page.locator('#device-list button').click();
+ // Sending settings needs this browser's leaderboard settings, then sends them as they are.
+ await page.locator('#device-list button.secondary').click();await page.waitForFunction(()=>/leaderboard/i.test(document.getElementById('access-message').textContent));assert.deepEqual(state.pushed,[]);
+ await page.evaluate(()=>localStorage.setItem('helios_leaderboard_next_current',JSON.stringify({layout:'studio',language:'vi'})));
+ page.once('dialog',dialog=>dialog.accept());await page.locator('#device-list button.secondary').click();await page.waitForFunction(()=>/TV/.test(document.getElementById('access-message').textContent));
+ assert.deepEqual(state.pushed,[{ids:['device-1'],config:{layout:'studio',language:'vi'}}]);
+ page.once('dialog',dialog=>dialog.accept());await page.locator('#device-list button:not(.secondary)').click();
  await page.waitForFunction(()=>!document.querySelector('#device-list button'));
  assert.deepEqual(state.revoked,['device-1']);
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);

@@ -70,6 +70,16 @@ test('TVs follow an admin broadcast at once and keep it as their default; admin 
  await page.keyboard.press('1');await page.reload();await page.locator('[data-key="monthly-ranking"] .row').first().waitFor({state:'attached'});
  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('helios_leaderboard_next_current')).scores[0]),true);
 });
+test('a TV adopts settings pushed to it; an admin browser keeps its own on broadcast and push',async t=>{
+ const{page,state}=await fixture(t);const current=await page.evaluate(()=>JSON.parse(localStorage.getItem('helios_leaderboard_next_current')));
+ state.push({version:Date.now(),config:{...current,layout:'studio'},updatedAt:new Date().toISOString(),updatedBy:'admin@example.test'});
+ await page.waitForFunction(()=>JSON.parse(localStorage.getItem('helios_leaderboard_next_current')).layout==='studio');
+ assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('helios_leaderboard_next_default')).layout),'studio');
+ state.admin=true;await page.reload();await page.locator('[data-key="monthly-ranking"] .row').first().waitFor({state:'attached'});
+ state.settings={...state.settings,version:5,config:{...current,layout:'classic'}};state.broadcast();state.push({version:Date.now()+1,config:{...current,layout:'classic'}});
+ await page.waitForFunction(()=>localStorage.getItem('helios_leaderboard_next_broadcast')==='5');
+ assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('helios_leaderboard_next_current')).layout),'studio');
+});
 test('admin edits group reset exceptions and saves settings for all TVs',async t=>{
  const{page,state}=await fixture(t);state.admin=true;state.settings={...state.settings,groupResetHours:{g:18}};await page.reload();await page.locator('[data-key="monthly-ranking"] .row').first().waitFor({state:'attached'});
  await page.keyboard.press('7');await page.locator('[data-page="1"]').click();await page.locator('#group-reset .group-reset-row').first().waitFor();
