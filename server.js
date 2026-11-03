@@ -56,7 +56,8 @@ const leaderboardAuth = createLeaderboardAuth({ getDb: () => db });
 const accessControlEnabled = process.env.LEADERBOARD_ACCESS_CONTROL === 'true';
 // Helios Backstage reads daily totals server-to-server with its own bearer token, outside device access.
 // Board settings/reconciliation are defined further down; the closures only run per request.
-app.use(createBackstageApi({ getDb: () => db, readProfiles: () => readProfilesFromDb(), resolveAvatar: (url, uid) => resolveAvatarFast(url, uid), sheets: leaderboardAuth.sheets,
+app.use(createBackstageApi({ getDb: () => db, readProfiles: () => readProfilesFromDb(), resolveAvatar: (url, uid) => resolveAvatarFast(url, uid),
+    avatarFile: (name) => { const ps = [ELECTRON_AVATARS, DEV_AVATARS, LOCAL_AVATARS].map(r => safeAvatarPath(r, name)); return ps.every(Boolean) ? ps.find(p => fs.existsSync(p)) || null : null; }, sheets: leaderboardAuth.sheets,
     reconcile: { status: () => sheetReconciliation.status() },
     settings: async () => { await boardSettings.current(); return { dayCount: boardSettings.dayCount(), rules: boardSettings.groupRules() }; },
     token: process.env.BACKSTAGE_API_TOKEN }));

@@ -90,3 +90,17 @@ test('avatars: uses the server avatar resolver (files fetched onto the ranking d
  const r=await call(api,'/api/backstage/avatars',{authorization:'Bearer '+TOKEN});
  assert.equal(r.body.talents[0].avatar,'/userdata/avatars/yiin.tt_1.jpg');
 });
+
+test('avatar file route: token required, outside the data rate limit, only known files', async () => {
+ const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'av-'));fs.writeFileSync(path.join(dir,'a.jpg'),'JPEGDATA');
+ const api=createBackstageApi({getDb:()=>({}),token:TOKEN,readProfiles:async()=>[],sheets:{status:async()=>({connected:false})},avatarFile:(n)=>n==='a.jpg'?path.join(dir,'a.jpg'):null});
+ const app=express();app.use(api);const server=app.listen(0);
+ try{
+  const base=`http://127.0.0.1:${server.address().port}/api/backstage-files/avatar/`;
+  assert.equal((await fetch(base+'a.jpg')).status,401);
+  const ok=await fetch(base+'a.jpg',{headers:{authorization:'Bearer '+TOKEN}});
+  assert.equal(ok.status,200);assert.equal(await ok.text(),'JPEGDATA');
+  assert.equal((await fetch(base+'b.jpg',{headers:{authorization:'Bearer '+TOKEN}})).status,404);
+ }finally{server.close()}
+});

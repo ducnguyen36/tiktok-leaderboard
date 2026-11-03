@@ -84,10 +84,20 @@ function dailyScores(profiles,sessions,gifts,days,context={}){
 function sheetDays(parsed,names){
   return parsed.days.map(day=>({date:day.date,group:day.group,idols:Object.fromEntries(names.map(n=>[n,day.provided[n]?day.individual[n]:null]))}));
 }
-function createBackstageApi({getDb,readProfiles,sheets,reconcile,settings,token,clock=Date.now,resolveAvatar=(url)=>url}){
+function createBackstageApi({getDb,readProfiles,sheets,reconcile,settings,token,clock=Date.now,resolveAvatar=(url)=>url,avatarFile=()=>null}){
   const router=express.Router(),cache=new Map(),hits=new Map();
   const configured=typeof token==='string'&&token.length>=32;
   const cached=async(key,ttl,build)=>{const hit=cache.get(key);if(hit&&clock()-hit.at<ttl)return hit.value;const value=await build();cache.set(key,{at:clock(),value});if(cache.size>50)cache.delete(cache.keys().next().value);return value};
+  // File ảnh đại diện talent cho Backstage (server-to-server, cùng khoá). Đường riêng ngoài /api/backstage
+  // để không ăn vào giới hạn 60 lượt/phút của API số liệu; chỉ tên file trong thư mục ảnh.
+  router.get('/api/backstage-files/avatar/:file',(req,res)=>{
+    if(!configured)return res.status(503).end();
+    if(!tokenMatches(req.get('authorization'),token))return res.status(401).end();
+    const file=avatarFile(String(req.params.file||''));
+    if(!file)return res.status(404).end();
+    res.set('Cache-Control','private, max-age=86400');
+    res.sendFile(file);
+  });
   router.use('/api/backstage',(req,res,next)=>{
     res.set('Cache-Control','no-store');
     if(!configured)return res.status(503).json({status:'error',message:'not_configured'});
