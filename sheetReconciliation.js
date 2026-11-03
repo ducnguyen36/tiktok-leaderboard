@@ -34,6 +34,9 @@ function parseSheet(values,month,talentNames){
   const columns=talentColumns(headers,talentNames).filter(c=>c.index>0),names=columns.map(c=>c.name);
   const days=new Map();let date=null,outside=0;
   for(const row of values.slice(2)){
+    // A fully blank row ends the day table: a side table below it (e.g. NAME/KPI/LACK/TOTAL)
+    // must not inherit the last date. Merged-date rows of a second shift are never blank.
+    if(!row.some(v=>v!==undefined&&v!==null&&String(v).trim()!=='')){date=null;continue}
     if(row[0]!==undefined&&row[0]!==null&&String(row[0]).trim()!=='')date=sheetDate(row[0]);
     if(!date)continue;
     const filled=(columns.length?columns.map(c=>row[c.index]):row.slice(1,common)).some(v=>typeof v==='number'||normalize(v)==='OFF')||(typeof row[common]==='number'&&row[common]!==0);

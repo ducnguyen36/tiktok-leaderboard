@@ -83,3 +83,7 @@ test('on the 1st the check still reads the finished month tab',async()=>{
  await check.refresh(profiles);const result=check.status();
  assert.equal(result.month,'2026-10');assert.ok(result.sources.every(s=>s.state!=='month_tab_missing'),JSON.stringify(result.sources));assert.ok(titles.length&&titles.every(r=>r.startsWith("'Tháng 10.2026'")));
 });
+test('a side table after a blank row is not read as the last day (NEXAR KPI table)',()=>{
+ const parsed=parseSheet([headers,[],[46296,100,200,0,300,300],[46325,null,null,0,0,0],[],[],[null,'NAME','KPI','LACK','TOTAL'],[null,'ANDEE',250000,238566,11434]],'2026-10',['Alice','Bob']);
+ assert.equal(parsed.days.length,1);assert.equal(parsed.days[0].group,300);
+});
