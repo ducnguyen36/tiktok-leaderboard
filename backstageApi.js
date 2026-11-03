@@ -84,7 +84,7 @@ function dailyScores(profiles,sessions,gifts,days,context={}){
 function sheetDays(parsed,names){
   return parsed.days.map(day=>({date:day.date,group:day.group,idols:Object.fromEntries(names.map(n=>[n,day.provided[n]?day.individual[n]:null]))}));
 }
-function createBackstageApi({getDb,readProfiles,sheets,reconcile,settings,token,clock=Date.now}){
+function createBackstageApi({getDb,readProfiles,sheets,reconcile,settings,token,clock=Date.now,resolveAvatar=(url)=>url}){
   const router=express.Router(),cache=new Map(),hits=new Map();
   const configured=typeof token==='string'&&token.length>=32;
   const cached=async(key,ttl,build)=>{const hit=cache.get(key);if(hit&&clock()-hit.at<ttl)return hit.value;const value=await build();cache.set(key,{at:clock(),value});if(cache.size>50)cache.delete(cache.keys().next().value);return value};
@@ -147,7 +147,8 @@ function createBackstageApi({getDb,readProfiles,sheets,reconcile,settings,token,
       const profiles=await readProfiles();
       const talents=[];
       for(const p of profiles)for(const [name,info] of Object.entries(p.talents||{})){
-        let a=String(info?.avatarUrl||'');
+        // Ảnh đã tải về ổ của ranking (theo username TikTok) — file lưu trong Mongo nằm trên máy HeliosControl.
+        let a=String(resolveAvatar(String(info?.avatarUrl||''),String(info?.uniqueId||''))||'');
         if(a.startsWith('userdata/avatars/'))a='/'+a;
         else if(a.startsWith('avatars/')||a.startsWith('/avatars/'))a='/userdata/avatars/'+a.split('/').pop();
         if(!(a.startsWith('/userdata/avatars/')||/^https:\/\//.test(a)))a='';

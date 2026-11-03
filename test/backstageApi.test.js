@@ -83,3 +83,10 @@ test('avatars: talent pictures only, paths normalized, unsafe values dropped', a
  assert.equal(by.Cdn,'https://p16.tiktokcdn.com/x.jpg');
  assert.equal((await call(api,'/api/backstage/avatars')).status,401);
 });
+
+test('avatars: uses the server avatar resolver (files fetched onto the ranking disk by TikTok username)', async () => {
+ const profiles=[{_id:'g1',name:'HT - VVG',talents:{Yiin:{avatarUrl:'userdata/avatars/old.jpg',uniqueId:'yiin.tt'}}}];
+ const api=createBackstageApi({getDb:()=>({}),token:TOKEN,readProfiles:async()=>profiles,sheets:{status:async()=>({connected:false})},resolveAvatar:(url,uid)=>uid==='yiin.tt'?'userdata/avatars/yiin.tt_1.jpg':url});
+ const r=await call(api,'/api/backstage/avatars',{authorization:'Bearer '+TOKEN});
+ assert.equal(r.body.talents[0].avatar,'/userdata/avatars/yiin.tt_1.jpg');
+});
