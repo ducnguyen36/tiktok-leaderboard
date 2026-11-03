@@ -1,6 +1,7 @@
 'use strict';
 // Feed for Helios Backstage (server-to-server). Daily KC totals per group/idol
-// and the group Sheets — never gifts, donors, avatars or tokens. The only write
+// and the group Sheets — never gifts, donors' data or tokens (talent avatars only,
+// for the Backstage profile pictures). The only write
 // is /sheets/write: approved shift reports into the eight group workbooks,
 // inside "THÁNG MM.YYYY" tabs, at most MAX_WRITE_CELLS cells per call.
 const crypto=require('node:crypto');
@@ -138,6 +139,22 @@ function createBackstageApi({getDb,readProfiles,sheets,reconcile,settings,token,
         return{status:'ok',connected:true,month,asOf:new Date(clock()).toISOString(),sources,reconciliation:reconcile?.status()||null};
       }));
     }catch{res.status(500).json({status:'error',message:'sheets_unavailable'})}
+  });
+  // Ảnh đại diện của TALENT trong từng nhóm (profiles.talents[name].avatarUrl) — không có người tặng.
+  // avatar: "/userdata/avatars/<file>" (phục vụ công khai ở route đó) hoặc link https gốc.
+  router.get('/api/backstage/avatars',async(req,res)=>{
+    try{
+      const profiles=await readProfiles();
+      const talents=[];
+      for(const p of profiles)for(const [name,info] of Object.entries(p.talents||{})){
+        let a=String(info?.avatarUrl||'');
+        if(a.startsWith('userdata/avatars/'))a='/'+a;
+        else if(a.startsWith('avatars/')||a.startsWith('/avatars/'))a='/userdata/avatars/'+a.split('/').pop();
+        if(!(a.startsWith('/userdata/avatars/')||/^https:\/\//.test(a)))a='';
+        talents.push({groupId:String(p._id),group:p.name||'',name,uniqueId:String(info?.uniqueId||''),avatar:a});
+      }
+      res.json({status:'ok',talents});
+    }catch{res.status(500).json({status:'error',message:'avatars_unavailable'})}
   });
   // Giờ bắt đầu / kết thúc phiên live theo nhóm (để Backstage suy ra lịch live). Chỉ đọc, không quà, không người tặng.
   router.get('/api/backstage/sessions',async(req,res)=>{

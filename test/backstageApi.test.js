@@ -70,3 +70,16 @@ test('sheets write: only group workbooks, month tabs, bounded cells', () => {
   assert.equal(ok.error, undefined);
   assert.equal(ok.valueInputOption, 'USER_ENTERED');
 });
+
+test('avatars: talent pictures only, paths normalized, unsafe values dropped', async () => {
+ const profiles=[{_id:'g1',name:'HT - VVG',talents:{Yiin:{avatarUrl:'userdata/avatars/yiin.jpg',uniqueId:'yiin'},Aliz:{avatarUrl:'avatars/aliz.jpg'},Bad:{avatarUrl:'javascript:alert(1)'},Cdn:{avatarUrl:'https://p16.tiktokcdn.com/x.jpg'}}}];
+ const api=createBackstageApi({getDb:()=>({}),token:TOKEN,readProfiles:async()=>profiles,sheets:{status:async()=>({connected:false})}});
+ const r=await call(api,'/api/backstage/avatars',{authorization:'Bearer '+TOKEN});
+ assert.equal(r.status,200);
+ const by=Object.fromEntries(r.body.talents.map(t=>[t.name,t.avatar]));
+ assert.equal(by.Yiin,'/userdata/avatars/yiin.jpg');
+ assert.equal(by.Aliz,'/userdata/avatars/aliz.jpg');
+ assert.equal(by.Bad,'');
+ assert.equal(by.Cdn,'https://p16.tiktokcdn.com/x.jpg');
+ assert.equal((await call(api,'/api/backstage/avatars')).status,401);
+});
