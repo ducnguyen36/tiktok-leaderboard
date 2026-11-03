@@ -104,3 +104,14 @@ test('avatar file route: token required, outside the data rate limit, only known
   assert.equal((await fetch(base+'b.jpg',{headers:{authorization:'Bearer '+TOKEN}})).status,404);
  }finally{server.close()}
 });
+
+test('scores ?count: Backstage asks for session-start regardless of the board; bad value rejected',async()=>{
+ const {dayCountOf}=require('../backstageApi');
+ assert.equal(dayCountOf('session','gift-time'),'session-start');
+ assert.equal(dayCountOf('gift','session-start'),'gift-time');
+ assert.equal(dayCountOf('',undefined),undefined);
+ assert.equal(dayCountOf('','session-start'),'session-start');
+ const db={collection:()=>{throw Error('no db access expected')}};
+ const api=createBackstageApi({getDb:()=>db,token:TOKEN});
+ assert.equal((await call(api,'/api/backstage/scores?from=2026-10-01&to=2026-10-01&count=hourly',{authorization:'Bearer '+TOKEN})).status,400);
+});

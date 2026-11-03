@@ -80,6 +80,13 @@ function dailyScores(profiles,sessions,gifts,days,context={}){
     return{date,groups:scored.group.map(({groupId,name,value})=>({groupId,name,value,provisional:true,reasons:reasonsOf.get(groupId)||[]})),idols:scored.individual.map(({groupId,name,value})=>({groupId,name,value})),status};
   });
 }
+// ?count=session (Backstage): whole sessions by shift start day regardless of the board setting;
+// ?count=gift: gift time; absent: follow the board's dayCount.
+function dayCountOf(count,board){
+  if(count==='session')return'session-start';
+  if(count==='gift')return'gift-time';
+  return board;
+}
 // Blank cells stay null (missing), never 0.
 function sheetDays(parsed,names){
   return parsed.days.map(day=>({date:day.date,group:day.group,idols:Object.fromEntries(names.map(n=>[n,day.provided[n]?day.individual[n]:null]))}));
@@ -110,14 +117,16 @@ function createBackstageApi({getDb,readProfiles,sheets,reconcile,settings,token,
   router.get('/api/backstage/scores',async(req,res)=>{
     const days=dateRange(req.query.from,req.query.to);
     if(!days)return res.status(400).json({status:'error',message:`from/to YYYY-MM-DD, tối đa ${MAX_DAYS} ngày`});
+    const count=String(req.query.count||'');
+    if(count&&count!=='session'&&count!=='gift')return res.status(400).json({status:'error',message:'count: session | gift'});
     try{
-      res.json(await cached(`scores:${days[0]}:${days.at(-1)}`,60000,async()=>{
+      res.json(await cached(`scores:${days[0]}:${days.at(-1)}:${count}`,60000,async()=>{
         const db=getDb(),lo=new Date(dayStart(days[0],WORKDAY_HOUR)-DAY-MAX_SHIFT),hi=new Date(dayStart(days.at(-1),WORKDAY_HOUR)+2*DAY);
         const [profiles,sessions]=await Promise.all([readProfiles(),db.collection('sessions').find({$or:[{createdAt:{$gte:lo,$lt:hi}},{sessionStartedAt:{$gte:lo,$lt:hi}}]},{projection:{profileId:1,createdAt:1,sessionStartedAt:1,sessionName:1,updatedAt:1}}).toArray()]);
         const [gifts,live]=await Promise.all([sessions.length?db.collection('gifts').aggregate(sessionGiftPipeline(sessions.map(s=>s._id)),{allowDiskUse:true,maxTimeMS:60000}).toArray().then(decodeGiftBuckets):[],
           db.collection('leaderboard_live').find({source:'helioscontrol',liveSince:{$gte:lo}},{projection:{sessionId:1,profileId:1,live:1,heartbeatAt:1,liveSince:1}}).toArray()]);
         const board=settings?await settings().catch(()=>null):null;
-        const now=clock(),context={now,dayCount:board?.dayCount,rules:board?.rules,known:new Set(live.map(s=>String(s.sessionId))),active:new Set(live.filter(s=>liveGroups([s],now).size).map(s=>String(s.sessionId)))};
+        const now=clock(),context={now,dayCount:dayCountOf(count,board?.dayCount),rules:board?.rules,known:new Set(live.map(s=>String(s.sessionId))),active:new Set(live.filter(s=>liveGroups([s],now).size).map(s=>String(s.sessionId)))};
         // Backend numbers are always provisional: TikTok's closed figures are not available here.
         return{status:'ok',source:'helioscontrol',asOf:new Date(now).toISOString(),resetHour:WORKDAY_HOUR,attribution:context.dayCount==='session-start'?'session-start':'gift-time',provisional:true,reasonLabels:REASONS,
           groups:profiles.map(p=>({groupId:String(p._id),name:p.name,idols:Object.keys(p.talents||{})})),days:dailyScores(profiles,sessions,gifts,days,context)};
@@ -214,4 +223,4 @@ function createBackstageApi({getDb,readProfiles,sheets,reconcile,settings,token,
   });
   return router;
 }
-module.exports={createBackstageApi,writeRequest,rangeCells,dateRange,tokenMatches,dailyScores,dayReasons,sheetDays,REASONS,MAX_DAYS};
+module.exports={createBackstageApi,writeRequest,rangeCells,dateRange,tokenMatches,dailyScores,dayCountOf,dayReasons,sheetDays,REASONS,MAX_DAYS};
