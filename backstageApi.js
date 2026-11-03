@@ -1,13 +1,39 @@
 'use strict';
-// Read-only feed for Helios Backstage (server-to-server). Daily KC totals per
-// group/idol and the group Sheets — never gifts, donors, avatars or tokens.
+// Feed for Helios Backstage (server-to-server). Daily KC totals per group/idol
+// and the group Sheets — never gifts, donors, avatars or tokens. The only write
+// is /sheets/write: approved shift reports into the eight group workbooks,
+// inside "THÁNG MM.YYYY" tabs, at most MAX_WRITE_CELLS cells per call.
 const crypto=require('node:crypto');
 const express=require('express');
 const {GROUP_SHEETS,findMonthTab}=require('./groupSheets');
 const {WORKDAY_HOUR,giftCutoff,giftDay,groupResetHours,partitionSessions,dayStart,scoreRows,sessionGiftPipeline,liveGroups}=require('./rankingNext');
 const {parseSheet,matchingProfile}=require('./sheetReconciliation');
 const {decodeGiftBuckets}=require('./leaderboardPerformance');
-const DAY=86400000,MAX_DAYS=62,MAX_SHIFT=14*3600000;
+const {sheetsReadError}=require('./sheetsConnection');
+const DAY=86400000,MAX_DAYS=62,MAX_SHIFT=14*3600000,MAX_WRITE_CELLS=200,MAX_READ_RANGES=10;
+const ALLOWED_SHEETS=new Set(GROUP_SHEETS.map(s=>s.spreadsheetId));
+// 'THÁNG 11.2026'!B5 or 'THÁNG 11.2026'!A1:Z60 — month tabs only.
+const MONTH_RANGE=/^'TH(Á|A)NG \d{1,2}\.\d{4}'!\$?[A-Z]{1,3}\$?\d{1,4}(:\$?[A-Z]{1,3}\$?\d{1,4})?$/;
+const colNum=c=>[...c].reduce((n,ch)=>n*26+ch.charCodeAt(0)-64,0);
+function rangeCells(range){
+  const m=range.replace(/\$/g,'').match(/!([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/);if(!m)return Infinity;
+  const c1=colNum(m[1]),r1=+m[2],c2=m[3]?colNum(m[3]):c1,r2=m[4]?+m[4]:r1;
+  return c2<c1||r2<r1?Infinity:(c2-c1+1)*(r2-r1+1);
+}
+function writeRequest(body){
+  if(!body||typeof body!=='object'||!ALLOWED_SHEETS.has(body.spreadsheetId))return{error:'not_allowed_spreadsheet'};
+  const data=Array.isArray(body.data)?body.data:null;if(!data||!data.length||data.length>MAX_WRITE_CELLS)return{error:'invalid_request'};
+  let cells=0;
+  for(const d of data){
+    if(typeof d?.range!=='string'||!MONTH_RANGE.test(d.range.normalize('NFC'))||!Array.isArray(d.values))return{error:'invalid_request'};
+    const n=rangeCells(d.range),rows=d.values;
+    if(!rows.every(r=>Array.isArray(r)&&r.every(v=>v===null||typeof v==='number'||(typeof v==='string'&&v.length<=500))))return{error:'invalid_request'};
+    if(rows.reduce((a,r)=>a+r.length,0)>n)return{error:'invalid_request'};
+    cells+=n;if(cells>MAX_WRITE_CELLS)return{error:'invalid_request'};
+  }
+  const valueInputOption=body.valueInputOption==='RAW'?'RAW':'USER_ENTERED';
+  return{spreadsheetId:body.spreadsheetId,data:data.map(d=>({range:d.range.normalize('NFC'),values:d.values})),valueInputOption,reason:typeof body.reason==='string'?body.reason.slice(0,100):''};
+}
 const sha=value=>crypto.createHash('sha256').update(String(value)).digest();
 const isDate=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value;
 function dateRange(from,to){
@@ -113,6 +139,40 @@ function createBackstageApi({getDb,readProfiles,sheets,reconcile,settings,token,
       }));
     }catch{res.status(500).json({status:'error',message:'sheets_unavailable'})}
   });
+  router.get('/api/backstage/sheets/status',async(req,res)=>{
+    try{const s=await sheets.status();res.json({ok:true,connected:s.connected,canWrite:s.canWrite===true,email:s.email||null})}
+    catch{res.status(500).json({ok:false,error:'sheets_unavailable'})}
+  });
+  router.post('/api/backstage/sheets/read',express.json({limit:'8kb'}),async(req,res)=>{
+    const {spreadsheetId,ranges}=req.body||{};
+    if(!ALLOWED_SHEETS.has(spreadsheetId))return res.status(403).json({ok:false,error:'not_allowed_spreadsheet'});
+    if(!Array.isArray(ranges)||!ranges.length||ranges.length>MAX_READ_RANGES||!ranges.every(r=>typeof r==='string'&&MONTH_RANGE.test(r.normalize('NFC'))))return res.status(400).json({ok:false,error:'invalid_request'});
+    try{
+      if(!(await sheets.status()).connected)return res.status(403).json({ok:false,error:'sheets_not_connected'});
+      const valueRanges=[],formulas=[];
+      for(const range of ranges.map(r=>r.normalize('NFC'))){
+        const v=await sheets.read({spreadsheetId,range,render:'FORMATTED_VALUE'}),f=await sheets.read({spreadsheetId,range,render:'FORMULA'});
+        valueRanges.push({range:v.range||range,values:v.values||[]});formulas.push({range:f.range||range,values:f.values||[]});
+      }
+      res.json({ok:true,valueRanges,formulas});
+    }catch(error){res.status(502).json({ok:false,error:'sheets_failed',code:sheetsReadError(error)})}
+  });
+  router.post('/api/backstage/sheets/write',express.json({limit:'64kb'}),async(req,res)=>{
+    const w=writeRequest(req.body);
+    if(w.error)return res.status(w.error==='not_allowed_spreadsheet'?403:400).json({ok:false,error:w.error});
+    try{
+      const s=await sheets.status();
+      if(!s.connected)return res.status(403).json({ok:false,error:'sheets_not_connected'});
+      if(!s.canWrite)return res.status(403).json({ok:false,error:'scope_readonly'});
+      const out=await sheets.write(w);
+      // Audit without cell values: who asked (Backstage report id), where, how many cells.
+      await getDb().collection('backstage_sheet_writes').insertOne({at:new Date(clock()),spreadsheetId:w.spreadsheetId,ranges:w.data.map(d=>d.range),reason:w.reason,updatedCells:out?.totalUpdatedCells||0}).catch(()=>{});
+      res.json({ok:true,updatedCells:out?.totalUpdatedCells||0,updatedRanges:(out?.responses||[]).map(r=>r.updatedRange)});
+    }catch(error){
+      if(error?.code==='scope_readonly')return res.status(403).json({ok:false,error:'scope_readonly'});
+      res.status(502).json({ok:false,error:'sheets_failed',code:sheetsReadError(error)});
+    }
+  });
   return router;
 }
-module.exports={createBackstageApi,dateRange,tokenMatches,dailyScores,dayReasons,sheetDays,REASONS,MAX_DAYS};
+module.exports={createBackstageApi,writeRequest,rangeCells,dateRange,tokenMatches,dailyScores,dayReasons,sheetDays,REASONS,MAX_DAYS};

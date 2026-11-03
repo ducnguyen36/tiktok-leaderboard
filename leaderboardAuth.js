@@ -4,7 +4,7 @@ const express = require('express');
 const { OAuth2Client } = require('google-auth-library');
 const QRCode = require('qrcode');
 const { createAuthStore } = require('./authStore');
-const { createSheetsConnection, SHEETS_SCOPE, sheetsReadError } = require('./sheetsConnection');
+const { createSheetsConnection, SHEETS_WRITE_SCOPE, sheetsReadError } = require('./sheetsConnection');
 const { GROUP_SHEETS, findMonthTab } = require('./groupSheets');
 const { persistentSheetsKey } = require('./sheetsKeyStore');
 const TEN_MINUTES = 600000, DEVICE_LIFETIME = 180 * 86400000;
@@ -168,7 +168,7 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     await store.put({ _id: `oauth:${hash(state)}`, binding: hash(secret), nonce: hash(nonce), purpose: 'sheets',
       adminId: admin._id, subject: admin.subject, expiresAt: new Date(+now() + TEN_MINUTES) });
     setCookie(res, FLOW_COOKIE, secret, TEN_MINUTES);
-    res.json({ url: provider.generateAuthUrl({ scope: ['openid', 'email', SHEETS_SCOPE], state, nonce,
+    res.json({ url: provider.generateAuthUrl({ scope: ['openid', 'email', SHEETS_WRITE_SCOPE], state, nonce,
       code_challenge_method: 'S256', code_challenge: crypto.createHash('sha256').update(verifierFor(secret)).digest('base64url'),
       redirect_uri: callback, access_type: 'offline', prompt: 'consent', login_hint: admin.email }) });
   }));

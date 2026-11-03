@@ -20,7 +20,7 @@ test('refresh token is encrypted; status does not disclose credential; reader us
   const h = setup();
   await h.sheets.save({scope:SHEETS_SCOPE,refresh_token:'private-refresh'}, {email:'ADMIN@example.com',sub:'owner'});
   assert.ok(!JSON.stringify([...h.records.values()]).includes('private-refresh'));
-  assert.deepEqual(Object.keys(await h.sheets.status()).sort(), ['configured','connected','connectedAt','email','lastCheck']);
+  assert.deepEqual(Object.keys(await h.sheets.status()).sort(), ['canWrite','configured','connected','connectedAt','email','lastCheck']);
   const data = await h.sheets.read({spreadsheetId:'valid_spreadsheet_identifier',range:"'THÁNG 10.2026'!A1:L3"});
   assert.equal(data.values.length,1); assert.equal(h.calls[0].method,'GET'); assert.equal(h.calls[0].params.valueRenderOption,'UNFORMATTED_VALUE');
   await h.sheets.disconnect(); assert.equal((await h.sheets.status()).connected,false);
@@ -53,4 +53,14 @@ test('setup, missing consent, bad ID, wrong encryption key and ciphertext tamper
   const record=[...h.records.values()][0];record.credential.tag=Buffer.alloc(16).toString('base64');
   assert.equal((await h.sheets.status()).connected,false);
   await assert.rejects(h.sheets.read({spreadsheetId:'valid_spreadsheet_identifier',range:'A1:B2'}));
+});
+
+test('write scope marks the connection writable; read-only connections refuse writes', async () => {
+  const { SHEETS_WRITE_SCOPE } = require('../sheetsConnection');
+  const h = setup();
+  await h.sheets.save({ scope: SHEETS_SCOPE, refresh_token: 'private-refresh' }, { email: 'a', sub: 'b' });
+  assert.equal((await h.sheets.status()).canWrite, false);
+  await assert.rejects(h.sheets.write({ spreadsheetId: 'a'.repeat(30), data: [] }), /read-only/);
+  await h.sheets.save({ scope: `openid ${SHEETS_WRITE_SCOPE}`, refresh_token: 'private-refresh' }, { email: 'a', sub: 'b' });
+  assert.equal((await h.sheets.status()).canWrite, true);
 });

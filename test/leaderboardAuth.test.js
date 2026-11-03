@@ -52,7 +52,7 @@ async function harness(t, options = {}) {
 }
 
 test('Sheets connection is admin/CSRF bound, offline, encrypted, testable, and removable', async t=>{
- const scope='https://www.googleapis.com/auth/spreadsheets.readonly'; let reads=0;
+ const scope='https://www.googleapis.com/auth/spreadsheets'; let reads=0;
  const h=await harness(t,{now:Date.UTC(2026,9,7),sheetsTokenEncryptionKey:'ab'.repeat(32),tokenOverrides:{scope,refresh_token:'do-not-expose'},sheetsClientFactory:()=>({setCredentials(value){assert.equal(value.refresh_token,'do-not-expose')},async request(options){assert.equal(options.method,'GET');reads++;return{data:options.params.fields?{properties:{title:'2026.DATA LEVEL X'},sheets:[{properties:{title:'THÁNG 10.2026',gridProperties:{rowCount:100,columnCount:20}}}]}:{values:[['header'],[10],[20]]}}}})});
  const visitor=h.browser();await visitor.status();assert.equal((await visitor.request('/auth/sheets/connect',{method:'POST',body:{}})).status,403);assert.equal((await visitor.status()).sheets,undefined);
  const admin=h.browser();await admin.login();await admin.status();

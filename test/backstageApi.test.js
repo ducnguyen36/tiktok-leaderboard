@@ -56,3 +56,17 @@ test('sheets endpoint reports disconnected without reading',async()=>{
  const r=await call(api,'/api/backstage/sheets?month=2026-10',{authorization:'Bearer '+TOKEN});
  assert.equal(r.status,200);assert.equal(r.body.connected,false);
 });
+
+test('sheets write: only group workbooks, month tabs, bounded cells', () => {
+  const { writeRequest, rangeCells } = require('../backstageApi');
+  const vvg = '17ksmH7zVysl8mPO2kq5v4vlSt3WklKJpIp5qKZUdWKs';
+  assert.equal(rangeCells("'THÁNG 11.2026'!B5"), 1);
+  assert.equal(rangeCells("'THÁNG 11.2026'!B5:O5"), 14);
+  assert.equal(writeRequest({ spreadsheetId: 'x'.repeat(44), data: [] }).error, 'not_allowed_spreadsheet');
+  assert.equal(writeRequest({ spreadsheetId: vvg, data: [{ range: "'Trang tính1'!A1", values: [['1']] }] }).error, 'invalid_request');
+  assert.equal(writeRequest({ spreadsheetId: vvg, data: [{ range: "'THÁNG 11.2026'!B5", values: [['1', '2']] }] }).error, 'invalid_request');
+  assert.equal(writeRequest({ spreadsheetId: vvg, data: [{ range: "'THÁNG 11.2026'!A1:Z60", values: [] }] }).error, 'invalid_request');
+  const ok = writeRequest({ spreadsheetId: vvg, data: [{ range: "'THÁNG 11.2026'!B5:C5", values: [[30050, '50700']] }], reason: 'r1' });
+  assert.equal(ok.error, undefined);
+  assert.equal(ok.valueInputOption, 'USER_ENTERED');
+});

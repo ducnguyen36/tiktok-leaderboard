@@ -1,6 +1,8 @@
 const crypto = require('node:crypto');
 const { OAuth2Client } = require('google-auth-library');
 const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly';
+// Edit scope (includes read). Only Helios Backstage's approved shift reports write, and only to the group workbooks.
+const SHEETS_WRITE_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
 const CONNECTION_ID = 'integration:google-sheets';
 const versionOf = record => record?.credential ? crypto.createHash('sha256').update(JSON.stringify(record.credential)).digest('hex') : '';
 function sheetsReadError(error) {
@@ -35,10 +37,11 @@ function createSheetsConnection({ store, config, now = () => new Date(), clientF
   }
   async function save(tokens, claims) {
     if (!configured) throw Error('Sheets setup required');
-    if (!(tokens.scope || '').split(/\s+/).includes(SHEETS_SCOPE)) throw Error('Sheets permission missing');
+    const scopes = (tokens.scope || '').split(/\s+/), canWrite = scopes.includes(SHEETS_WRITE_SCOPE);
+    if (!canWrite && !scopes.includes(SHEETS_SCOPE)) throw Error('Sheets permission missing');
     if (typeof tokens.refresh_token !== 'string' || !tokens.refresh_token) throw Error('Offline permission missing');
     await store.put({ _id: CONNECTION_ID, kind: 'sheets', email: claims.email.toLowerCase(), subject: claims.sub,
-      connectedAt: now(), credential: seal(tokens.refresh_token) });
+      connectedAt: now(), canWrite, credential: seal(tokens.refresh_token) });
   }
   async function status() {
     const record = await store.get(CONNECTION_ID);
@@ -46,10 +49,10 @@ function createSheetsConnection({ store, config, now = () => new Date(), clientF
     let connected = false;
     if (configured && record) { try { open(record.credential); connected = true; } catch {} }
     const check = connected ? await store.get('integration:google-sheets-check') : null;
-    return { configured, connected, email: record?.email, connectedAt: record?.connectedAt,
+    return { configured, connected, canWrite: connected && record.canWrite === true, email: record?.email, connectedAt: record?.connectedAt,
       lastCheck: check?.credentialVersion === versionOf(record) ? check.result : undefined };
   }
-  async function read({ spreadsheetId, range, metadata = false }) {
+  async function clientFor(spreadsheetId) {
     if (!configured || !/^[A-Za-z0-9_-]{20,200}$/.test(spreadsheetId || '')) throw Error('Invalid Sheets request');
     const record = await store.get(CONNECTION_ID);
     if (!record) throw Error('Sheets not connected');
@@ -60,11 +63,20 @@ function createSheetsConnection({ store, config, now = () => new Date(), clientF
       client.setCredentials({ refresh_token: open(record.credential) });
       cachedClient = client; cachedVersion = version;
     }
-    const client = cachedClient;
-    const root = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`;
+    return { client: cachedClient, record, root: `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}` };
+  }
+  async function read({ spreadsheetId, range, metadata = false, render = 'UNFORMATTED_VALUE' }) {
+    const { client, root } = await clientFor(spreadsheetId);
     const response = await client.request({ method: 'GET', timeout: 15000,
       url: metadata ? root : `${root}/values/${encodeURIComponent(range)}`,
-      params: metadata ? { fields: 'spreadsheetId,properties(title),sheets(properties)' } : { valueRenderOption: 'UNFORMATTED_VALUE' } });
+      params: metadata ? { fields: 'spreadsheetId,properties(title),sheets(properties)' } : { valueRenderOption: render } });
+    return response.data;
+  }
+  async function write({ spreadsheetId, data, valueInputOption = 'USER_ENTERED' }) {
+    const { client, record, root } = await clientFor(spreadsheetId);
+    if (record.canWrite !== true) throw Object.assign(Error('Sheets connection is read-only'), { code: 'scope_readonly' });
+    const response = await client.request({ method: 'POST', timeout: 20000, url: `${root}/values:batchUpdate`,
+      data: { valueInputOption, data } });
     return response.data;
   }
   async function recordCheck(result, version) {
@@ -73,7 +85,7 @@ function createSheetsConnection({ store, config, now = () => new Date(), clientF
     await store.put({ _id: 'integration:google-sheets-check', kind: 'sheets-check', credentialVersion: version,
       result: { ...result, checkedAt: now() } });
   }
-  return { configured, save, status, read, recordCheck, version: async () => versionOf(await store.get(CONNECTION_ID)),
+  return { configured, save, status, read, write, recordCheck, version: async () => versionOf(await store.get(CONNECTION_ID)),
     async disconnect() { cachedClient = null; cachedVersion = null; await store.remove(CONNECTION_ID); } };
 }
-module.exports = { createSheetsConnection, SHEETS_SCOPE, sheetsReadError };
+module.exports = { createSheetsConnection, SHEETS_SCOPE, SHEETS_WRITE_SCOPE, sheetsReadError };
