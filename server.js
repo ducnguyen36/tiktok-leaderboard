@@ -8,6 +8,7 @@ const { createNextRanking, DEFAULT_CONTEXT: nextRankingDefaults } = require('./r
 const { createBoardSettings } = require('./boardSettings');
 const { createCompetitionPages } = require('./competitionPages');
 const { createSheetReconciliation } = require('./sheetReconciliation');
+const { createBackstageApi } = require('./backstageApi');
 const { createDailyReport, renderMarkdown } = require('./reconciliationReport');
 const { privateHtmlName, safeAvatarPath } = require('./privateAssets');
 const path = require('path');
@@ -53,6 +54,12 @@ const PORT = process.env.PORT || 5000;
 const leaderboardAuth = createLeaderboardAuth({ getDb: () => db });
 // Staged rollout: enable only after OAuth and TV enrollment are prepared.
 const accessControlEnabled = process.env.LEADERBOARD_ACCESS_CONTROL === 'true';
+// Helios Backstage reads daily totals server-to-server with its own bearer token, outside device access.
+// Board settings/reconciliation are defined further down; the closures only run per request.
+app.use(createBackstageApi({ getDb: () => db, readProfiles: () => readProfilesFromDb(), sheets: leaderboardAuth.sheets,
+    reconcile: { status: () => sheetReconciliation.status() },
+    settings: async () => { await boardSettings.current(); return { dayCount: boardSettings.dayCount(), rules: boardSettings.groupRules() }; },
+    token: process.env.BACKSTAGE_API_TOKEN }));
 // Public privacy policy required by the Google OAuth consent screen; no sign-in.
 app.get(['/privacy', '/privacy.html'], (req, res) => {
     res.set({ 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'", 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=3600' });
