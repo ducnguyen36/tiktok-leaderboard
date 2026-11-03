@@ -139,6 +139,17 @@ function createBackstageApi({getDb,readProfiles,sheets,reconcile,settings,token,
       }));
     }catch{res.status(500).json({status:'error',message:'sheets_unavailable'})}
   });
+  // Giờ bắt đầu / kết thúc phiên live theo nhóm (để Backstage suy ra lịch live). Chỉ đọc, không quà, không người tặng.
+  router.get('/api/backstage/sessions',async(req,res)=>{
+    const days=dateRange(req.query.from,req.query.to);
+    if(!days)return res.status(400).json({status:'error',message:`from/to YYYY-MM-DD, tối đa ${MAX_DAYS} ngày`});
+    try{
+      const lo=new Date(Date.parse(days[0]+'T00:00:00+07:00')),hi=new Date(Date.parse(days.at(-1)+'T00:00:00+07:00')+DAY);
+      const [profiles,sessions]=await Promise.all([readProfiles(),getDb().collection('sessions').find({$or:[{sessionStartedAt:{$gte:lo,$lt:hi}},{sessionStartedAt:null,createdAt:{$gte:lo,$lt:hi}}]},{projection:{profileId:1,createdAt:1,sessionStartedAt:1,updatedAt:1}}).toArray()]);
+      const names=new Map(profiles.map(p=>[String(p._id),p.name]));
+      res.json({status:'ok',from:days[0],to:days.at(-1),sessions:sessions.map(s=>({groupId:String(s.profileId),name:names.get(String(s.profileId))||'',startedAt:new Date(s.sessionStartedAt||s.createdAt).toISOString(),lastUpdateAt:s.updatedAt?new Date(s.updatedAt).toISOString():null}))});
+    }catch{res.status(500).json({status:'error',message:'sessions_unavailable'})}
+  });
   router.get('/api/backstage/sheets/status',async(req,res)=>{
     try{const s=await sheets.status();res.json({ok:true,connected:s.connected,canWrite:s.canWrite===true,email:s.email||null})}
     catch{res.status(500).json({ok:false,error:'sheets_unavailable'})}
