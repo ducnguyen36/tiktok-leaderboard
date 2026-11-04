@@ -91,7 +91,7 @@ function dayCountOf(count,board){
 function sheetDays(parsed,names){
   return parsed.days.map(day=>({date:day.date,group:day.group,idols:Object.fromEntries(names.map(n=>[n,day.provided[n]?day.individual[n]:null]))}));
 }
-function createBackstageApi({getDb,readProfiles,sheets,reconcile,settings,token,clock=Date.now,resolveAvatar=(url)=>url,avatarFile=()=>null}){
+function createBackstageApi({getDb,readProfiles,sheets,reconcile,settings,token,clock=Date.now,resolveAvatar=(url)=>url,avatarFile=()=>null,liveJournal=null}){
   const router=express.Router(),cache=new Map(),hits=new Map();
   const configured=typeof token==='string'&&token.length>=32;
   const cached=async(key,ttl,build)=>{const hit=cache.get(key);if(hit&&clock()-hit.at<ttl)return hit.value;const value=await build();cache.set(key,{at:clock(),value});if(cache.size>50)cache.delete(cache.keys().next().value);return value};
@@ -186,6 +186,19 @@ function createBackstageApi({getDb,readProfiles,sheets,reconcile,settings,token,
       const names=new Map(profiles.map(p=>[String(p._id),p.name]));
       res.json({status:'ok',from:days[0],to:days.at(-1),sessions:sessions.map(s=>({groupId:String(s.profileId),name:names.get(String(s.profileId))||'',startedAt:new Date(s.sessionStartedAt||s.createdAt).toISOString(),lastUpdateAt:s.updatedAt?new Date(s.updatedAt).toISOString():null}))});
     }catch{res.status(500).json({status:'error',message:'sessions_unavailable'})}
+  });
+  // Đoạn live theo nhóm (nhật ký lên/xuống từ heartbeat HeliosControl): nhóm nào đang live, dừng từ lúc nào,
+  // lên lại sau bao lâu. `end: null` = đang live. Chỉ giờ giấc, không quà / người tặng.
+  router.get('/api/backstage/live',async(req,res)=>{
+    const days=dateRange(req.query.from,req.query.to);
+    if(!days)return res.status(400).json({status:'error',message:`from/to YYYY-MM-DD, tối đa ${MAX_DAYS} ngày`});
+    if(!liveJournal)return res.status(503).json({status:'error',message:'live_journal_unavailable'});
+    try{
+      const now=clock(),lo=Date.parse(days[0]+'T00:00:00+07:00'),hi=Date.parse(days.at(-1)+'T00:00:00+07:00')+DAY+MAX_SHIFT;
+      liveJournal.expire(now);
+      const profiles=await readProfiles();
+      res.json({status:'ok',asOf:new Date(now).toISOString(),staleAfterMs:90000,groups:profiles.map(p=>({groupId:String(p._id),name:p.name})),segments:liveJournal.segments(lo,hi,now)});
+    }catch{res.status(500).json({status:'error',message:'live_unavailable'})}
   });
   router.get('/api/backstage/sheets/status',async(req,res)=>{
     try{const s=await sheets.status();res.json({ok:true,connected:s.connected,canWrite:s.canWrite===true,email:s.email||null})}

@@ -9,6 +9,7 @@ const { createBoardSettings } = require('./boardSettings');
 const { createCompetitionPages } = require('./competitionPages');
 const { createSheetReconciliation } = require('./sheetReconciliation');
 const { createBackstageApi } = require('./backstageApi');
+const { createLiveJournal } = require('./liveJournal');
 const { createDailyReport, renderMarkdown } = require('./reconciliationReport');
 const { privateHtmlName, safeAvatarPath } = require('./privateAssets');
 const path = require('path');
@@ -54,13 +55,15 @@ const PORT = process.env.PORT || 5000;
 const leaderboardAuth = createLeaderboardAuth({ getDb: () => db });
 // Staged rollout: enable only after OAuth and TV enrollment are prepared.
 const accessControlEnabled = process.env.LEADERBOARD_ACCESS_CONTROL === 'true';
+// Nhật ký lên/xuống live cho Backstage — file trong thư mục avatars (volume giữ qua lần cập nhật Docker).
+const liveJournal = createLiveJournal({ file: process.env.LIVE_JOURNAL_FILE || path.join(__dirname, 'avatars', 'backstage', 'live-journal.jsonl') });
 // Helios Backstage reads daily totals server-to-server with its own bearer token, outside device access.
 // Board settings/reconciliation are defined further down; the closures only run per request.
 app.use(createBackstageApi({ getDb: () => db, readProfiles: () => readProfilesFromDb(), resolveAvatar: (url, uid) => resolveAvatarFast(url, uid),
     avatarFile: (name) => { const ps = [ELECTRON_AVATARS, DEV_AVATARS, LOCAL_AVATARS].map(r => safeAvatarPath(r, name)); return ps.every(Boolean) ? ps.find(p => fs.existsSync(p)) || null : null; }, sheets: leaderboardAuth.sheets,
     reconcile: { status: () => sheetReconciliation.status() },
     settings: async () => { await boardSettings.current(); return { dayCount: boardSettings.dayCount(), rules: boardSettings.groupRules() }; },
-    token: process.env.BACKSTAGE_API_TOKEN }));
+    liveJournal, token: process.env.BACKSTAGE_API_TOKEN }));
 // Public privacy policy required by the Google OAuth consent screen; no sign-in.
 app.get(['/privacy', '/privacy.html'], (req, res) => {
     res.set({ 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'", 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=3600' });
@@ -1108,7 +1111,7 @@ function startChangeStreams() {
         activeLiveStream=db.collection('leaderboard_live').watch([],{fullDocument:'updateLookup'});
         const liveStream=activeLiveStream;
         observeStreamCompletion(liveStream,()=>activeLiveStream===liveStream,()=>{activeLiveStream=null;nextRanking.invalidate();debouncedBroadcast()});
-        liveStream.on('change',()=>{nextRanking.invalidate();debouncedBroadcast()});
+        liveStream.on('change',change=>{if(change?.fullDocument)liveJournal.ingest(change.fullDocument);nextRanking.invalidate();debouncedBroadcast()});
         liveStream.on('error',()=>{activeLiveStream=null;nextRanking.invalidate();debouncedBroadcast()});
 
         console.log('[ChangeStream] Watching gifts, profiles, sessions and locations');
@@ -1319,6 +1322,17 @@ setInterval(async () => {
         console.error('[Cache] Background refresh error:', err.message);
     }
 }, CACHE_BG_INTERVAL);
+
+// Quét leaderboard_live mỗi 30 giây cho nhật ký live: bắt cả lúc HeliosControl tắt ngang (không còn heartbeat,
+// change stream không báo gì) và dựng lại đoạn live khi ranking vừa khởi động.
+setInterval(async () => {
+    if (!db) return;
+    try {
+        const docs = await db.collection('leaderboard_live').find({ source: 'helioscontrol', heartbeatAt: { $gt: new Date(Date.now() - 36 * 3600000) } }).toArray();
+        for (const doc of docs) liveJournal.ingest(doc);
+        liveJournal.expire();
+    } catch (err) { console.warn('[LiveJournal]', err.message); }
+}, 30000).unref?.();
 
 // Recover standalone stream failures too (not every stream error closes MongoClient).
 setInterval(() => {
