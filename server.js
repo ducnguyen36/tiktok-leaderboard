@@ -614,7 +614,7 @@ const liveDependencyRepository = {
     readLocations: readLocationsFromDb,
 };
 
-const { buildTalentAvatars, buildProfileMap, buildTalentToProfileMap, buildProfileNameToIdMap, buildUidMaps, aggregateIndividual, aggregateGroup } = require('./leaderboardAggregation');
+const { buildTalentAvatars, buildProfileMap, buildTalentToProfileMap, orderForOwnership, buildProfileNameToIdMap, buildUidMaps, aggregateIndividual, aggregateGroup } = require('./leaderboardAggregation');
 
 // ==========================================
 // SHARED AGGREGATION (used by API + SSE push)
@@ -717,9 +717,10 @@ async function _buildLeaderboardDataInner(context, { force = false } = {}) {
     );
     const talentAvatarMap = buildTalentAvatars(profiles);
     const profileMap = buildProfileMap(profiles);
-    const talentToProfile = buildTalentToProfileMap(profiles);
+    const owned = orderForOwnership(profiles, sessionProfileMap);
+    const talentToProfile = buildTalentToProfileMap(owned);
     const profileNameToId = buildProfileNameToIdMap(profiles);
-    const { uidToTalent, uidToProfile } = buildUidMaps(profiles);
+    const { uidToTalent, uidToProfile } = buildUidMaps(owned);
 
     const allBuckets = await giftBucketStore.get(context, { force });
     const allDailyGifts = allBuckets.filter(g => g.daily);
@@ -859,11 +860,11 @@ async function buildHistoricalLeaderboardData(period) {
     const profiles = await readProfilesFromDb();
     const talentAvatarMap = buildTalentAvatars(profiles);
     const profileMap = buildProfileMap(profiles);
-    const talentToProfile = buildTalentToProfileMap(profiles);
-    const profileNameToId = buildProfileNameToIdMap(profiles);
-    const { uidToTalent, uidToProfile } = buildUidMaps(profiles);
-
     const sessionProfileMap = await readSessionProfileMapFromDb();
+    const owned = orderForOwnership(profiles, sessionProfileMap);
+    const talentToProfile = buildTalentToProfileMap(owned);
+    const profileNameToId = buildProfileNameToIdMap(profiles);
+    const { uidToTalent, uidToProfile } = buildUidMaps(owned);
 
     const allGifts = decodeGiftBuckets(await db.collection('gifts').aggregate(
         buildGiftBucketPipeline({ start: Date.parse(period.start), end: Date.parse(period.end), month: true, plainFrom: monthPlainFrom() }),

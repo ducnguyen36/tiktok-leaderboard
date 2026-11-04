@@ -34,6 +34,8 @@ function buildProfileMap(profiles) {
     return map;
 }
 
+// A talent listed in several profiles belongs to the last one listed (a moved
+// talent can stay in its old group's profile); profileIds keeps every owner.
 function buildTalentToProfileMap(profiles) {
     const map = {};
     for (const profile of profiles) {
@@ -41,11 +43,18 @@ function buildTalentToProfileMap(profiles) {
         const profileName = profile.name || profileId.toString();
         if (profile.talents) {
             for (const talentName of Object.keys(profile.talents)) {
-                map[talentName] = { profileId, profileName };
+                map[talentName] = { profileId, profileName, profileIds: [...(map[talentName]?.profileIds || []), profileId] };
             }
         }
     }
     return map;
+}
+
+// An event profile (e.g. CROWN WAR II) copies members of real groups but has no
+// lives of its own. Profiles with lives go last so they keep their members.
+function orderForOwnership(profiles, sessionProfileMap = {}) {
+    const live = new Set(Object.values(sessionProfileMap).map(String));
+    return [...profiles.filter(p => !live.has(String(p._id))), ...profiles.filter(p => live.has(String(p._id)))];
 }
 
 // Maps profile display name -> profileId (for new helioscontrol format
@@ -94,7 +103,7 @@ function buildUidMaps(profiles) {
             for (const [talentName, info] of Object.entries(profile.talents)) {
                 if (info.id) {
                     uidToTalent[info.id] = talentName;
-                    uidToProfile[info.id] = { profileId: pid, profileName: pName };
+                    uidToProfile[info.id] = { profileId: pid, profileName: pName, profileIds: [...(uidToProfile[info.id]?.profileIds || []), pid] };
                 }
                 if (info.uniqueId) {
                     const key = uniqueIdKey(info.uniqueId);
@@ -284,16 +293,23 @@ function aggregateGroup(gifts, talentToProfile, profileMap, profileNameToId, uid
         profileTotals[pid] = { name: pInfo.name, totalDiamonds: 0 };
     }
 
+    // A talent in several profiles counts for the one whose live the gift came from.
+    function ownerAtLive(mapping, gift) {
+        const sessionPid = getSessionProfile(gift);
+        const match = sessionPid && (mapping.profileIds || []).find(id => String(id) === String(sessionPid));
+        return match || mapping.profileId;
+    }
+
     // Helper: resolve a single talent entry to a profileId
-    function resolveToProfile(t) {
+    function resolveToProfile(t, gift) {
         // 1. Check by UID
         if (t.uid && uidToProfile[t.uid]) {
-            return uidToProfile[t.uid].profileId;
+            return ownerAtLive(uidToProfile[t.uid], gift);
         }
         // 2. Check by talent name -> profile
         const talentMapping = talentToProfile[t.name];
         if (talentMapping) {
-            return talentMapping.profileId;
+            return ownerAtLive(talentMapping, gift);
         }
         // 3. Check if it's a profile name directly
         const profileId = profileNameToId[t.name];
@@ -323,7 +339,7 @@ function aggregateGroup(gifts, talentToProfile, profileMap, profileNameToId, uid
         const talents = resolveGiftTalents(gift, uidToTalent);
         for (const t of talents) {
             if (t.name === 'Group' || t.name === 'Unassigned' || profileNameToId[t.name]) continue;
-            const pid = resolveToProfile(t);
+            const pid = resolveToProfile(t, gift);
             if (!pid || !profileTotals[pid]) continue;
             (info.talents[pid] ||= new Set()).add(t.name);
         }
@@ -361,12 +377,12 @@ function aggregateGroup(gifts, talentToProfile, profileMap, profileNameToId, uid
             if (t.name === 'Group' || t.name === 'Unassigned') {
                 const uid = t.uid || gift.toMemberUid || '';
                 if (uid && uidToProfile[uid]) {
-                    resolvedPids.add(uidToProfile[uid].profileId);
+                    resolvedPids.add(ownerAtLive(uidToProfile[uid], gift));
                 }
                 continue;
             }
 
-            const pid = groupAtLive(gift, resolveToProfile(t));
+            const pid = groupAtLive(gift, resolveToProfile(t, gift));
             if (pid) {
                 resolvedPids.add(pid);
             }
@@ -409,4 +425,4 @@ function aggregateGroup(gifts, talentToProfile, profileMap, profileNameToId, uid
 }
 
 
-module.exports = { buildTalentAvatars, buildProfileMap, buildTalentToProfileMap, buildProfileNameToIdMap, buildUidMaps, resolveGiftTalents, aggregateIndividual, aggregateGroup };
+module.exports = { buildTalentAvatars, buildProfileMap, buildTalentToProfileMap, orderForOwnership, buildProfileNameToIdMap, buildUidMaps, resolveGiftTalents, aggregateIndividual, aggregateGroup };
