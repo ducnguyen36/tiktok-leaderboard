@@ -5,10 +5,9 @@
 // is /sheets/write: approved shift reports into the eight group workbooks,
 // inside "THÁNG MM.YYYY" tabs, at most MAX_WRITE_CELLS cells per call.
 const express=require('express');
-const {GROUP_SHEETS,findMonthTab}=require('./groupSheets');
-const {parseSheet,matchingProfile}=require('./sheetReconciliation');
 const {sheetsReadError}=require('./sheetsConnection');
-const {DAY,MAX_DAYS,MAX_SHIFT,MAX_WRITE_CELLS,MAX_READ_RANGES,ALLOWED_SHEETS,rangeCells,writeRequest,dateRange,tokenMatches,REASONS,dayReasons,dailyScores,dayCountOf,sheetDays,scoresData,sessionsData}=require('./backstageCore');
+const {sheetsMonth,sheetsReadRanges}=require('./backstageSheets');
+const {DAY,MAX_DAYS,MAX_SHIFT,MAX_WRITE_CELLS,MAX_READ_RANGES,ALLOWED_SHEETS,MONTH_RANGE,rangeCells,writeRequest,dateRange,tokenMatches,REASONS,dayReasons,dailyScores,dayCountOf,sheetDays,scoresData,sessionsData}=require('./backstageCore');
 function createBackstageApi({getDb,readProfiles,sheets,reconcile,settings,token,clock=Date.now,resolveAvatar=(url)=>url,avatarFile=()=>null,liveJournal=null}){
   const router=express.Router(),cache=new Map(),hits=new Map();
   const configured=typeof token==='string'&&token.length>=32;
@@ -50,24 +49,7 @@ function createBackstageApi({getDb,readProfiles,sheets,reconcile,settings,token,
     try{
       const state=await sheets.status();
       if(!state.connected)return res.json({status:'ok',connected:false,month,sources:[]});
-      res.json(await cached(`sheets:${month}:${await sheets.version()}`,300000,async()=>{
-        const profiles=await readProfiles(),sources=[];
-        // Serial reads, as the reconciliation does, to stay inside the Sheets quota.
-        for(const source of GROUP_SHEETS){
-          const profile=matchingProfile(profiles,source.group),base={group:source.group,groupId:profile?String(profile._id):null};
-          try{
-            const metadata=await sheets.read({spreadsheetId:source.spreadsheetId,metadata:true});
-            const tab=findMonthTab(metadata,new Date(Date.parse(month+'-15T00:00:00Z')));
-            if(!tab){sources.push({...base,state:'month_tab_missing'});continue}
-            const data=await sheets.read({spreadsheetId:source.spreadsheetId,range:`'${tab.title.replace(/'/g,"''")}'!A1:U${Math.min(100,tab.gridProperties.rowCount)}`});
-            let names=Object.keys(profile?.talents||{}),parsed=parseSheet(data.values||[],month,names),groupOnly=false;
-            if(parsed.error==='talent_names_unmatched'){names=[];parsed=parseSheet(data.values||[],month,names);groupOnly=true}
-            if(parsed.error){sources.push({...base,state:parsed.error});continue}
-            sources.push({...base,state:groupOnly?'group_only':'ok',tab:tab.title,sheetUrl:`https://docs.google.com/spreadsheets/d/${source.spreadsheetId}/edit#gid=${tab.sheetId}`,days:sheetDays(parsed,names)});
-          }catch{sources.push({...base,state:'read_failed'})}
-        }
-        return{status:'ok',connected:true,month,asOf:new Date(clock()).toISOString(),sources,reconciliation:reconcile?.status()||null};
-      }));
+      res.json(await cached(`sheets:${month}:${await sheets.version()}`,300000,async()=>({...await sheetsMonth({sheets,profiles:await readProfiles(),month,now:clock()}),reconciliation:reconcile?.status()||null})));
     }catch{res.status(500).json({status:'error',message:'sheets_unavailable'})}
   });
   // Ảnh đại diện của TALENT trong từng nhóm (profiles.talents[name].avatarUrl) — không có người tặng.
@@ -118,12 +100,7 @@ function createBackstageApi({getDb,readProfiles,sheets,reconcile,settings,token,
     if(!Array.isArray(ranges)||!ranges.length||ranges.length>MAX_READ_RANGES||!ranges.every(r=>typeof r==='string'&&MONTH_RANGE.test(r.normalize('NFC'))))return res.status(400).json({ok:false,error:'invalid_request'});
     try{
       if(!(await sheets.status()).connected)return res.status(403).json({ok:false,error:'sheets_not_connected'});
-      const valueRanges=[],formulas=[];
-      for(const range of ranges.map(r=>r.normalize('NFC'))){
-        const v=await sheets.read({spreadsheetId,range,render:'FORMATTED_VALUE'}),f=await sheets.read({spreadsheetId,range,render:'FORMULA'});
-        valueRanges.push({range:v.range||range,values:v.values||[]});formulas.push({range:f.range||range,values:f.values||[]});
-      }
-      res.json({ok:true,valueRanges,formulas});
+      res.json({ok:true,...await sheetsReadRanges({sheets,spreadsheetId,ranges})});
     }catch(error){res.status(502).json({ok:false,error:'sheets_failed',code:sheetsReadError(error)})}
   });
   router.post('/api/backstage/sheets/write',express.json({limit:'64kb'}),async(req,res)=>{

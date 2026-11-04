@@ -24,7 +24,7 @@ COPY monthlyWindows.js ./
 COPY leaderboardHistory.js ./
 COPY leaderboardAggregation.js ./
 COPY leaderboardPerformance.js ./
-COPY rankingNext.js sheetReconciliation.js backstageApi.js backstageCore.js liveJournal.js ./
+COPY rankingNext.js sheetReconciliation.js backstageApi.js backstageCore.js backstageSheets.js liveJournal.js ./
 COPY reconciliationReport.js reconciliationKnownIssues.js boardSettings.js ./
 COPY competitionPages.js ./
 COPY public/ ./public/

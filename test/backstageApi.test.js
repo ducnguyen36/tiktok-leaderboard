@@ -115,3 +115,16 @@ test('scores ?count: Backstage asks for session-start regardless of the board; b
  const api=createBackstageApi({getDb:()=>db,token:TOKEN});
  assert.equal((await call(api,'/api/backstage/scores?from=2026-10-01&to=2026-10-01&count=hourly',{authorization:'Bearer '+TOKEN})).status,400);
 });
+
+test('sheets/read: month ranges of a group workbook, values + formulas (POST)', async () => {
+ const {GROUP_SHEETS}=require('../groupSheets');
+ const id=GROUP_SHEETS[0].spreadsheetId,reads=[];
+ const api=createBackstageApi({getDb:()=>({}),token:TOKEN,readProfiles:async()=>profiles,sheets:{status:async()=>({connected:true,canWrite:true}),read:async(o)=>{reads.push(o.render);return{range:o.range,values:[[o.render]]}}}});
+ const app=express();app.use(api);const server=app.listen(0);
+ try{
+  const r=await fetch(`http://127.0.0.1:${server.address().port}/api/backstage/sheets/read`,{method:'POST',headers:{authorization:'Bearer '+TOKEN,'content-type':'application/json'},body:JSON.stringify({spreadsheetId:id,ranges:["'THÁNG 11.2026'!B5"]})});
+  const body=await r.json();
+  assert.equal(r.status,200);assert.equal(body.ok,true);
+  assert.deepEqual(body.valueRanges[0].values,[['FORMATTED_VALUE']]);assert.deepEqual(body.formulas[0].values,[['FORMULA']]);
+ }finally{server.close()}
+});
