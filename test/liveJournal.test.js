@@ -52,3 +52,13 @@ test('live journal: persists to file and reloads', () => {
 });
 
 function DAY(){return 86400000}
+
+test('live journal: initial segments + drain returns only changed ones', () => {
+  let now=T+10*M;
+  const a=createLiveJournal({clock:()=>now,initial:[{pub:'pub1',gid:'g1',sid:'s1',since:T,start:T,end:null,lastBeat:T+9*M}]});
+  assert.equal(a.drain().length,0);
+  a.ingest(doc({live:false,heartbeatAt:new Date(now),liveEndedAt:new Date(T+10*M)}));
+  const changed=a.drain();
+  assert.equal(changed.length,1);assert.equal(changed[0].end,T+10*M);
+  assert.equal(a.drain().length,0);
+});

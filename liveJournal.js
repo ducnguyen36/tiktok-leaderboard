@@ -9,11 +9,13 @@ const STALE=90000,KEEP_DAYS=62,DAY=86400000;
 
 // Một đoạn live: {pub, gid, sid, since, start, end|null, lastBeat}. `since` = liveSince của bộ điều khiển
 // (khoá cùng `pub`); `start` = lúc lên thật (bằng since, hoặc lúc nối lại nếu rớt rồi nối lại cùng lease).
-function createLiveJournal({file=null,clock=Date.now,keepDays=KEEP_DAYS}={}){
-  const segs=new Map(),open=new Map();
+// `initial`: các đoạn đã lưu nơi khác (Backstage lưu trong database) thay cho file; `drain()` trả các đoạn
+// vừa thêm/đổi kể từ lần gọi trước để nơi đó lưu lại.
+function createLiveJournal({file=null,clock=Date.now,keepDays=KEEP_DAYS,initial=[]}={}){
+  const segs=new Map(),open=new Map(),dirty=new Map();
   const key=s=>`${s.pub}|${s.start}`;
   const save=s=>{if(!file)return;try{fs.mkdirSync(path.dirname(file),{recursive:true});fs.appendFileSync(file,JSON.stringify(s)+'\n')}catch{}};
-  function put(s){segs.set(key(s),s);if(s.end===null)open.set(s.pub,s);else if(open.get(s.pub)?.start===s.start)open.delete(s.pub);save(s)}
+  function put(s){segs.set(key(s),s);dirty.set(key(s),s);if(s.end===null)open.set(s.pub,s);else if(open.get(s.pub)?.start===s.start)open.delete(s.pub);save(s)}
   function load(){
     if(!file)return;let text='';try{text=fs.readFileSync(file,'utf8')}catch{return}
     const cut=clock()-keepDays*DAY;
@@ -34,7 +36,7 @@ function createLiveJournal({file=null,clock=Date.now,keepDays=KEEP_DAYS}={}){
     if(up){
       if(cur&&cur.since===since){if(beat>cur.lastBeat)cur.lastBeat=beat;
         // Ghi heartbeat ra file mỗi 5 phút: ranking khởi động lại giữa ca vẫn biết đoạn kéo tới đâu.
-        if(cur.lastBeat-(cur.savedBeat||cur.start)>=300000){cur.savedBeat=cur.lastBeat;save(cur)}return}
+        if(cur.lastBeat-(cur.savedBeat||cur.start)>=300000){cur.savedBeat=cur.lastBeat;dirty.set(key(cur),cur);save(cur)}return}
       if(cur)put({...cur,end:cur.lastBeat});
       // Cùng lease đã có đoạn trước (rớt rồi nối lại) → lên lại lúc heartbeat này; lease mới → liveSince.
       const again=[...segs.values()].some(s=>s.pub===pub&&s.since===since);
@@ -54,6 +56,8 @@ function createLiveJournal({file=null,clock=Date.now,keepDays=KEEP_DAYS}={}){
       .map(s=>({groupId:s.gid,sessionId:s.sid,start:new Date(s.start).toISOString(),end:s.end===null?null:new Date(s.end).toISOString(),lastBeatAt:new Date(s.lastBeat).toISOString()}));
   }
   load();
-  return{ingest,expire,segments,size:()=>segs.size};
+  for(const s of initial){if(!s||typeof s.pub!=='string'||!Number.isFinite(s.start))continue;segs.set(key(s),s);if(s.end===null)open.set(s.pub,s)}
+  function drain(){const out=[...dirty.values()];dirty.clear();return out}
+  return{ingest,expire,segments,drain,size:()=>segs.size};
 }
 module.exports={createLiveJournal,STALE};
