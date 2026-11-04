@@ -52,21 +52,24 @@ function createBackstageApi({getDb,readProfiles,sheets,reconcile,settings,token,
       res.json(await cached(`sheets:${month}:${await sheets.version()}`,300000,async()=>({...await sheetsMonth({sheets,profiles:await readProfiles(),month,now:clock()}),reconciliation:reconcile?.status()||null})));
     }catch{res.status(500).json({status:'error',message:'sheets_unavailable'})}
   });
-  // Ảnh đại diện của TALENT trong từng nhóm (profiles.talents[name].avatarUrl) — không có người tặng.
+  // Ảnh đại diện của TALENT trong từng nhóm (profiles.talents[name].avatarUrl) + ảnh kênh nhóm — không có người tặng.
   // avatar: "/userdata/avatars/<file>" (phục vụ công khai ở route đó) hoặc link https gốc.
   router.get('/api/backstage/avatars',async(req,res)=>{
     try{
       const profiles=await readProfiles();
-      const talents=[];
-      for(const p of profiles)for(const [name,info] of Object.entries(p.talents||{})){
-        // Ảnh đã tải về ổ của ranking (theo username TikTok) — file lưu trong Mongo nằm trên máy HeliosControl.
-        let a=String(resolveAvatar(String(info?.avatarUrl||''),String(info?.uniqueId||''))||'');
+      // Ảnh đã tải về ổ của ranking (theo username TikTok) — file lưu trong Mongo nằm trên máy HeliosControl.
+      const pic=(url,uid)=>{
+        let a=String(resolveAvatar(String(url||''),String(uid||''))||'');
         if(a.startsWith('userdata/avatars/'))a='/'+a;
         else if(a.startsWith('avatars/')||a.startsWith('/avatars/'))a='/userdata/avatars/'+a.split('/').pop();
-        if(!(a.startsWith('/userdata/avatars/')||/^https:\/\//.test(a)))a='';
-        talents.push({groupId:String(p._id),group:p.name||'',name,uniqueId:String(info?.uniqueId||''),avatar:a});
-      }
-      res.json({status:'ok',talents});
+        return a.startsWith('/userdata/avatars/')||/^https:\/\//.test(a)?a:'';
+      };
+      const talents=[];
+      for(const p of profiles)for(const [name,info] of Object.entries(p.talents||{}))
+        talents.push({groupId:String(p._id),group:p.name||'',name,uniqueId:String(info?.uniqueId||''),avatar:pic(info?.avatarUrl,info?.uniqueId)});
+      // Ảnh kênh của nhóm (profiles.avatar / username) cho vòng nhóm trên Backstage.
+      const groups=profiles.map(p=>({groupId:String(p._id),name:p.name||'',avatar:pic(p.avatar,p.username)}));
+      res.json({status:'ok',talents,groups});
     }catch{res.status(500).json({status:'error',message:'avatars_unavailable'})}
   });
   // Giờ bắt đầu / kết thúc phiên live theo nhóm (để Backstage suy ra lịch live). Chỉ đọc, không quà, không người tặng.

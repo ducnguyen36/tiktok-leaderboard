@@ -91,6 +91,13 @@ test('avatars: uses the server avatar resolver (files fetched onto the ranking d
  assert.equal(r.body.talents[0].avatar,'/userdata/avatars/yiin.tt_1.jpg');
 });
 
+test('avatars: group channel pictures alongside talents', async () => {
+ const profiles=[{_id:'g1',name:'HT - VVG',avatar:'userdata/avatars/vvg.jpg',username:'vvg',talents:{}},{_id:'g2',name:'AURA',avatar:'javascript:x',talents:{}}];
+ const api=createBackstageApi({getDb:()=>({}),token:TOKEN,readProfiles:async()=>profiles,sheets:{status:async()=>({connected:false})}});
+ const r=await call(api,'/api/backstage/avatars',{authorization:'Bearer '+TOKEN});
+ assert.deepEqual(r.body.groups,[{groupId:'g1',name:'HT - VVG',avatar:'/userdata/avatars/vvg.jpg'},{groupId:'g2',name:'AURA',avatar:''}]);
+});
+
 test('avatar file route: token required, outside the data rate limit, only known files', async () => {
  const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'av-'));fs.writeFileSync(path.join(dir,'a.jpg'),'JPEGDATA');
