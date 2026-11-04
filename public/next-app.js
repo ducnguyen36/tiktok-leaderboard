@@ -48,13 +48,25 @@ function makeRow(entry,index,column){
  }
  row.dataset.rank=String(index+1);row.dataset.name=entry.name;N.decorateRow(row,avatar,name,entry,column,rawData,config);row.append(rank,avatar,identity);return row;
 }
+// Placeholder row shown until the first scores arrive.
+function skeletonRow(index){
+ const row=document.createElement('div');row.className='row skeleton'+(index<3?' top'+(index+1):'');row.setAttribute('aria-hidden','true');
+ const rank=document.createElement('i');rank.className='rank';rank.textContent=index+1;
+ const avatar=document.createElement('i');avatar.className='avatar';
+ const identity=document.createElement('div');identity.className='identity';
+ const name=document.createElement('div');name.className='name';name.textContent=' ';
+ const points=document.createElement('div');points.className='points';points.textContent=' ';
+ identity.append(name,points);row.append(rank,avatar,identity);return row;
+}
 function renderRows(index){
  const source=columnData[index],rows=C.selectRows(source,config,index,historyPayload?.data,dailyHistory);
  const ready=index>=5&&config.lastMonth?Boolean(historyPayload):Boolean(source);
  const signature=JSON.stringify([rows.map(e=>({...e,live:N.isLive(e)})),source?.reconciliation?.warnings,ready,dailyHistory,config.yesterdayGroups,config.yesterdayIdols,config.language]);if(signature===rowSignatures[index])return false;
  rowSignatures[index]=signature;const list=boards[index].querySelector('.list');const wrapper=index>=4?document.createElement('div'):list;
  list.replaceChildren();if(index>=4){wrapper.className='all-track';list.append(wrapper)}
- if(!rows.length){const empty=document.createElement('div');empty.className='empty-state';empty.textContent=t(ready?'row.empty':'row.waiting');list.replaceChildren(empty)}
+ list.toggleAttribute('aria-busy',!ready);if(ready)list.removeAttribute('aria-label');else list.setAttribute('aria-label',t('row.waiting'));
+ if(!rows.length&&!ready)for(let i=0;i<5;i++)wrapper.append(skeletonRow(i));
+ else if(!rows.length){const empty=document.createElement('div');empty.className='empty-state';empty.textContent=t('row.empty');list.replaceChildren(empty)}
  else rows.forEach((entry,i)=>wrapper.append(makeRow(entry,i,index)));
  return true;
 }
@@ -255,17 +267,38 @@ function renderConnection(){
  if(!parts.length)parts.push('● '+t(meta.allComputed&&!meta.unknown&&streamConnected?'status.live':'status.connected'));
  if(!streamConnected)parts.push(t('status.reconnecting'));connection(parts.join(' · '));
 }
+// The last scores stay on this device, so a reload shows them at once (marked as
+// cached) until fresh ones arrive. They are not reused across the reset or hold
+// time, or after 12 hours.
+const liveCacheKey=storageKey+'_live';let liveCacheSaved=0;
+function sameBoardDay(then,now,context){
+ const params=new URLSearchParams(context),hours=[Number(params.get('resetHour'))||0],hold=/^(\d\d):(\d\d)$/.exec(params.get('freezeUntil')||'');if(hold)hours.push(+hold[1]+hold[2]/60);
+ const day=(time,hour)=>Math.floor((time+(7-hour)*3600000)/86400000);
+ return now>=then&&now-then<12*3600000&&hours.every(hour=>day(then,hour)===day(now,hour));
+}
+function cachedLive(context){
+ try{const saved=JSON.parse(localStorage.getItem(liveCacheKey)||'null');return saved?.context===context&&saved.result?.data&&sameBoardDay(saved.savedAt,Date.now(),context)?saved.result:null}catch{return null}
+}
+function storeLive(context,result){
+ if(Date.now()-liveCacheSaved<30000)return;liveCacheSaved=Date.now();
+ try{localStorage.setItem(liveCacheKey,JSON.stringify({context,savedAt:Date.now(),result}))}catch{}
+}
+function showLive(result,indices,cached=false){
+ rawData=result.data;dataError=false;allLocations=(rawData.locations||[]).map(l=>({...l,id:String(l.id)}));allGroups=(rawData.groups||[]).map(g=>({...g,id:String(g.id),locationId:String(g.locationId||'')}));
+ const meta=cached?{...result.meta,source:'cache',stale:true}:result.meta||null;
+ if(!cached){updateCelebrations(result);followBroadcast(result.meta?.settingsVersion||0,result.meta?.deviceSettingsVersion||0)}
+ indices.forEach(i=>{columnData[i]=rawData;columnMeta[i]=meta});let changed=false;indices.forEach(i=>{changed=renderRows(i)||changed});if(changed)setupScroll();renderSummary();renderLocations();syncInputs();if(adminState&&!groupRules)renderAdmin();
+ renderConnection();
+}
 async function loadCurrent(indices=[0,1,2,3,4,5,6],manual=false){
  const context=requestContext();if(!manual&&manualPending.get(context))return;
  if(manual){manualPending.set(context,(manualPending.get(context)||0)+1);manualEpoch.set(context,(manualEpoch.get(context)||0)+1)}
  const epoch=manualEpoch.get(context)||0,key=context+'|'+(manual?'fresh':'current'),request=++requestCounter;indices.forEach(i=>{columnVersion[i]=request;boards[i].classList.add('loading');boards[i].querySelector('.column-refresh')?.setAttribute('disabled','')});
+ if(!rawData&&!manual){const saved=cachedLive(context);if(saved)showLive(saved,indices,true)}
  if(!liveInFlight.has(key)){const promise=fetchJSON('/api/leaderboard/next?'+context+(manual?'&fresh=true':'')).finally(()=>liveInFlight.delete(key));liveInFlight.set(key,promise)}
  try{const result=await liveInFlight.get(key);if(context!==requestContext()||(!manual&&epoch!==(manualEpoch.get(context)||0)))return;
   const accepted=indices.filter(i=>columnVersion[i]===request);if(!accepted.length)return;
-  rawData=result.data;dataError=false;allLocations=(rawData.locations||[]).map(l=>({...l,id:String(l.id)}));allGroups=(rawData.groups||[]).map(g=>({...g,id:String(g.id),locationId:String(g.locationId||'')}));
-  updateCelebrations(result);followBroadcast(result.meta?.settingsVersion||0,result.meta?.deviceSettingsVersion||0);
-  accepted.forEach(i=>{columnData[i]=rawData;columnMeta[i]=result.meta||null});let changed=false;accepted.forEach(i=>{changed=renderRows(i)||changed});if(changed)setupScroll();renderSummary();renderLocations();syncInputs();if(adminState&&!groupRules)renderAdmin();
-  renderConnection();if(manual)notify(t(result.meta?.stale===true?'toast.pointsPending':'toast.pointsRefreshed'));
+  showLive(result,accepted);storeLive(context,result);if(manual)notify(t(result.meta?.stale===true?'toast.pointsPending':'toast.pointsRefreshed'));
  }catch(e){if(context===requestContext()&&(manual||epoch===(manualEpoch.get(context)||0))){dataError=true;renderConnection();if(manual||!rawData)notify(t('toast.refreshFailed'))}}
  finally{if(manual){const remaining=(manualPending.get(context)||1)-1;if(remaining)manualPending.set(context,remaining);else manualPending.delete(context)}indices.forEach(i=>{if(columnVersion[i]===request){boards[i].classList.remove('loading');boards[i].querySelector('.column-refresh')?.removeAttribute('disabled')}})}
 }

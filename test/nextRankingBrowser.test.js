@@ -1,7 +1,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),{chromium}=require('playwright');
 const{createNextFixture}=require('./support/next-ranking-server');
 const fs=require('node:fs'),path=require('node:path');
-async function fixture(t,viewport={width:1920,height:1080}){const{app,state}=createNextFixture(),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']});const page=await browser.newPage({viewport});page.setDefaultTimeout(8000);const errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});await page.goto('http://127.0.0.1:'+server.address().port+'/new');await page.locator('[data-key="monthly-ranking"] .row').first().waitFor({state:'attached'});return{page,state}}
+async function fixture(t,viewport={width:1920,height:1080}){const{app,state}=createNextFixture(),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']});const page=await browser.newPage({viewport});page.setDefaultTimeout(8000);const errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});await page.goto('http://127.0.0.1:'+server.address().port+'/new');await page.locator('[data-key="monthly-ranking"] .row:not(.skeleton)').first().waitFor({state:'attached'});return{page,state}}
 test('new desktop board has one monthly talent column, stacked Today talents/groups, live avatars and warning details',async t=>{
  const{page}=await fixture(t);assert.equal(await page.locator('[data-key="monthly-ranking"] .row').count(),23);assert.match(await page.locator('[data-key="side-talents"]').textContent(),/TEST TODAY/);assert.match(await page.locator('[data-key="side-groups"]').textContent(),/TEST GROUP/);
  assert.equal(await page.locator('[data-key="monthly-ranking"] .avatar.live').count(),23);assert.equal(await page.locator('[data-key="monthly-ranking"] .equalizer i').count(),69);
@@ -12,7 +12,7 @@ test('new desktop board has one monthly talent column, stacked Today talents/gro
 test('Last Month replaces Today, hiding Today expands monthly, preferences persist without touching old settings',async t=>{
  const{page}=await fixture(t);await page.locator('#quick-lastmonth').click();assert.equal(await page.locator('#side-column').isVisible(),false);await page.locator('#quick-lastmonth').click();await page.locator('[data-key="side-talents"]').getByText('TEST PRIOR TALENT',{exact:true}).waitFor();assert.match(await page.locator('[data-key="side-groups"]').textContent(),/TEST PRIOR GROUP/);assert.equal(await page.locator('#side-column .avatar.live').count(),0);assert.equal(await page.locator('#side-column').count(),1);
  await page.locator('#quick-lastmonth').click();assert.match(await page.locator('[data-key="side-talents"]').textContent(),/TEST TODAY/);await page.keyboard.press('6');assert.equal(await page.locator('#side-column').isVisible(),false);
- await page.reload();await page.locator('[data-key="monthly-ranking"] .row').first().waitFor();assert.equal(await page.locator('#side-column').isVisible(),false);assert.equal(await page.evaluate(()=>localStorage.getItem('helios_leaderboard_v2_current')),null);
+ await page.reload();await page.locator('[data-key="monthly-ranking"] .row:not(.skeleton)').first().waitFor();assert.equal(await page.locator('#side-column').isVisible(),false);assert.equal(await page.evaluate(()=>localStorage.getItem('helios_leaderboard_v2_current')),null);
  await page.locator('#quick-lastmonth').click();await page.locator('[data-key="side-talents"]').getByText('TEST PRIOR TALENT',{exact:true}).waitFor();assert.equal(await page.locator('#side-column').isVisible(),true);
 });
 test('mobile fits screen, tabs show stacked daily, yesterday follows session source and SSE clears live',async t=>{
@@ -50,11 +50,11 @@ test('all timing controls, independent points, sound, saved defaults and origina
  let saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('helios_leaderboard_next_current')));assert.equal(saved.pause,4);assert.equal(saved.tickerSpeed,100);assert.equal(saved.celebrationSound,false);assert.equal(saved.scores[0],false);
  await page.locator('#factory').click();saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('helios_leaderboard_next_current')));assert.equal(saved.layout,'podium');assert.equal(saved.resetHour,6);assert.equal(saved.freezeUntil,'14:00');assert.equal(saved.showDaily,true);
  await page.locator('[data-page="0"]').click();await page.locator('#layout-choice').click();await page.locator('.tv-picker button',{hasText:'Classic'}).click();assert.equal(await page.locator('.tv').getAttribute('data-layout'),'classic');await page.locator('#done-settings').click();
- await page.reload();await page.locator('[data-column="4"] .row').first().waitFor();assert.equal(await page.locator('.tv').getAttribute('data-layout'),'classic');
+ await page.reload();await page.locator('[data-column="4"] .row:not(.skeleton)').first().waitFor();assert.equal(await page.locator('.tv').getAttribute('data-layout'),'classic');
 });
 test('old preferences migrate without overwriting original settings, and hold-to-open is preserved',async t=>{
  const{page}=await fixture(t);const legacy={language:'vi',layout:'classic',resetHour:0,freezeUntil:'09:00',pause:5,tickerSpeed:120,celebrationSound:false,scores:[false,true,true,true,true],locations:{loc_hcm:true}};
- await page.evaluate(value=>{localStorage.removeItem('helios_leaderboard_next_current');localStorage.setItem('helios_leaderboard_v2_current',JSON.stringify(value))},legacy);await page.reload();await page.locator('[data-column="4"] .row').first().waitFor();
+ await page.evaluate(value=>{localStorage.removeItem('helios_leaderboard_next_current');localStorage.setItem('helios_leaderboard_v2_current',JSON.stringify(value))},legacy);await page.reload();await page.locator('[data-column="4"] .row:not(.skeleton)').first().waitFor();
  const migrated=await page.evaluate(()=>JSON.parse(localStorage.getItem('helios_leaderboard_next_current')));assert.equal(migrated.layout,'podium');assert.equal(migrated.pause,5);assert.equal(migrated.tickerSpeed,120);assert.equal(migrated.celebrationSound,false);assert.equal(migrated.resetHour,6);assert.equal(migrated.freezeUntil,'14:00');
  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('helios_leaderboard_v2_current'))),legacy);
  await page.mouse.move(40,20);await page.mouse.down();await page.locator('#settings-dialog').waitFor({state:'visible'});await page.mouse.up();await page.keyboard.press('7');assert.equal(await page.locator('#settings-dialog').isVisible(),false);
@@ -67,7 +67,7 @@ test('TVs follow an admin broadcast at once and keep it as their default; admin 
  const stored=await page.evaluate(()=>({def:JSON.parse(localStorage.getItem('helios_leaderboard_next_default')),version:localStorage.getItem('helios_leaderboard_next_broadcast'),layout:document.querySelector('.tv').dataset.layout}));
  assert.equal(stored.def.layout,'classic');assert.deepEqual(stored.def.scores,[false,false,false,false,false]);assert.equal(stored.version,'3');assert.equal(stored.layout,'classic');
  // A local change afterwards is kept until the next broadcast.
- await page.keyboard.press('1');await page.reload();await page.locator('[data-key="monthly-ranking"] .row').first().waitFor({state:'attached'});
+ await page.keyboard.press('1');await page.reload();await page.locator('[data-key="monthly-ranking"] .row:not(.skeleton)').first().waitFor({state:'attached'});
  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('helios_leaderboard_next_current')).scores[0]),true);
 });
 test('a TV adopts settings pushed to it; an admin browser keeps its own on broadcast and push',async t=>{
@@ -75,13 +75,13 @@ test('a TV adopts settings pushed to it; an admin browser keeps its own on broad
  state.push({version:Date.now(),config:{...current,layout:'studio'},updatedAt:new Date().toISOString(),updatedBy:'admin@example.test'});
  await page.waitForFunction(()=>JSON.parse(localStorage.getItem('helios_leaderboard_next_current')).layout==='studio');
  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('helios_leaderboard_next_default')).layout),'studio');
- state.admin=true;await page.reload();await page.locator('[data-key="monthly-ranking"] .row').first().waitFor({state:'attached'});
+ state.admin=true;await page.reload();await page.locator('[data-key="monthly-ranking"] .row:not(.skeleton)').first().waitFor({state:'attached'});
  state.settings={...state.settings,version:5,config:{...current,layout:'classic'}};state.broadcast();state.push({version:Date.now()+1,config:{...current,layout:'classic'}});
  await page.waitForFunction(()=>localStorage.getItem('helios_leaderboard_next_broadcast')==='5');
  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('helios_leaderboard_next_current')).layout),'studio');
 });
 test('admin edits group reset exceptions and saves settings for all TVs',async t=>{
- const{page,state}=await fixture(t);state.admin=true;state.settings={...state.settings,groupResetHours:{g:18}};await page.reload();await page.locator('[data-key="monthly-ranking"] .row').first().waitFor({state:'attached'});
+ const{page,state}=await fixture(t);state.admin=true;state.settings={...state.settings,groupResetHours:{g:18}};await page.reload();await page.locator('[data-key="monthly-ranking"] .row:not(.skeleton)').first().waitFor({state:'attached'});
  await page.keyboard.press('7');await page.locator('[data-page="1"]').click();await page.locator('#group-reset .group-reset-row').first().waitFor();
  const hour=page.locator('#group-reset .group-reset-row input');await hour.fill('17');await hour.press('Tab');
  await page.locator('#shared-hold').fill('22:30');await page.locator('#shared-hold').press('Tab');
@@ -95,4 +95,16 @@ test('ticker congratulates groups then idols from 100K, skipping hidden idols',a
  const text=await page.evaluate(()=>{const saved=rawData,loc=allLocations[0].id;rawData={...saved,group:{...saved.group,daily:[{name:'TEST BIG GROUP',groupId:'gx',locationId:loc,value:160000},{name:'TEST SMALL GROUP',groupId:'gy',locationId:loc,value:99999}]},individual:{...saved.individual,daily:[{name:'TEST BIG IDOL',locationId:loc,value:120000},{name:'TEST HIDDEN IDOL',locationId:loc,value:300000},{name:'TEST SMALL IDOL',locationId:loc,value:99000}]}};config.talents['TEST HIDDEN IDOL']=false;const out=buildTicker();rawData=saved;delete config.talents['TEST HIDDEN IDOL'];return out});
  assert.ok(text.indexOf('TEST BIG GROUP')>=0&&text.indexOf('TEST BIG GROUP')<text.indexOf('TEST BIG IDOL'));assert.match(text,/100[.,]000/);
  for(const name of ['TEST SMALL GROUP','TEST HIDDEN IDOL','TEST SMALL IDOL'])assert.ok(!text.includes(name),name);
+});
+test('a slow first load shows placeholder rows, and a reload shows this device last scores at once as cached',async t=>{
+ const{page,state}=await fixture(t);await page.waitForTimeout(100);
+ assert.ok(await page.evaluate(()=>localStorage.getItem('helios_leaderboard_next_live')),'scores are kept on the device');
+ state.delay=4000;await page.reload();const monthly=page.locator('[data-key="monthly-ranking"]');
+ await monthly.locator('.row:not(.skeleton)').first().waitFor({timeout:2000});assert.equal(await page.locator('.row.skeleton').count(),0);
+ assert.match(await page.locator('#connection').textContent(),/cached|bộ nhớ|đệm/i);
+ await page.evaluate(()=>localStorage.removeItem('helios_leaderboard_next_live'));await page.reload();
+ await monthly.locator('.row.skeleton').first().waitFor({timeout:2000});assert.equal(await monthly.locator('.row:not(.skeleton)').count(),0);assert.equal(await monthly.locator('.list').getAttribute('aria-busy'),'');
+ await monthly.locator('.row:not(.skeleton)').first().waitFor({timeout:8000});assert.equal(await page.locator('.row.skeleton').count(),0);
+ await page.evaluate(()=>localStorage.setItem('helios_leaderboard_next_live',JSON.stringify({...JSON.parse(localStorage.getItem('helios_leaderboard_next_live')),savedAt:Date.now()-13*3600000})));
+ await page.reload();await monthly.locator('.row.skeleton').first().waitFor({timeout:2000});
 });

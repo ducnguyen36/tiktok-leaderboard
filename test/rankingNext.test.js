@@ -128,3 +128,17 @@ test('sessions re-saved days later or far apart are never chained into one shift
  assert.equal(st.get('c'),Date.parse('2026-10-07T07:10:00+07:00'),'restart 20 minutes later is the same shift');
  assert.equal(st.get('d'),Date.parse('2026-10-07T23:20:00+07:00'),'a shift is at most 14 hours');
 });
+test('a restarted server answers at once with the saved board of the same day, then saves the fresh one',async()=>{
+ const now=Date.parse('2026-10-07T20:00:00+07:00'),sessions=[{_id:'s',createdAt:'2026-10-07T19:00:00+07:00',profileId:'g'}];let release;const gate=new Promise(r=>release=r);
+ const db={collection(name){return{find(){return{toArray:async()=>name==='sessions'?sessions:[]}},aggregate(){return{toArray:async()=>{await gate;return[{gift:{sessionId:'s',cost:50,receivedTalent:'Alice'},count:1}]}}}}}};
+ const monthly={status:'ok',meta:{computedAt:new Date(now).toISOString()},data:{individual:{monthly:[]},group:{monthly:[]},locations:[],groups:[]}};
+ const store=new Map(),saves=[];const snapshots={load:async key=>store.get(key)||null,save:async(key,result)=>{saves.push(key);store.set(key,JSON.parse(JSON.stringify(result)))}};
+ let clock=now;const make=()=>createNextRanking({getDb:()=>db,snapshots,current:async()=>monthly,readProfiles:async()=>profiles,readLocations:async()=>[],clock:()=>clock});
+ const first=make().get(false,{resetHour:6,freezeUntil:''});release();const fresh=await first;assert.equal(fresh.data.group.daily[0].value,50);
+ await new Promise(r=>setImmediate(r));assert.deepEqual(saves,['6|']);
+ let open;const slow=new Promise(r=>open=r);db.collection=(name)=>({find(){return{toArray:async()=>name==='sessions'?sessions:[]}},aggregate(){return{toArray:async()=>{await slow;return[]}}}});
+ clock=now+60000;const restarted=await make().get(false,{resetHour:6,freezeUntil:''});
+ assert.equal(restarted.meta.source,'snapshot');assert.equal(restarted.meta.stale,true);assert.equal(restarted.data.group.daily[0].value,50);open();
+ store.set('6|',{...store.get('6|'),data:{...store.get('6|').data,dailyPeriod:{...store.get('6|').data.dailyPeriod,today:'2026-10-06'}}});
+ const nextDay=await make().get(false,{resetHour:6,freezeUntil:''});assert.notEqual(nextDay.meta.source,'snapshot','an earlier day is recomputed, not served');
+});

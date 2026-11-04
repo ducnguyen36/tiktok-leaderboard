@@ -476,3 +476,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,.b
 .celebration-text b{font-weight:900;margin-right:.35em;max-width:40vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .celebration-text em{font-style:normal;font-weight:700}
 @media(prefers-reduced-motion:reduce){.celebration-in{-webkit-animation:none;animation:none}}
+/* Placeholder rows while the first scores load. */
+.row.skeleton .avatar{background:#ffffff1a}
+.row.skeleton .name,.row.skeleton .points{color:transparent;border-radius:4px;background:linear-gradient(90deg,#ffffff12 25%,#ffffff2e 50%,#ffffff12 75%);background-size:200% 100%;animation:skeleton-shimmer 1.4s linear infinite}
+.row.skeleton .name{width:70%}.row.skeleton .points{width:40%;margin-top:.25em}
+@keyframes skeleton-shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
+@media(prefers-reduced-motion:reduce){.row.skeleton .name,.row.skeleton .points{animation:none}}

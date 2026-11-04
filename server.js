@@ -1154,7 +1154,11 @@ const groupRules=()=>boardSettings.groupRules();
 // Month edges follow the admin's day count: gift time cuts at 07:00 on the 1st (from November 2026).
 function monthPlainFrom(){try{return boardSettings.dayCount()==='gift-time'?GIFT_TIME_EDGES_FROM:null}catch{return GIFT_TIME_EDGES_FROM}}
 const sheetReconciliation=createSheetReconciliation({getDb:()=>db,sheets:leaderboardAuth.sheets,groupRules});
-const nextRanking=createNextRanking({getDb:()=>db,current:getLeaderboardResult,readProfiles:readProfilesFromDb,readLocations:readLocationsFromDb,avatar:resolveAvatarFast,reconcile:sheetReconciliation,groupRules,dayCount:()=>boardSettings.dayCount()});
+const rankingSnapshots={
+    async load(key){const doc=await db?.collection('ranking_next_snapshots').findOne({_id:key});return doc?JSON.parse(doc.json):null},
+    async save(key,result){await db?.collection('ranking_next_snapshots').updateOne({_id:key},{$set:{json:JSON.stringify(result),savedAt:new Date()}},{upsert:true})},
+};
+const nextRanking=createNextRanking({getDb:()=>db,snapshots:rankingSnapshots,current:getLeaderboardResult,readProfiles:readProfilesFromDb,readLocations:readLocationsFromDb,avatar:resolveAvatarFast,reconcile:sheetReconciliation,groupRules,dayCount:()=>boardSettings.dayCount()});
 // Daily read-only reconciliation report (admin only). Built once a day from 09:00 Vietnam time.
 const dailyReport=createDailyReport({getDb:()=>db,groupRules,sheets:leaderboardAuth.sheets,readProfiles:readProfilesFromDb,current:getLeaderboardResult,appVersion:process.env.APP_VERSION||'dev',
     // RECON_REPORT_GROUPS (comma list) limits the report; default: all eight groups.

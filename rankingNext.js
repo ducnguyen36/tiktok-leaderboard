@@ -80,8 +80,12 @@ function sessionGiftPipeline(ids){
   return[{$match:{sessionId:{$in:ids}}},{$group:{_id:{...Object.fromEntries(fields.map(f=>[f,'$'+f])),hour},count:{$sum:1}}},{$project:{_id:0,gift:'$_id',count:1}}];
 }
 function decorateLive(rows,states,now){const groups=liveGroups(states,now);return rows.map(row=>({...row,...(groups.get(String(row.groupId))||{live:false})}))}
-function createNextRankingForHour({getDb,current,readProfiles,readLocations,avatar,reconcile,groupRules,dayCount=()=>'gift-time',clock=Date.now,resetHour=0,holdUntil=''}){
-  let cached,pending,generation=0;
+// The last board is saved (at most once a minute) so a restarted server answers at
+// once with it, marked as a snapshot, while the fresh board is computed. A snapshot
+// of an earlier day is never served.
+const SNAPSHOT_EVERY=60000;
+function createNextRankingForHour({getDb,current,readProfiles,readLocations,avatar,reconcile,groupRules,dayCount=()=>'gift-time',clock=Date.now,resetHour=0,holdUntil='',snapshots=null,contextKey=''}){
+  let cached,pending,generation=0,restored=false,savedAt=0;
   async function build(force=false){
     const revision=generation,started=clock(),db=getDb(),mode=dayCount()==='session-start'?'session-start':'gift-time';if(!db)throw Error('Database unavailable');
     // Restarted shifts reach back up to 14 hours, so read sessions from before the earlier day's start.
@@ -97,10 +101,13 @@ function createNextRankingForHour({getDb,current,readProfiles,readLocations,avat
     const data={...monthly.data,individual:{...monthly.data.individual,daily:daily.individual,yesterday:prior.individual},group:{...monthly.data.group,daily:daily.group,yesterday:prior.group},frozen:false,dailyPeriod:{today,yesterday,resetHour,holdUntil,groupResetHours:groupHours,attribution:mode,...(mode==='gift-time'?{giftCutoffHour:cutoff}:{})}};
     for(const kind of ['individual','group'])for(const period of ['daily','yesterday','monthly'])data[kind][period]=decorateLive(data[kind][period],states,started);
     cached={status:'ok',data,meta:{...monthly.meta,computedAt:new Date(started).toISOString(),dailyAttribution:mode,liveSource:'helioscontrol-heartbeat',stale:monthly.meta?.stale===true},builtAt:started,revision};
+    if(snapshots&&started-savedAt>=SNAPSHOT_EVERY){savedAt=started;Promise.resolve().then(()=>snapshots.save(contextKey,cached)).catch(()=>{})}
     reconcile?.refresh(profiles).catch(()=>{});return cached;
   }
   return{invalidate(){generation++},async get(force=false){
     if(force&&pending)await pending;
+    if(!cached&&!restored&&snapshots){restored=true;const saved=await Promise.resolve().then(()=>snapshots.load(contextKey)).catch(()=>null);
+      if(!cached&&saved?.data?.dailyPeriod&&Number.isFinite(saved.builtAt))cached={...saved,meta:{...saved.meta,source:'snapshot'},revision:generation}}
     const newDay=()=>displayDay(clock(),resetHour,holdUntil)!==cached.data.dailyPeriod.today||(dayCount()==='session-start'?'session-start':'gift-time')!==cached.data.dailyPeriod.attribution;
     if(!cached||newDay()||force||clock()-cached.builtAt>15000||cached.revision!==generation){if(!pending)pending=build(force).finally(()=>pending=null);if(!cached||force||newDay())await pending;else pending.catch(()=>{})}
     const result={...cached,data:structuredClone(cached.data),meta:{...cached.meta,stale:cached.meta.stale||cached.revision!==generation||clock()-cached.builtAt>15000}};
@@ -123,7 +130,7 @@ function createNextRanking(options){
    const freeze=context.freezeUntil===undefined?DEFAULT_CONTEXT.freezeUntil:context.freezeUntil||'';
    if(typeof freeze!=='string'||(freeze&&!/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(freeze)))throw new RangeError('Invalid freeze time');
    const key=hour+'|'+freeze;
-   if(!services.has(key))services.set(key,createNextRankingForHour({...options,resetHour:hour,holdUntil:freeze}));
+   if(!services.has(key))services.set(key,createNextRankingForHour({...options,resetHour:hour,holdUntil:freeze,contextKey:key}));
    const result=await services.get(key).get(force);
    // Held: the board still shows the workday that ended at the reset hour.
    result.data.frozen=result.data.dailyPeriod.today!==dayKey(clock(),hour);result.meta.contextKey=key;
