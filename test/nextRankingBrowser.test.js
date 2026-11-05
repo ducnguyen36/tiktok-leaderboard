@@ -5,6 +5,8 @@ async function fixture(t,viewport={width:1920,height:1080}){const{app,state}=cre
 test('new desktop board has one monthly talent column, stacked Today talents/groups, live avatars and warning details',async t=>{
  const{page,state}=await fixture(t);assert.equal(await page.locator('[data-key="monthly-ranking"] .row').count(),23);assert.match(await page.locator('[data-key="side-talents"]').textContent(),/TEST TODAY/);assert.match(await page.locator('[data-key="side-groups"]').textContent(),/TEST GROUP/);
  assert.equal(await page.locator('[data-key="monthly-ranking"] .avatar.live').count(),23);assert.equal(await page.locator('[data-key="monthly-ranking"] .equalizer i').count(),69);
+ // Every screen gets the simple TV-safe mark: ring without outline, solid round dot, no bars.
+ assert.deepEqual(await page.locator('[data-key="monthly-ranking"] .avatar.live').first().evaluate(a=>{const dot=getComputedStyle(a.querySelector('.equalizer')),bar=getComputedStyle(a.querySelector('.equalizer i'));return[getComputedStyle(a).outlineStyle,dot.borderRadius,bar.display]}),['none','50%','none']);
  const positions=await page.locator('.monthly-ranking,.side-column').evaluateAll(els=>els.map(e=>e.getBoundingClientRect().left));assert.ok(positions[1]>positions[0]);
  // Sheet problems stay off public TVs; only an admin browser sees them.
  assert.equal(await page.locator('.warning').count(),0);assert.equal(await page.locator('#sheet-status').isHidden(),true);
