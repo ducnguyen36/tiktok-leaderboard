@@ -121,3 +121,9 @@ test('auto-hide hides group points from day 15 and a manual flip lasts 5 minutes
  await page.keyboard.press('1');assert.equal(await hidden(0),false);assert.equal(await hidden(2),true);
  await page.clock.setFixedTime(start+6*60000);await page.waitForFunction(()=>document.querySelector('[data-column="0"]').classList.contains('hide-points'));
 });
+test('the total leads with today even while the board holds the finished day, with yesterday on a small line',async t=>{
+ const{page,state}=await fixture(t);assert.equal(await page.locator('.kpi b').textContent(),'400');assert.match(await page.locator('.kpi-yesterday').textContent(),/300/);
+ state.held=true;await page.reload();await page.waitForFunction(()=>document.querySelector('.kpi b').textContent==='400');
+ assert.match(await page.locator('.kpi-yesterday').textContent(),/300/);assert.ok(state.contexts.some(c=>c.freezeUntil===''));
+ assert.match(await page.locator('.kpi span').textContent(),/today|hôm nay/i);
+});

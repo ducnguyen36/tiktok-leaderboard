@@ -218,10 +218,19 @@ function setupTicker(){
  const distance=span.getBoundingClientRect().width;tickerAnimation=ticker.animate([{transform:'translateX(0)'},{transform:'translateX(-'+distance+'px)'}],{duration:distance/(config.tickerSpeed*innerWidth/1920)*1000,iterations:Infinity,easing:'linear'});
  if(!dialog.hidden)tickerAnimation.pause();
 }
+// The total always leads with today's points. While the board holds the finished day,
+// today's total comes from an unheld request; yesterday goes on the small line.
+let liveTotalData=null,liveTotalAt=0;
+function loadLiveTotal(){
+ if(!rawData?.frozen||Date.now()-liveTotalAt<60000)return;liveTotalAt=Date.now();
+ fetchJSON('/api/leaderboard/next?'+new URLSearchParams({resetHour:String(config.resetHour),freezeUntil:''})).then(result=>{if(result?.data?.group){liveTotalData=result.data;renderSummary()}}).catch(()=>{liveTotalAt=0});
+}
 function renderSummary(){
- document.querySelector('.kpi b').textContent=rawData?C.formatPoints(C.total(rawData,config,dailyHistory)):'—';
- const totalYesterday=dailyHistory||rawData?.frozen;
- document.querySelector('.kpi span').textContent=t(totalYesterday?'kpi.yesterday':'kpi.today');
+ loadLiveTotal();const source=rawData?.frozen?liveTotalData:rawData,small=document.querySelector('.kpi-yesterday');
+ document.querySelector('.kpi b').textContent=source?C.formatPoints(C.total(source,config,false)):'—';
+ const yesterday=source?C.total(source,config,true):rawData?C.total(rawData,config,false):null;
+ small.hidden=yesterday===null;small.textContent=yesterday===null?'':t('kpi.yesterdayLine',{value:C.formatPoints(yesterday)});
+ document.querySelector('.kpi span').textContent=t('kpi.today');
  document.querySelector('.kpi').title=t('kpi.title');
  const groupsYesterday=dailyHistory||columnData[0]?.frozen,idolsYesterday=dailyHistory||columnData[1]?.frozen;
  boards[0].querySelector('.board-head b').textContent=t(groupsYesterday?'board.yesterdayGroups':'board.dailyGroups');boards[1].querySelector('.board-head b').textContent=t(idolsYesterday?'board.yesterdayIdols':'board.dailyIdols');

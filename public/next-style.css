@@ -477,3 +477,4 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,.b
 .row.skeleton .name{width:70%}.row.skeleton .points{width:40%;margin-top:.25em}
 @keyframes skeleton-shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
 @media(prefers-reduced-motion:reduce){.row.skeleton .name,.row.skeleton .points{animation:none}}
+.kpi-value{display:flex;flex-direction:column;align-items:inherit;min-width:0}.kpi-yesterday{margin-top:.3em;font-size:clamp(10px,.9vw,20px);font-weight:600;color:#c9b49f;white-space:nowrap;font-variant-numeric:tabular-nums}.kpi-yesterday[hidden]{display:none}
