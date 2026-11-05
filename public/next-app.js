@@ -23,7 +23,12 @@ const columnData=Array(7).fill(null),columnVersion=Array(7).fill(0),rowSignature
 const columnMeta=Array(7).fill(null);
 let scrollAnimations=[],tickerAnimation,tickerMessage='',lastContext='',historyMonth='',historyRequest=0,requestCounter=0,liveInFlight=new Map(),lastMotion='',lastTickerSpeed=0;
 let selectedMobileColumn=0;
-const configInputs=[...dialog.querySelectorAll('[data-config]')],scoreInputs=[...dialog.querySelectorAll('[data-score]')];
+const configInputs=[...dialog.querySelectorAll('[data-config]')],scoreInputs=[...dialog.querySelectorAll('[data-score]')],autoHideInputs=[...dialog.querySelectorAll('[data-auto-hide]')];
+let scoreOverrides=[];
+const shownScores=()=>N.visibleScores(config,scoreOverrides,Date.now());
+// Under auto-hide a manual flip only lasts 5 minutes; otherwise it changes the saved setting.
+function setScore(i,value){if(N.isAutoScore(config,i))scoreOverrides[i]={value,until:Date.now()+N.OVERRIDE_MS};else config.scores[i]=value}
+function syncScoreVisibility(){const shown=shownScores();boards.forEach((b,i)=>b.classList.toggle('hide-points',i<5&&!shown[i]));scoreInputs.forEach(e=>e.checked=shown[+e.dataset.score])}
 const camera=document.querySelector('.camera-notice');
 camera.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h4l2-3h6l2 3h4v13H3z"/><circle cx="12" cy="13" r="4"/><path d="M2 2l20 20"/></svg>';
 const cameraText=document.createTextNode('');camera.append(cameraText);
@@ -31,7 +36,7 @@ function translateUI(){
  cameraText.nodeValue=t('camera');
  boards.forEach(board=>{const header=board.querySelector('.board-head'),button=header.querySelector('.column-refresh'),name=header.querySelector('b').textContent;header.setAttribute('aria-label',t('actions.showRefresh',{name}));if(button)button.setAttribute('aria-label',t('actions.refresh',{name}))});
 }
-function syncInputs(){const sideButton=document.getElementById('quick-lastmonth'),sideLabel=config.language==='vi'?'Tắt → Tháng trước → Hôm nay':'Off → Last Month → Today';sideButton.setAttribute('aria-pressed',String(config.lastMonth||config.showDaily));sideButton.setAttribute('aria-label',sideLabel);sideButton.title=sideLabel;configInputs.forEach(e=>{const value=config[e.dataset.config];if(e.type==='checkbox')e.checked=Boolean(value);else if(e!==document.activeElement)e.value=value});scoreInputs.forEach(e=>e.checked=config.scores[+e.dataset.score])}
+function syncInputs(){const sideButton=document.getElementById('quick-lastmonth'),sideLabel=config.language==='vi'?'Tắt → Tháng trước → Hôm nay':'Off → Last Month → Today';sideButton.setAttribute('aria-pressed',String(config.lastMonth||config.showDaily));sideButton.setAttribute('aria-label',sideLabel);sideButton.title=sideLabel;configInputs.forEach(e=>{const value=config[e.dataset.config];if(e.type==='checkbox')e.checked=Boolean(value);else if(e!==document.activeElement)e.value=value});scoreInputs.forEach(e=>e.checked=shownScores()[+e.dataset.score]);autoHideInputs.forEach(e=>e.checked=config.autoHide[e.dataset.autoHide])}
 function safeAvatar(value){if(typeof value!=='string')return '';if(value.startsWith('userdata/avatars/')||value.startsWith('avatars/'))value='/'+value;if(value.startsWith('/userdata/avatars/')||value.startsWith('/avatars/'))return value;try{const u=new URL(value);return ['https:','http:'].includes(u.protocol)?u.href:''}catch{return ''}}
 function makeRow(entry,index,column){
  const row=document.createElement('div');row.className='row'+(index<3?' top'+(index+1):'');
@@ -234,7 +239,7 @@ function renderSummary(){
  syncMobileLayout();
 }
 function apply(){
- const previousLanguage=document.documentElement.lang;config=C.normalize(config);const languageChanged=previousLanguage!==config.language;I.applyDocument(config.language,document);N.translateExtras(config,rawData,historyPayload,dailyHistory);boards.forEach((b,i)=>b.classList.toggle('hide-points',i<5&&!config.scores[i]));
+ const previousLanguage=document.documentElement.lang;config=C.normalize(config);const languageChanged=previousLanguage!==config.language;I.applyDocument(config.language,document);N.translateExtras(config,rawData,historyPayload,dailyHistory);syncScoreVisibility();
  const side=config.showDaily||config.lastMonth,sideColumn=document.getElementById('side-column');
  const changedLayout=sideColumn.hidden===side||stage.dataset.layout!==config.layout;stage.dataset.layout=config.layout;stage.dataset.studio=String(config.layout!=='classic');sideColumn.hidden=!side;sixth.hidden=false;boards[6].hidden=false;stage.classList.toggle('six',side);grid.style.setProperty('--columns',side?6:5);
  syncMobileLayout();
@@ -426,14 +431,15 @@ document.getElementById('broadcast-settings').onclick=async()=>{
   renderAdmin();notify(say('Đã lưu và gửi cho tất cả TV','Saved and sent to all TVs'));loadCurrent();
  }catch(e){notify(say('Không gửi được cài đặt: ','Could not send settings: ')+e.message)}finally{button.disabled=false}
 };
-fetch('/auth/status',{cache:'no-store',credentials:'same-origin'}).then(r=>r.json()).then(status=>{adminState=status?.admin?{admin:true,csrf:status.csrf||'',email:status.email}:null;return readBoardSettings()}).then(payload=>{groupRules=payload.groupResetHours;sharedHold=payload.holdUntil||'';dayCount=payload.dayCount||'gift-time';if(adminState&&payload.version)adminState.lastSaved=payload;renderAdmin();followBroadcast(payload.version)}).catch(()=>{});
+fetch('/auth/status',{cache:'no-store',credentials:'same-origin'}).then(r=>r.json()).then(status=>{adminState=status?.admin?{admin:true,csrf:status.csrf||'',email:status.email}:null;N.admin=Boolean(adminState);[0,1,2,3,4,5,6].forEach(renderRows);N.translateExtras(config,rawData,historyPayload,dailyHistory);return readBoardSettings()}).then(payload=>{groupRules=payload.groupResetHours;sharedHold=payload.holdUntil||'';dayCount=payload.dayCount||'gift-time';if(adminState&&payload.version)adminState.lastSaved=payload;renderAdmin();followBroadcast(payload.version)}).catch(()=>{});
 document.getElementById('factory').onclick=()=>{config=C.normalize(defaults);apply();renderLocations();notify(t('toast.factory'))};
 configInputs.forEach(e=>e.onchange=()=>{if(editing===e&&!['layout','language','rankOrder'].includes(e.dataset.config))return;let value=e.type==='checkbox'?e.checked:e.type==='number'?Number(e.value):e.value;
  if(e.type==='number'){value=Math.max(Number(e.min),Math.min(Number(e.max),value));if(!Number.isFinite(value))return}
  config[e.dataset.config]=value;apply();if(['speed','pause'].includes(e.dataset.config))setupScroll();if(e.dataset.config==='tickerSpeed')setupTicker();document.getElementById('save-status').textContent=t('settings.changesSaved')});
 ['layout-choice','language-choice','rank-order-choice'].forEach(id=>document.getElementById(id).oninput=e=>e.target.onchange());
 document.getElementById('use-v1').onclick=()=>{try{localStorage.setItem('helios_leaderboard_ui_version','v1')}catch{notify(t('toast.storageSettings'));return}location.assign('/v1.html')};
-scoreInputs.forEach(e=>e.onchange=()=>{config.scores[+e.dataset.score]=e.checked;apply();document.getElementById('save-status').textContent=t('settings.changesSaved')});
+scoreInputs.forEach(e=>e.onchange=()=>{setScore(+e.dataset.score,e.checked);apply();document.getElementById('save-status').textContent=t('settings.changesSaved')});
+autoHideInputs.forEach(e=>e.onchange=()=>{config.autoHide={...config.autoHide,[e.dataset.autoHide]:e.checked};scoreOverrides=[];apply();document.getElementById('save-status').textContent=t('settings.changesSaved')});
 function openPage(index){document.querySelectorAll('[data-page]').forEach(e=>e.classList.toggle('active',+e.dataset.page===index));document.querySelectorAll('[data-pane]').forEach(e=>e.classList.toggle('active',+e.dataset.pane===index))}
 document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>openPage(+b.dataset.page));
 
@@ -600,7 +606,7 @@ document.addEventListener('keydown',e=>{
  if(ok&&!e.repeat&&!e.target.closest('button,input,select,[role=button]'))remoteTimer=setTimeout(showSettings,1200);
  if(e.repeat)return;
  if(e.key==='7'||e.key.toLowerCase()==='s'){showSettings();return}
- if(/^[1-5]$/.test(e.key)){const i=Number(e.key)-1;config.scores[i]=!config.scores[i];apply()}
+ if(/^[1-5]$/.test(e.key)){const i=Number(e.key)-1;setScore(i,!shownScores()[i]);apply()}
  if(e.key==='6'&&!e.shiftKey){cycleSideRanking()}
  if(e.key==='8')refreshAll();
  if(e.key==='9'){config.total=!config.total;apply()}
@@ -642,7 +648,7 @@ function connectStream(){
 setInterval(()=>{if(!streamConnected||columnMeta.some(meta=>meta?.stale))loadCurrent();if(unfreezeUntil&&Date.now()>=unfreezeUntil){unfreezeUntil=0;lastContext='';apply()}},10000);
 setInterval(()=>{loadCurrent();if(config.lastMonth)loadHistory(false)},60000);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){loadCurrent();if(config.lastMonth)loadHistory(false)}});
-setInterval(()=>{if(!document.hidden){[0,1,2,3,4,5,6].forEach(renderRows);N.translateExtras(config,rawData,historyPayload,dailyHistory)}},5000);
+setInterval(()=>{if(!document.hidden){[0,1,2,3,4,5,6].forEach(renderRows);N.translateExtras(config,rawData,historyPayload,dailyHistory);syncScoreVisibility()}},5000);
 window.addEventListener('pagehide',()=>{stream?.close();scrollAnimations.forEach(a=>a.cancel());tickerAnimation?.cancel()});
 apply();renderLocations();connectStream();
 if(window.HeliosWake)window.HeliosWake.start();

@@ -3,9 +3,12 @@ const{createNextFixture}=require('./support/next-ranking-server');
 const fs=require('node:fs'),path=require('node:path');
 async function fixture(t,viewport={width:1920,height:1080}){const{app,state}=createNextFixture(),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']});const page=await browser.newPage({viewport});page.setDefaultTimeout(8000);const errors=[];page.on('pageerror',e=>errors.push(e.message));t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});await page.goto('http://127.0.0.1:'+server.address().port+'/new');await page.locator('[data-key="monthly-ranking"] .row:not(.skeleton)').first().waitFor({state:'attached'});return{page,state}}
 test('new desktop board has one monthly talent column, stacked Today talents/groups, live avatars and warning details',async t=>{
- const{page}=await fixture(t);assert.equal(await page.locator('[data-key="monthly-ranking"] .row').count(),23);assert.match(await page.locator('[data-key="side-talents"]').textContent(),/TEST TODAY/);assert.match(await page.locator('[data-key="side-groups"]').textContent(),/TEST GROUP/);
+ const{page,state}=await fixture(t);assert.equal(await page.locator('[data-key="monthly-ranking"] .row').count(),23);assert.match(await page.locator('[data-key="side-talents"]').textContent(),/TEST TODAY/);assert.match(await page.locator('[data-key="side-groups"]').textContent(),/TEST GROUP/);
  assert.equal(await page.locator('[data-key="monthly-ranking"] .avatar.live').count(),23);assert.equal(await page.locator('[data-key="monthly-ranking"] .equalizer i').count(),69);
  const positions=await page.locator('.monthly-ranking,.side-column').evaluateAll(els=>els.map(e=>e.getBoundingClientRect().left));assert.ok(positions[1]>positions[0]);
+ // Sheet problems stay off public TVs; only an admin browser sees them.
+ assert.equal(await page.locator('.warning').count(),0);assert.equal(await page.locator('#sheet-status').isHidden(),true);
+ state.admin=true;await page.reload();await page.locator('[data-key="monthly-ranking"] .warning').waitFor();
  await page.locator('[data-key="monthly-ranking"] .warning').click();await page.locator('#warning-dialog').waitFor({state:'visible'});assert.match(await page.locator('#warning-details').textContent(),/2,000/);assert.equal(await page.locator('#warning-sheet').getAttribute('href'),'https://docs.google.com/spreadsheets/d/test/edit');
  await page.locator('#warning-dialog button').click();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
 });
@@ -107,4 +110,12 @@ test('a slow first load shows placeholder rows, and a reload shows this device l
  await monthly.locator('.row:not(.skeleton)').first().waitFor({timeout:8000});assert.equal(await page.locator('.row.skeleton').count(),0);
  await page.evaluate(()=>localStorage.setItem('helios_leaderboard_next_live',JSON.stringify({...JSON.parse(localStorage.getItem('helios_leaderboard_next_live')),savedAt:Date.now()-13*3600000})));
  await page.reload();await monthly.locator('.row.skeleton').first().waitFor({timeout:2000});
+});
+test('auto-hide hides group points from day 15 and a manual flip lasts 5 minutes',async t=>{
+ const{page}=await fixture(t);const start=new Date('2026-11-20T03:00:00Z').getTime();await page.clock.setFixedTime(start);await page.reload();await page.locator('[data-key="monthly-ranking"] .row:not(.skeleton)').first().waitFor({state:'attached'});
+ const hidden=async i=>/hide-points/.test(await page.locator('[data-column="'+i+'"]').getAttribute('class'));
+ await page.keyboard.press('7');await page.locator('[data-auto-hide="group"]').check();await page.locator('#done-settings').click();
+ assert.deepEqual([await hidden(0),await hidden(1),await hidden(2),await hidden(3)],[true,false,true,false]);
+ await page.keyboard.press('1');assert.equal(await hidden(0),false);assert.equal(await hidden(2),true);
+ await page.clock.setFixedTime(start+6*60000);await page.waitForFunction(()=>document.querySelector('[data-column="0"]').classList.contains('hide-points'));
 });

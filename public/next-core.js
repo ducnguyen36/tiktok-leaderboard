@@ -3,8 +3,12 @@
  // dailyResetVersion 2: one-time move of saved new-board settings to the 06:00 workday held on the board until 16:00.
  // Version 3: the hold moved to 14:00; a saved 16:00 (the old default) follows, other choices are kept.
  const DAILY={resetHour:6,freezeUntil:'14:00'};
- function normalize(raw={}){const version=raw.dailyResetVersion,reset=version===2||version===3?(version===2&&raw.freezeUntil==='16:00'?{freezeUntil:DAILY.freezeUntil}:{}):DAILY;return{...C.normalize({...DAILY,...raw,...reset}),dailyResetVersion:3,layout:['classic','studio','podium'].includes(raw.layout)?raw.layout:'podium',appearanceVersion:1,showDaily:typeof raw.showDaily==='boolean'?raw.showDaily:true,dailyMode:raw.dailyMode==='yesterday'?'yesterday':'daily'}}
+ function normalize(raw={}){const version=raw.dailyResetVersion,reset=version===2||version===3?(version===2&&raw.freezeUntil==='16:00'?{freezeUntil:DAILY.freezeUntil}:{}):DAILY;return{...C.normalize({...DAILY,...raw,...reset}),dailyResetVersion:3,layout:['classic','studio','podium'].includes(raw.layout)?raw.layout:'podium',appearanceVersion:1,showDaily:typeof raw.showDaily==='boolean'?raw.showDaily:true,autoHide:{group:raw.autoHide?.group===true,individual:raw.autoHide?.individual===true},dailyMode:raw.dailyMode==='yesterday'?'yesterday':'daily'}}
  function migrate(saved,legacy){return normalize(saved?{...saved,layout:saved.appearanceVersion===1?saved.layout:'podium'}:{...(legacy||{language:'vi'}),layout:'podium',...DAILY})}
+ // Auto-hide points: shown on days 1-14 and hidden from day 15 (Vietnam calendar). A manual flip lasts 5 minutes.
+ const SCORE_KINDS=['group','individual','group','individual','individual'],OVERRIDE_MS=5*60000;
+ const isAutoScore=(config,i)=>config.autoHide?.[SCORE_KINDS[i]]===true;
+ function visibleScores(config,overrides,now){const day=new Date(now+7*3600000).getUTCDate();return config.scores.map((shown,i)=>{if(!isAutoScore(config,i))return shown;const o=overrides?.[i];return o&&o.until>now?o.value:day<15})}
  function warningFor(data,kind,period,row){return(data?.reconciliation?.warnings||[]).find(w=>w.kind===kind&&w.period===period&&String(w.groupId)===String(row.groupId)&&w.name===row.name)||null}
  function panels(raw,config,history){const selected=config.lastMonth?'history':config.dailyMode;return[
   {key:'top-daily-group',kind:'group',period:config.dailyMode,rows:raw?.group?.[config.dailyMode],limit:config.layout==='podium'?11:10},
@@ -44,7 +48,7 @@
  // Smart TV browsers (Tizen, webOS, Android TV…) get simplified effects.
  const TV_AGENT=/SMART-?TV|SmartTV|Tizen|Web0S|webOS|NetCast|BRAVIA|HbbTV|Android TV|GoogleTV|AFT[A-Z]|CrKey|Roku|AppleTV|VIDAA|NETTV|Opera TV|TV Safari|; ?TV[;)]/i;
  function isTvDevice(userAgent,override){if(override==='1')return true;if(override==='0')return false;return TV_AGENT.test(userAgent||'')}
- return{normalize,migrate,panels,warningFor,sheetProblems,milestoneHits,isLive,isTvDevice,selectRows};
+ return{normalize,migrate,visibleScores,isAutoScore,OVERRIDE_MS,panels,warningFor,sheetProblems,milestoneHits,isLive,isTvDevice,selectRows};
 });
 /* Original UI and Settings are reused, with only feature-specific row decorations. */
 if(typeof window==='object'){
@@ -58,7 +62,7 @@ if(typeof window==='object'){
    const bars=document.createElement('span');bars.className='equalizer';bars.setAttribute('aria-hidden','true');for(let i=0;i<3;i++)bars.append(document.createElement('i'));avatar.append(bars);
   }
   const kind=[0,2,6].includes(column)?'group':'individual',period=column>=5&&config.lastMonth?'history':[2,3,4].includes(column)?'monthly':'daily',warning=N.warningFor(raw,kind,period,entry);
-  if(warning){const b=document.createElement('button');b.className='warning';b.textContent='!';b.setAttribute('aria-label',text(config,'Chênh lệch điểm so với sheet','Score differs from sheet')+' · '+entry.name);b.onclick=()=>N.showWarning(warning,config);name.parentElement.classList.add('has-warning');name.after(b)}
+  if(warning&&N.admin){const b=document.createElement('button');b.className='warning';b.textContent='!';b.setAttribute('aria-label',text(config,'Chênh lệch điểm so với sheet','Score differs from sheet')+' · '+entry.name);b.onclick=()=>N.showWarning(warning,config);name.parentElement.classList.add('has-warning');name.after(b)}
  };
  N.showWarning=(warning,config)=>{
   const d=document.getElementById('warning-dialog');document.getElementById('warning-title').textContent=text(config,'Chênh lệch điểm so với sheet','Score differs from sheet');document.getElementById('warning-name').textContent=warning.name+' · '+text(config,'Cùng ngày đã điền điểm và phiên hoàn tất, không phải tổng live chưa chốt.','Same filled days and completed sessions; not the unclosed live total.');
@@ -72,15 +76,16 @@ if(typeof window==='object'){
   const daily=yesterday||raw?.frozen,period=config.lastMonth?text(config,'Tháng trước','Last Month'):text(config,daily?'Hôm qua':'Hôm nay',daily?'Yesterday':'Today');
   for(const [index,kind]of [[5,text(config,'Talent','Talents')],[6,text(config,'Nhóm','Groups')]])document.querySelector('[data-column="'+index+'"] .board-head b').textContent=period+' · '+kind;
   const show=document.getElementById('show-daily-label');if(show?.firstChild)show.firstChild.nodeValue=text(config,'Hiển thị cột Today','Show Today ranking');
+  for(const [kind,vi,en]of [['group','Tự ẩn điểm nhóm (ẩn từ ngày 15, hiện lại ngày 1)','Auto-hide group points (hidden from day 15, back on day 1)'],['individual','Tự ẩn điểm cá nhân (ẩn từ ngày 15, hiện lại ngày 1)','Auto-hide idol points (hidden from day 15, back on day 1)']]){const label=document.getElementById('auto-hide-'+kind+'-label');if(label?.firstChild)label.firstChild.nodeValue=text(config,vi,en)}
   document.getElementById('old-board').textContent=text(config,'Mở bảng xếp hạng cũ','Open old leaderboard');
   const check=raw?.reconciliation,issues=(check?.sources||[]).filter(s=>s.state!=='checked');
-  const status=document.getElementById('sheet-status');
+  const status=document.getElementById('sheet-status');status.hidden=!N.admin;
   status.textContent=check?.state==='checked'?text(config,'Sheets: chỉ đối soát phiên hoàn tất và ngày đã điền điểm.','Sheets: only verified closed sessions and filled days.'):check?.state==='pending'?text(config,'Sheets: đang kiểm tra…','Sheets: checking…'):text(config,'Sheets: chưa kết nối hoặc tạm không đọc được.','Sheets: disconnected or temporarily unavailable.');
   status.title=issues.map(s=>s.group+' ('+s.state+')').join(' · ');
   // Reading problems must be visible on the board, not only inside Settings.
   let alert=document.getElementById('sheet-alert');
   if(!alert){alert=document.createElement('div');alert.id='sheet-alert';alert.className='sheet-alert';alert.setAttribute('role','alert');document.body.append(alert)}
-  const problem=N.sheetProblems(check);alert.hidden=!problem;
+  const problem=N.admin&&N.sheetProblems(check);alert.hidden=!problem;
   if(problem){
    const reconnect=problem.failed.some(s=>s.state==='reconnect_required');
    alert.textContent=problem.all?text(config,'⚠ Sheets: chưa kết nối hoặc không đọc được, không có cảnh báo chênh lệch','⚠ Sheets disconnected or unreadable: no score warnings')
