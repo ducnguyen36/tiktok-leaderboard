@@ -62,7 +62,9 @@ if(typeof window==='object'){
    const bars=document.createElement('span');bars.className='equalizer';bars.setAttribute('aria-hidden','true');for(let i=0;i<3;i++)bars.append(document.createElement('i'));avatar.append(bars);
   }
   const kind=[0,2,6].includes(column)?'group':'individual',period=column>=5&&config.lastMonth?'history':[2,3,4].includes(column)?'monthly':'daily',warning=N.warningFor(raw,kind,period,entry);
+  // Admins get the clickable sheet details; everyone else sees a quiet mark that the score is not final yet.
   if(warning&&N.admin){const b=document.createElement('button');b.className='warning';b.textContent='!';b.setAttribute('aria-label',text(config,'Chênh lệch điểm so với sheet','Score differs from sheet')+' · '+entry.name);b.onclick=()=>N.showWarning(warning,config);name.parentElement.classList.add('has-warning');name.after(b)}
+  else if(warning){const mark=document.createElement('span');mark.className='warning pending';mark.textContent='!';mark.setAttribute('role','img');mark.title=text(config,'Điểm đang được đối soát lại, chưa chốt','Points are still being reconciled, not final');mark.setAttribute('aria-label',mark.title+' · '+entry.name);name.parentElement.classList.add('has-warning');name.after(mark)}
  };
  N.showWarning=(warning,config)=>{
   const d=document.getElementById('warning-dialog');document.getElementById('warning-title').textContent=text(config,'Chênh lệch điểm so với sheet','Score differs from sheet');document.getElementById('warning-name').textContent=warning.name+' · '+text(config,'Cùng ngày đã điền điểm và phiên hoàn tất, không phải tổng live chưa chốt.','Same filled days and completed sessions; not the unclosed live total.');

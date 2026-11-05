@@ -9,9 +9,10 @@ test('new desktop board has one monthly talent column, stacked Today talents/gro
  assert.deepEqual(await page.locator('[data-key="monthly-ranking"] .avatar.live').first().evaluate(a=>{const dot=getComputedStyle(a.querySelector('.equalizer')),bar=getComputedStyle(a.querySelector('.equalizer i'));return[getComputedStyle(a).outlineStyle,dot.borderRadius,bar.display]}),['none','50%','none']);
  const positions=await page.locator('.monthly-ranking,.side-column').evaluateAll(els=>els.map(e=>e.getBoundingClientRect().left));assert.ok(positions[1]>positions[0]);
  // Sheet problems stay off public TVs; only an admin browser sees them.
- assert.equal(await page.locator('.warning').count(),0);assert.equal(await page.locator('#sheet-status').isHidden(),true);
- state.admin=true;await page.reload();await page.locator('[data-key="monthly-ranking"] .warning').waitFor();
- await page.locator('[data-key="monthly-ranking"] .warning').click();await page.locator('#warning-dialog').waitFor({state:'visible'});assert.match(await page.locator('#warning-details').textContent(),/2,000/);assert.equal(await page.locator('#warning-sheet').getAttribute('href'),'https://docs.google.com/spreadsheets/d/test/edit');
+ // Public screens get a quiet, non-clickable "not final" mark instead of the details button.
+ assert.equal(await page.locator('button.warning').count(),0);assert.equal(await page.locator('[data-key="monthly-ranking"] .warning.pending').count(),1);assert.equal(await page.locator('#sheet-status').isHidden(),true);
+ state.admin=true;await page.reload();await page.locator('[data-key="monthly-ranking"] button.warning').waitFor();
+ await page.locator('[data-key="monthly-ranking"] button.warning').click();await page.locator('#warning-dialog').waitFor({state:'visible'});assert.match(await page.locator('#warning-details').textContent(),/2,000/);assert.equal(await page.locator('#warning-sheet').getAttribute('href'),'https://docs.google.com/spreadsheets/d/test/edit');
  await page.locator('#warning-dialog button').click();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
 });
 test('Last Month replaces Today, hiding Today expands monthly, preferences persist without touching old settings',async t=>{
