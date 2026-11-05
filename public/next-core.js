@@ -5,10 +5,10 @@
  const DAILY={resetHour:6,freezeUntil:'14:00'};
  function normalize(raw={}){const version=raw.dailyResetVersion,reset=version===2||version===3?(version===2&&raw.freezeUntil==='16:00'?{freezeUntil:DAILY.freezeUntil}:{}):DAILY;return{...C.normalize({...DAILY,...raw,...reset}),dailyResetVersion:3,layout:['classic','studio','podium'].includes(raw.layout)?raw.layout:'podium',appearanceVersion:1,showDaily:typeof raw.showDaily==='boolean'?raw.showDaily:true,autoHide:{group:raw.autoHide?.group===true,individual:raw.autoHide?.individual===true},dailyMode:raw.dailyMode==='yesterday'?'yesterday':'daily'}}
  function migrate(saved,legacy){return normalize(saved?{...saved,layout:saved.appearanceVersion===1?saved.layout:'podium'}:{...(legacy||{language:'vi'}),layout:'podium',...DAILY})}
- // Auto-hide points: shown on days 1-14 and hidden from day 15 (Vietnam calendar). A manual flip lasts 5 minutes.
+ // Auto-hide points (Vietnam time): hidden from 00:00 on day 15 until the 07:00 monthly close on day 1. A manual flip lasts 5 minutes.
  const SCORE_KINDS=['group','individual','group','individual','individual'],OVERRIDE_MS=5*60000;
  const isAutoScore=(config,i)=>config.autoHide?.[SCORE_KINDS[i]]===true;
- function visibleScores(config,overrides,now){const day=new Date(now+7*3600000).getUTCDate();return config.scores.map((shown,i)=>{if(!isAutoScore(config,i))return shown;const o=overrides?.[i];return o&&o.until>now?o.value:day<15})}
+ function visibleScores(config,overrides,now){const vn=new Date(now+7*3600000),day=vn.getUTCDate(),open=day>1&&day<15||day===1&&vn.getUTCHours()>=7;return config.scores.map((shown,i)=>{if(!isAutoScore(config,i))return shown;const o=overrides?.[i];return o&&o.until>now?o.value:open})}
  function warningFor(data,kind,period,row){return(data?.reconciliation?.warnings||[]).find(w=>w.kind===kind&&w.period===period&&String(w.groupId)===String(row.groupId)&&w.name===row.name)||null}
  function panels(raw,config,history){const selected=config.lastMonth?'history':config.dailyMode;return[
   {key:'top-daily-group',kind:'group',period:config.dailyMode,rows:raw?.group?.[config.dailyMode],limit:config.layout==='podium'?11:10},
@@ -76,7 +76,7 @@ if(typeof window==='object'){
   const daily=yesterday||raw?.frozen,period=config.lastMonth?text(config,'Tháng trước','Last Month'):text(config,daily?'Hôm qua':'Hôm nay',daily?'Yesterday':'Today');
   for(const [index,kind]of [[5,text(config,'Talent','Talents')],[6,text(config,'Nhóm','Groups')]])document.querySelector('[data-column="'+index+'"] .board-head b').textContent=period+' · '+kind;
   const show=document.getElementById('show-daily-label');if(show?.firstChild)show.firstChild.nodeValue=text(config,'Hiển thị cột Today','Show Today ranking');
-  for(const [kind,vi,en]of [['group','Tự ẩn điểm nhóm (ẩn từ ngày 15, hiện lại ngày 1)','Auto-hide group points (hidden from day 15, back on day 1)'],['individual','Tự ẩn điểm cá nhân (ẩn từ ngày 15, hiện lại ngày 1)','Auto-hide idol points (hidden from day 15, back on day 1)']]){const label=document.getElementById('auto-hide-'+kind+'-label');if(label?.firstChild)label.firstChild.nodeValue=text(config,vi,en)}
+  for(const [kind,vi,en]of [['group','Tự ẩn điểm nhóm (ẩn từ ngày 15, hiện lại 7:00 ngày 1)','Auto-hide group points (hidden from day 15, back at 07:00 on day 1)'],['individual','Tự ẩn điểm cá nhân (ẩn từ ngày 15, hiện lại 7:00 ngày 1)','Auto-hide idol points (hidden from day 15, back at 07:00 on day 1)']]){const label=document.getElementById('auto-hide-'+kind+'-label');if(label?.firstChild)label.firstChild.nodeValue=text(config,vi,en)}
   document.getElementById('old-board').textContent=text(config,'Mở bảng xếp hạng cũ','Open old leaderboard');
   const check=raw?.reconciliation,issues=(check?.sources||[]).filter(s=>s.state!=='checked');
   const status=document.getElementById('sheet-status');status.hidden=!N.admin;

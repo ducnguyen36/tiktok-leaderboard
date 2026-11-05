@@ -4,12 +4,13 @@ const assert = require('node:assert/strict');
 const N = require('../public/next-core');
 const at = iso => new Date(iso).getTime();
 const config = autoHide => N.normalize({ scores: [true, true, true, true, true], autoHide });
-test('auto-hide follows the Vietnam calendar: points on days 1-14, hidden from day 15', () => {
+test('auto-hide follows Vietnam time: hidden from 00:00 on day 15 until the 07:00 close on day 1', () => {
     const c = config({ group: true });
     assert.deepEqual(N.visibleScores(c, [], at('2026-11-14T16:59:00Z')), [true, true, true, true, true]);
     assert.deepEqual(N.visibleScores(c, [], at('2026-11-14T17:00:00Z')), [false, true, false, true, true]);
     assert.deepEqual(N.visibleScores(c, [], at('2026-11-30T16:59:00Z')), [false, true, false, true, true]);
-    assert.deepEqual(N.visibleScores(c, [], at('2026-11-30T17:00:00Z')), [true, true, true, true, true]);
+    assert.deepEqual(N.visibleScores(c, [], at('2026-11-30T23:59:00Z')), [false, true, false, true, true]);
+    assert.deepEqual(N.visibleScores(c, [], at('2026-12-01T00:00:00Z')), [true, true, true, true, true]);
     assert.deepEqual(N.visibleScores(config({ individual: true }), [], at('2026-11-20T03:00:00Z')), [true, false, true, false, false]);
 });
 test('a manual flip under auto-hide only lasts until it expires; without auto-hide the saved choice wins', () => {
