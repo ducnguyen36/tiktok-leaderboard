@@ -164,6 +164,7 @@ html,body{background:#171614}
 .board-head b{color:#fff6ed}
 .row{border-bottom:1px solid #ffffff15}
 .row:nth-child(even){background:#ffffff03}
+.row.gliding{position:relative;z-index:3}
 .row.top1{background:linear-gradient(90deg,#ffcf5b12,transparent)}
 .points{color:#e8d7c6}.name{color:#fff9f2}
 .avatar{background:linear-gradient(145deg,#49413b,#292520);color:#efe2d6;border-color:#7c7064}

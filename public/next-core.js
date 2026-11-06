@@ -56,12 +56,13 @@ if(typeof window==='object'){
  // ?tv=1 / ?tv=0 forces the TV mode on a device and is remembered there.
  let tvOverride=null;try{const forced=new URLSearchParams(location.search).get('tv');if(forced==='1'||forced==='0')localStorage.setItem('helios_tv_mode',forced);else if(forced==='auto')localStorage.removeItem('helios_tv_mode');tvOverride=localStorage.getItem('helios_tv_mode')}catch{}
  document.documentElement.classList.toggle('tv-device',N.isTvDevice(navigator.userAgent,tvOverride));
+ N.rowWarning=(raw,column,entry,config)=>N.warningFor(raw,[0,2,6].includes(column)?'group':'individual',column>=5&&config.lastMonth?'history':[2,3,4].includes(column)?'monthly':'daily',entry);
  N.decorateRow=(row,avatar,name,entry,column,raw,config)=>{
   if(!(column>=5&&config.lastMonth)&&N.isLive(entry)){
    avatar.classList.add('live');avatar.title=text(config,'Đang live qua HeliosControl','Live through HeliosControl');
    const bars=document.createElement('span');bars.className='equalizer';bars.setAttribute('aria-hidden','true');for(let i=0;i<3;i++)bars.append(document.createElement('i'));avatar.append(bars);
   }
-  const kind=[0,2,6].includes(column)?'group':'individual',period=column>=5&&config.lastMonth?'history':[2,3,4].includes(column)?'monthly':'daily',warning=N.warningFor(raw,kind,period,entry);
+  const warning=N.rowWarning(raw,column,entry,config);
   // Admins get the clickable sheet details; everyone else sees a quiet mark that the score is not final yet.
   if(warning&&N.admin){const b=document.createElement('button');b.className='warning';b.textContent='!';b.setAttribute('aria-label',text(config,'Chênh lệch điểm so với sheet','Score differs from sheet')+' · '+entry.name);b.onclick=()=>N.showWarning(warning,config);name.parentElement.classList.add('has-warning');name.after(b)}
   else if(warning){const mark=document.createElement('span');mark.className='warning pending';mark.textContent='!';mark.setAttribute('role','img');mark.title=text(config,'Điểm đang được đối soát lại, chưa chốt','Points are still being reconciled, not final');mark.setAttribute('aria-label',mark.title+' · '+entry.name);name.parentElement.classList.add('has-warning');name.after(mark)}

@@ -1,9 +1,9 @@
 const express=require('express'),path=require('node:path');
 function createNextFixture(){
- const app=express(),streams=new Set(),state={fail:false,live:true,offset:0,historyRequests:0,nextRequests:0,contexts:[]};
+ const app=express(),streams=new Set(),state={fail:false,live:true,offset:0,historyRequests:0,nextRequests:0,contexts:[]},checkedAt=new Date().toISOString();
  state.invalidate=()=>streams.forEach(r=>r.write('data: {"status":"invalidate"}\n\n'));
  function row(name,value,kind){return{name,value:value+state.offset,groupId:'g',locationId:'loc_hcm',avatar:'/helios-asset-23.png',live:state.live,liveExpiresAt:new Date(Date.now()+90000).toISOString()}}
- function data(){return{individual:{monthly:Array.from({length:23},(_,i)=>row(i===0?'TEST ALICE':'TEST TALENT '+i,9000-i*100)),daily:[row('TEST TODAY',400)],yesterday:[row('TEST YESTERDAY',300)]},group:{monthly:[row('TEST GROUP',13000)],daily:[row('TEST GROUP',400)],yesterday:[row('TEST GROUP',300)]},groups:[{id:'g',name:'TEST GROUP',locationId:'loc_hcm'}],locations:[{id:'loc_hcm',name:'TEST HCM'}],dailyPeriod:{today:'2026-10-07',yesterday:'2026-10-06'},reconciliation:{state:'checked',warnings:[{kind:'individual',period:'monthly',groupId:'g',name:'TEST ALICE',backend:9000,sheet:7000,delta:2000,dates:['2026-10-01'],checkedAt:new Date().toISOString(),sheetUrl:'https://docs.google.com/spreadsheets/d/test/edit'}],sources:[]}}}
+ function data(){return{individual:{monthly:Array.from({length:23},(_,i)=>row(i===(state.swap?1:0)?'TEST ALICE':'TEST TALENT '+(state.swap&&i===0?1:i),9000-i*100)),daily:[row('TEST TODAY',400)],yesterday:[row('TEST YESTERDAY',300)]},group:{monthly:[row('TEST GROUP',13000)],daily:[row('TEST GROUP',400)],yesterday:[row('TEST GROUP',300)]},groups:[{id:'g',name:'TEST GROUP',locationId:'loc_hcm'}],locations:[{id:'loc_hcm',name:'TEST HCM'}],dailyPeriod:{today:'2026-10-07',yesterday:'2026-10-06'},reconciliation:{state:'checked',warnings:[{kind:'individual',period:'monthly',groupId:'g',name:'TEST ALICE',backend:9000,sheet:7000,delta:2000,dates:['2026-10-01'],checkedAt,sheetUrl:'https://docs.google.com/spreadsheets/d/test/edit'}],sources:[]}}}
  app.get('/api/leaderboard/next',async(req,res)=>{state.nextRequests++;state.contexts.push({...req.query});if(state.delay)await new Promise(r=>setTimeout(r,state.delay));if(state.fail)return res.status(503).json({status:'error'});const d=data();
   // state.held: the board holds the finished day (300); only an unheld request sees today (400).
   if(state.held&&req.query.freezeUntil){d.group={...d.group,daily:d.group.yesterday,yesterday:[row('TEST GROUP',200)]};d.frozen=true}
@@ -12,7 +12,7 @@ function createNextFixture(){
  state.admin=false;state.settings={version:0,config:null,groupResetHours:null,updatedAt:null,updatedBy:null};
  state.broadcast=()=>streams.forEach(r=>r.write('data: '+JSON.stringify({status:'ok',invalidated:true,settingsVersion:state.settings.version})+'\n\n'));
  app.use(express.json());
- app.get('/auth/status',(req,res)=>res.json({authorized:true,admin:state.admin,csrf:state.admin?'test-csrf':undefined,email:state.admin?'admin@example.test':undefined}));
+ app.get('/auth/status',async(req,res)=>{await state.authGate;res.json({authorized:true,admin:state.admin,csrf:state.admin?'test-csrf':undefined,email:state.admin?'admin@example.test':undefined})});
  app.get('/api/board-settings',(req,res)=>res.json({status:'ok',...state.settings,admin:state.admin,device:state.device||null}));
  state.push=device=>{state.device=device;streams.forEach(r=>r.write('data: '+JSON.stringify({status:'ok',invalidated:true,settingsVersion:state.settings.version,devicePush:device.version})+'\n\n'))};
  app.post('/api/board-settings',(req,res)=>{if(!state.admin||req.get('x-csrf-token')!=='test-csrf')return res.status(403).json({status:'error',error:'admin_required'});

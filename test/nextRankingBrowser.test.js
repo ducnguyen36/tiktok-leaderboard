@@ -122,6 +122,23 @@ test('auto-hide hides group points from day 15 and a manual flip lasts 5 minutes
  await page.keyboard.press('1');assert.equal(await hidden(0),false);assert.equal(await hidden(2),true);
  await page.clock.setFixedTime(start+6*60000);await page.waitForFunction(()=>document.querySelector('[data-column="0"]').classList.contains('hide-points'));
 });
+test('a rank change glides on the same row element and leaves scrolling and avatars alone',async t=>{
+ const{page,state}=await fixture(t);await page.waitForFunction(()=>streamConnected);
+ await page.evaluate(()=>{const monthly=document.querySelector('[data-key="monthly-ranking"]'),row=monthly.querySelector('.row[data-name="TEST ALICE"]');window.aliceRow=row;window.aliceAvatar=row.querySelector('.avatar');window.aliceImage=row.querySelector('img');window.track=monthly.querySelector('.all-track');window.trackScroll=window.track.getAnimations()[0]});
+ assert.equal(await page.evaluate(()=>[aliceRow.dataset.rank,aliceRow.className].join('|')),'1|row top1');assert.equal(await page.evaluate(()=>trackScroll.playState),'running');
+ state.swap=true;state.invalidate();await page.waitForFunction(()=>aliceRow.dataset.rank==='2');
+ const seen=await page.evaluate(()=>{const monthly=document.querySelector('[data-key="monthly-ranking"]'),first=monthly.querySelector('.row[data-name="TEST TALENT 1"]');return{connected:aliceRow.isConnected,same:monthly.querySelector('.row[data-name="TEST ALICE"]')===aliceRow,glideFrom:aliceRow.glide?.effect.getKeyframes()[0].transform,glideTo:aliceRow.glide?.effect.getKeyframes()[1].transform,aliceClass:aliceRow.className.replace(' gliding',''),rank:aliceRow.querySelector('.rank').textContent,points:aliceRow.querySelector('.points').textContent,firstClass:first.className.replace(' gliding',''),firstRank:first.querySelector('.rank').textContent,firstIndex:[...first.parentElement.children].indexOf(first),avatar:aliceRow.querySelector('.avatar')===aliceAvatar&&aliceRow.querySelector('img')===aliceImage,track:monthly.querySelector('.all-track')===track,scrollSame:track.getAnimations().includes(trackScroll),scrollState:trackScroll.playState,rows:monthly.querySelectorAll('.row').length}});
+ // Alice falls one row, so her glide starts one row height above where she now sits.
+ assert.match(seen.glideFrom,/^translate\(0px, -\d+(\.\d+)?px\)/);assert.equal(seen.glideTo,'none');delete seen.glideFrom;delete seen.glideTo;
+ assert.deepEqual(seen,{connected:true,same:true,aliceClass:'row top2',rank:'2',points:'8,900',firstClass:'row top1',firstRank:'1',firstIndex:0,avatar:true,track:true,scrollSame:true,scrollState:'running',rows:23});
+ await page.waitForFunction(()=>aliceRow.glide.playState==='finished'&&!aliceRow.classList.contains('gliding'));assert.equal(await page.evaluate(()=>trackScroll.playState),'running');
+});
+test('an admin whose rows render before the login status resolves still gets the warning button and scrolling',async t=>{
+ const{page,state}=await fixture(t);let release;state.admin=true;state.authGate=new Promise(r=>release=r);await page.reload();
+ const monthly=page.locator('[data-key="monthly-ranking"]');await monthly.locator('.warning.pending').waitFor({state:'attached'});assert.equal(await page.locator('button.warning').count(),0);
+ release();await monthly.locator('button.warning').waitFor({state:'attached'});assert.equal(await monthly.locator('.warning.pending').count(),0);
+ assert.equal(await monthly.locator('.all-track').evaluate(track=>track.getAnimations()[0]?.playState),'running');
+});
 test('the total leads with today even while the board holds the finished day, with yesterday on a small line',async t=>{
  const{page,state}=await fixture(t);assert.equal(await page.locator('.kpi b').textContent(),'400');assert.match(await page.locator('.kpi-yesterday').textContent(),/300/);
  state.held=true;await page.reload();await page.waitForFunction(()=>document.querySelector('.kpi b').textContent==='400');

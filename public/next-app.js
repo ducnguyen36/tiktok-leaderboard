@@ -19,7 +19,7 @@ const defaults=C.clone(C.defaults);
 function persist(){try{localStorage.setItem(storageKey+'_current',JSON.stringify(config))}catch(e){notify(t('toast.storageSession'))}}
 let rawData=null,historyPayload=null,allLocations=[],allGroups=[],dailyHistory=false,unfreezeUntil=0;
 let dataError=false;const manualPending=new Map(),manualEpoch=new Map();
-const columnData=Array(7).fill(null),columnVersion=Array(7).fill(0),rowSignatures=Array(7).fill('');
+const columnData=Array(7).fill(null),columnVersion=Array(7).fill(0),rowSignatures=Array(7).fill(''),rowStructures=Array(7).fill('');
 const columnMeta=Array(7).fill(null);
 let scrollAnimations=[],tickerAnimation,tickerMessage='',lastContext='',historyMonth='',historyRequest=0,requestCounter=0,liveInFlight=new Map(),lastMotion='',lastTickerSpeed=0;
 let selectedMobileColumn=0;
@@ -38,6 +38,8 @@ function translateUI(){
 }
 function syncInputs(){const sideButton=document.getElementById('quick-lastmonth'),sideLabel=config.language==='vi'?'Tắt → Tháng trước → Hôm nay':'Off → Last Month → Today';sideButton.setAttribute('aria-pressed',String(config.lastMonth||config.showDaily));sideButton.setAttribute('aria-label',sideLabel);sideButton.title=sideLabel;configInputs.forEach(e=>{const value=config[e.dataset.config];if(e.type==='checkbox')e.checked=Boolean(value);else if(e!==document.activeElement)e.value=value});scoreInputs.forEach(e=>e.checked=shownScores()[+e.dataset.score]);autoHideInputs.forEach(e=>e.checked=config.autoHide[e.dataset.autoHide])}
 function safeAvatar(value){if(typeof value!=='string')return '';if(value.startsWith('userdata/avatars/')||value.startsWith('avatars/'))value='/'+value;if(value.startsWith('/userdata/avatars/')||value.startsWith('/avatars/'))return value;try{const u=new URL(value);return ['https:','http:'].includes(u.protocol)?u.href:''}catch{return ''}}
+// What a row shows besides its rank and points; a change here means building the row again.
+function rowLook(entry,column){return JSON.stringify([entry.avatar,N.isLive(entry),N.rowWarning(rawData,column,entry,config),entry.yesterday?.value])}
 function makeRow(entry,index,column){
  const row=document.createElement('div');row.className='row'+(index<3?' top'+(index+1):'');
  const rank=document.createElement('i');rank.className='rank';rank.textContent=index+1;
@@ -51,7 +53,7 @@ function makeRow(entry,index,column){
  if(!dailyHistory&&showComparison&&entry.yesterday&&Number.isFinite(Number(entry.yesterday.value))){
   const hint=document.createElement('div');hint.className='yesterday';hint.textContent=t('row.yesterday',{points:C.formatPoints(entry.yesterday.value)});identity.append(hint);
  }
- row.dataset.rank=String(index+1);row.dataset.name=entry.name;N.decorateRow(row,avatar,name,entry,column,rawData,config);row.append(rank,avatar,identity);return row;
+ row.dataset.rank=String(index+1);row.dataset.name=entry.name;N.decorateRow(row,avatar,name,entry,column,rawData,config);row.append(rank,avatar,identity);row.look=rowLook(entry,column);return row;
 }
 // Placeholder row shown until the first scores arrive.
 function skeletonRow(index){
@@ -63,11 +65,50 @@ function skeletonRow(index){
  const points=document.createElement('div');points.className='points';points.textContent=' ';
  identity.append(name,points);row.append(rank,avatar,identity);return row;
 }
+// Updates rows in place so scores never rebuild the list. False means the caller must rebuild.
+function updateRows(wrapper,rows,column){
+ const existing=new Map();
+ for(const row of wrapper.children){if(!row.dataset.name||existing.has(row.dataset.name))return false;existing.set(row.dataset.name,row)}
+ if(new Set(rows.map(e=>e.name)).size!==rows.length||rows.filter(e=>existing.has(e.name)).length*2<rows.length)return false;
+ const before=new Map();existing.forEach((row,name)=>before.set(name,row.getBoundingClientRect()));
+ existing.forEach(row=>{if(row.glide){row.glide.cancel();row.glide=null;row.classList.remove('gliding')}});
+ rows.forEach((entry,i)=>{
+  let row=existing.get(entry.name);
+  if(row&&row.look!==rowLook(entry,column)){row.remove();row=makeRow(entry,i,column)}
+  else if(!row)row=makeRow(entry,i,column);
+  else{
+   const className='row'+(i<3?' top'+(i+1):''),rank=String(i+1),points=C.formatPoints(entry.value),rankCell=row.querySelector('.rank'),pointsCell=row.querySelector('.points');
+   if(row.className!==className)row.className=className;row.dataset.rank=rank;
+   if(rankCell.textContent!==rank)rankCell.textContent=rank;if(pointsCell.textContent!==points)pointsCell.textContent=points;
+  }
+  if(wrapper.children[i]!==row)wrapper.insertBefore(row,wrapper.children[i]||null);
+ });
+ while(wrapper.children.length>rows.length)wrapper.lastElementChild.remove();
+ glideRows(wrapper,before);return true;
+}
+// FLIP: a row that changed rank slides from where it was; podium cards differ in size, hence the scale.
+function glideRows(wrapper,before){
+ if(typeof wrapper.animate!=='function'||document.hidden||matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+ const view=wrapper.closest('.list').getBoundingClientRect(),inView=r=>Boolean(r)&&r.right>view.left&&r.left<view.right&&r.bottom>view.top&&r.top<view.bottom;
+ const moves=[...wrapper.children].map(row=>({row,to:row.getBoundingClientRect(),from:before.get(row.dataset.name)})).filter(m=>inView(m.to)||inView(m.from));
+ for(const{row,to,from}of moves){
+  if(!from){row.glide=row.animate([{opacity:0},{opacity:1}],{duration:900,easing:'ease-out'});continue}
+  const dx=from.left-to.left,dy=from.top-to.top,sx=to.width?from.width/to.width:1,sy=to.height?from.height/to.height:1;
+  if(Math.abs(dx)<.5&&Math.abs(dy)<.5&&Math.abs(sx-1)<.01&&Math.abs(sy-1)<.01)continue;
+  row.classList.add('gliding');
+  const glide=row.animate([{transformOrigin:'0 0',transform:'translate('+dx+'px,'+dy+'px) scale('+sx+','+sy+')'},{transformOrigin:'0 0',transform:'none'}],{duration:900,easing:'cubic-bezier(.22,.8,.3,1)'});
+  glide.onfinish=()=>row.classList.remove('gliding');row.glide=glide;
+ }
+}
 function renderRows(index){
  const source=columnData[index],rows=C.selectRows(source,config,index,historyPayload?.data,dailyHistory);
  const ready=index>=5&&config.lastMonth?Boolean(historyPayload):Boolean(source);
- const signature=JSON.stringify([rows.map(e=>({...e,live:N.isLive(e)})),source?.reconciliation?.warnings,ready,dailyHistory,config.yesterdayGroups,config.yesterdayIdols,config.language]);if(signature===rowSignatures[index])return false;
- rowSignatures[index]=signature;const list=boards[index].querySelector('.list');const wrapper=index>=4?document.createElement('div'):list;
+ const signature=JSON.stringify([rows.map(e=>({...e,live:N.isLive(e)})),source?.reconciliation?.warnings,ready,dailyHistory,config.yesterdayGroups,config.yesterdayIdols,config.language,config.lastMonth,Boolean(N.admin)]);if(signature===rowSignatures[index])return false;
+ rowSignatures[index]=signature;const list=boards[index].querySelector('.list');
+ const structure=JSON.stringify([ready,dailyHistory,config.yesterdayGroups,config.yesterdayIdols,config.language,config.lastMonth,Boolean(N.admin)]),sameStructure=structure===rowStructures[index];rowStructures[index]=structure;
+ const existing=index>=4?list.querySelector('.all-track'):list;
+ if(rows.length&&sameStructure&&existing){const count=existing.children.length;if(updateRows(existing,rows,index))return existing.children.length!==count}
+ const wrapper=index>=4?document.createElement('div'):list;
  list.replaceChildren();if(index>=4){wrapper.className='all-track';list.append(wrapper)}
  list.toggleAttribute('aria-busy',!ready);if(ready)list.removeAttribute('aria-label');else list.setAttribute('aria-label',t('row.waiting'));
  if(!rows.length&&!ready)for(let i=0;i<5;i++)wrapper.append(skeletonRow(i));
@@ -440,7 +481,7 @@ document.getElementById('broadcast-settings').onclick=async()=>{
   renderAdmin();notify(say('Đã lưu và gửi cho tất cả TV','Saved and sent to all TVs'));loadCurrent();
  }catch(e){notify(say('Không gửi được cài đặt: ','Could not send settings: ')+e.message)}finally{button.disabled=false}
 };
-fetch('/auth/status',{cache:'no-store',credentials:'same-origin'}).then(r=>r.json()).then(status=>{adminState=status?.admin?{admin:true,csrf:status.csrf||'',email:status.email}:null;N.admin=Boolean(adminState);[0,1,2,3,4,5,6].forEach(renderRows);N.translateExtras(config,rawData,historyPayload,dailyHistory);return readBoardSettings()}).then(payload=>{groupRules=payload.groupResetHours;sharedHold=payload.holdUntil||'';dayCount=payload.dayCount||'gift-time';if(adminState&&payload.version)adminState.lastSaved=payload;renderAdmin();followBroadcast(payload.version)}).catch(()=>{});
+fetch('/auth/status',{cache:'no-store',credentials:'same-origin'}).then(r=>r.json()).then(status=>{adminState=status?.admin?{admin:true,csrf:status.csrf||'',email:status.email}:null;N.admin=Boolean(adminState);let changed=false;boards.forEach((b,i)=>{changed=renderRows(i)||changed});if(changed)setupScroll();N.translateExtras(config,rawData,historyPayload,dailyHistory);return readBoardSettings()}).then(payload=>{groupRules=payload.groupResetHours;sharedHold=payload.holdUntil||'';dayCount=payload.dayCount||'gift-time';if(adminState&&payload.version)adminState.lastSaved=payload;renderAdmin();followBroadcast(payload.version)}).catch(()=>{});
 document.getElementById('factory').onclick=()=>{config=C.normalize(defaults);apply();renderLocations();notify(t('toast.factory'))};
 configInputs.forEach(e=>e.onchange=()=>{if(editing===e&&!['layout','language','rankOrder'].includes(e.dataset.config))return;let value=e.type==='checkbox'?e.checked:e.type==='number'?Number(e.value):e.value;
  if(e.type==='number'){value=Math.max(Number(e.min),Math.min(Number(e.max),value));if(!Number.isFinite(value))return}
