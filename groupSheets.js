@@ -17,16 +17,4 @@ function findMonthTab(metadata, date) {
     return match && Number(match[1]) === month && Number(match[2]) === year;
   })?.properties;
 }
-// Bản sao THỬ (Drive "Backstage – Sheet THỬ"): Backstage ghi số cuối ca do Helios Control báo cáo thẳng vào đây
-// để so với sheet điền tay trước khi ghi bản thật. Chỉ dùng cho /api/backstage/sheets (đọc/ghi), không đối soát.
-const TEST_SHEETS = Object.freeze([
-  { group: 'LEVEL X', spreadsheetId: '1eoyLUQdb1q04jPdKj0L8A2yRBzWn_Z7ThMKL8IB_IR4' },
-  { group: 'AURA', spreadsheetId: '1sYBXHvpBVfg2pY5IyuLGti4qI445PAWeVEPBd9316_Q' },
-  { group: 'VENYXIS', spreadsheetId: '1pwoGACx8Z_bwwletU8biXarJ1bCaXUdIeUTGuITIAi4' },
-  { group: 'VELIX', spreadsheetId: '14SZL8TaTbywQDC-ZSh6xxxdCHGxXXfSm-XTE6_gesYU' },
-  { group: 'NEXAR', spreadsheetId: '17QsdZHrugLXnyEBrzb70Q-H9nuL0xhq0Iz78Zev0tBE' },
-  { group: 'VELVET GRACE', spreadsheetId: '120Ba8kc9T22iR3wKJY6Cion4W0PYeTEuC_SmeKk7WDc' },
-  { group: 'ICONZ', spreadsheetId: '1fa9_154Mv0MQ-wJ4T7k4pXjLIilKrE2kQtyPhNo9odg' },
-  { group: 'DPM', spreadsheetId: '16Ll-894wNVwVyODYJxRZ51qSb2GVLwk4Ku1Nn5N9Itw' }
-]);
-module.exports = { GROUP_SHEETS, TEST_SHEETS, findMonthTab };
+module.exports = { GROUP_SHEETS, findMonthTab };
