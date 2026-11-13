@@ -25,6 +25,8 @@ let scrollAnimations=[],tickerAnimation,tickerMessage='',lastContext='',historyM
 let selectedMobileColumn=0;
 const configInputs=[...dialog.querySelectorAll('[data-config]')],scoreInputs=[...dialog.querySelectorAll('[data-score]')],autoHideInputs=[...dialog.querySelectorAll('[data-auto-hide]')];
 let scoreOverrides=[];
+// Saved on pagehide so the keep-awake reload continues where the board was (see saveResume).
+let resume=null;try{const saved=JSON.parse(sessionStorage.getItem('helios_next_resume')||'null');sessionStorage.removeItem('helios_next_resume');if(saved&&Date.now()-saved.at<30000)resume=saved}catch{}
 const shownScores=()=>N.visibleScores(config,scoreOverrides,Date.now());
 // Under auto-hide a manual flip only lasts 5 minutes; otherwise it changes the saved setting.
 function setScore(i,value){if(N.isAutoScore(config,i))scoreOverrides[i]={value,until:Date.now()+N.OVERRIDE_MS};else config.scores[i]=value}
@@ -118,7 +120,8 @@ function setupScroll(){
  for(const index of [4,5,6]){if(boards[index].hidden)continue;const viewport=boards[index].querySelector('.list'),track=viewport.querySelector('.all-track');if(!track||typeof track.animate!=='function')continue;
   const motion=C.scrollFrames(track.scrollHeight-viewport.clientHeight,config.speed*innerHeight/1080,config.pause);if(!motion)continue;
   const animation=track.animate(motion.frames,{duration:motion.duration,iterations:Infinity,easing:'linear'});animation.column=index;
-  if(previous.has(index))animation.currentTime=(previous.get(index).progress%1)*motion.duration;
+  const startAt=previous.get(index)?.progress??resume?.scroll?.[index];if(startAt!==undefined)animation.currentTime=(startAt%1)*motion.duration;
+  if(resume?.scroll)delete resume.scroll[index];
   if(!dialog.hidden)animation.pause();scrollAnimations.push(animation);
  }
 }
@@ -216,11 +219,12 @@ function setupTicker(){
  const span=document.createElement('span');span.append(tickerContent());span.style.display='inline-block';span.style.paddingRight='40px';span.style.minWidth=ticker.parentElement.clientWidth+'px';ticker.replaceChildren(span);
  const duplicate=span.cloneNode(true);duplicate.setAttribute('aria-hidden','true');ticker.append(duplicate);
  const distance=span.getBoundingClientRect().width;tickerAnimation=ticker.animate([{transform:'translateX(0)'},{transform:'translateX(-'+distance+'px)'}],{duration:distance/(config.tickerSpeed*innerWidth/1920)*1000,iterations:Infinity,easing:'linear'});
+ if(resume?.ticker!==undefined&&resume.tickerMessage===tickerMessage){tickerAnimation.currentTime=(resume.ticker%1)*tickerAnimation.effect.getTiming().duration;delete resume.ticker}
  if(!dialog.hidden)tickerAnimation.pause();
 }
 // The total always leads with today's points. While the board holds the finished day,
 // today's total comes from an unheld request; yesterday goes on the small line.
-let liveTotalData=null,liveTotalAt=0;
+let liveTotalData=resume?.liveTotal||null,liveTotalAt=0;
 function loadLiveTotal(){
  if(!rawData?.frozen||Date.now()-liveTotalAt<60000)return;liveTotalAt=Date.now();
  fetchJSON('/api/leaderboard/next?'+new URLSearchParams({resetHour:String(config.resetHour),freezeUntil:''})).then(result=>{if(result?.data?.group){liveTotalData=result.data;renderSummary()}}).catch(()=>{liveTotalAt=0});
@@ -293,9 +297,15 @@ function sameBoardDay(then,now,context){
 function cachedLive(context){
  try{const saved=JSON.parse(localStorage.getItem(liveCacheKey)||'null');return saved?.context===context&&saved.result?.data&&sameBoardDay(saved.savedAt,Date.now(),context)?saved.result:null}catch{return null}
 }
+let pendingLive=null;
+function flushLive(){
+ if(!pendingLive)return;liveCacheSaved=Date.now();
+ try{localStorage.setItem(liveCacheKey,JSON.stringify(pendingLive))}catch{}
+ pendingLive=null;
+}
 function storeLive(context,result){
- if(Date.now()-liveCacheSaved<30000)return;liveCacheSaved=Date.now();
- try{localStorage.setItem(liveCacheKey,JSON.stringify({context,savedAt:Date.now(),result}))}catch{}
+ pendingLive={context,savedAt:Date.now(),result};
+ if(Date.now()-liveCacheSaved>=30000)flushLive();
 }
 function showLive(result,indices,cached=false){
  rawData=result.data;dataError=false;allLocations=(rawData.locations||[]).map(l=>({...l,id:String(l.id)}));allGroups=(rawData.groups||[]).map(g=>({...g,id:String(g.id),locationId:String(g.locationId||'')}));
@@ -658,6 +668,20 @@ setInterval(()=>{if(!streamConnected||columnMeta.some(meta=>meta?.stale))loadCur
 setInterval(()=>{loadCurrent();if(config.lastMonth)loadHistory(false)},60000);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){loadCurrent();if(config.lastMonth)loadHistory(false)}});
 setInterval(()=>{if(!document.hidden){[0,1,2,3,4,5,6].forEach(renderRows);N.translateExtras(config,rawData,historyPayload,dailyHistory);syncScoreVisibility()}},5000);
-window.addEventListener('pagehide',()=>{stream?.close();scrollAnimations.forEach(a=>a.cancel());tickerAnimation?.cancel()});
+function animationProgress(animation){const progress=(Number(animation.currentTime)||0)/animation.effect.getTiming().duration;return Number.isFinite(progress)?progress:0}
+function saveResume(){
+ flushLive();
+ const scroll={};scrollAnimations.forEach(a=>{scroll[a.column]=animationProgress(a)});
+ const liveTotal=rawData?.frozen&&liveTotalData?{group:{daily:liveTotalData.group?.daily,yesterday:liveTotalData.group?.yesterday},locations:liveTotalData.locations}:undefined;
+ try{sessionStorage.setItem('helios_next_resume',JSON.stringify({at:Date.now(),scroll,ticker:tickerAnimation?animationProgress(tickerAnimation):undefined,tickerMessage,liveTotal}))}catch{}
+}
+// new.html keeps the reloading page unpainted so the browser holds the previous frame;
+// show the board once the cached rows and their avatars are ready, or after 800ms.
+function revealAfterReload(){
+ const decoded=Promise.all([...document.querySelectorAll('.avatar img')].map(img=>img.decode?.().catch(()=>{})));
+ Promise.race([decoded,new Promise(done=>setTimeout(done,800))]).then(()=>{if(!window.heliosAccessDenied)document.documentElement.style.visibility=''});
+}
+window.addEventListener('pagehide',()=>{saveResume();stream?.close();scrollAnimations.forEach(a=>a.cancel());tickerAnimation?.cancel()});
 apply();renderLocations();connectStream();
+if(resume)revealAfterReload();
 if(window.HeliosWake)window.HeliosWake.start();
