@@ -3,11 +3,11 @@
 // kiểm yêu cầu ghi Sheet. Backstage chép NGUYÊN file này (và các module nó cần) để tự đọc MongoDB
 // HeliosControl giống hệt ranking — sửa ở đây thì chạy lại scripts/sync-ranking-core.mjs bên Backstage.
 const crypto=require('node:crypto');
-const {GROUP_SHEETS}=require('./groupSheets');
+const {GROUP_SHEETS,TEST_SHEETS}=require('./groupSheets');
 const {WORKDAY_HOUR,giftCutoff,giftDay,groupResetHours,partitionSessions,dayStart,scoreRows,sessionGiftPipeline,liveGroups}=require('./rankingNext');
 const {decodeGiftBuckets}=require('./leaderboardPerformance');
 const DAY=86400000,MAX_DAYS=62,MAX_SHIFT=14*3600000,MAX_WRITE_CELLS=200,MAX_READ_RANGES=10;
-const ALLOWED_SHEETS=new Set(GROUP_SHEETS.map(s=>s.spreadsheetId));
+const ALLOWED_SHEETS=new Set([...GROUP_SHEETS,...TEST_SHEETS].map(s=>s.spreadsheetId));
 // 'THÁNG 11.2026'!B5 or 'THÁNG 11.2026'!A1:Z60 — month tabs only.
 const MONTH_RANGE=/^'TH(Á|A)NG \d{1,2}\.\d{4}'!\$?[A-Z]{1,3}\$?\d{1,4}(:\$?[A-Z]{1,3}\$?\d{1,4})?$/;
 const colNum=c=>[...c].reduce((n,ch)=>n*26+ch.charCodeAt(0)-64,0);
