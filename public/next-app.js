@@ -708,7 +708,7 @@ function connectStream(){
 setInterval(()=>{if(!streamConnected||columnMeta.some(meta=>meta?.stale))loadCurrent();if(unfreezeUntil&&Date.now()>=unfreezeUntil){unfreezeUntil=0;lastContext='';apply()}},10000);
 setInterval(()=>{loadCurrent();if(config.lastMonth)loadHistory(false)},60000);
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){loadCurrent();if(config.lastMonth)loadHistory(false)}});
-setInterval(()=>{if(!document.hidden){[0,1,2,3,4,5,6].forEach(renderRows);N.translateExtras(config,rawData,historyPayload,dailyHistory);syncScoreVisibility()}},5000);
+setInterval(()=>{if(!document.hidden){if([0,1,2,3,4,5,6].map(renderRows).some(Boolean))setupScroll();N.translateExtras(config,rawData,historyPayload,dailyHistory);syncScoreVisibility()}},5000);
 function animationProgress(animation){const progress=(Number(animation.currentTime)||0)/animation.effect.getTiming().duration;return Number.isFinite(progress)?progress:0}
 function saveResume(){
  flushLive();
