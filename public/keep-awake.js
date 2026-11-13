@@ -3,8 +3,6 @@
 let lastInteraction=Date.now();
 ['pointerdown','pointermove','keydown'].forEach(type=>document.addEventListener(type,()=>lastInteraction=Date.now(),{passive:true}));
 let _wakeLockSentinel = null;
-let _wakeLockVideo = null;
-let _wakeLockCanvas = null;
 let _wakeLockAudioCtx = null;
 
 async function requestWakeLock() {
@@ -16,19 +14,13 @@ async function requestWakeLock() {
     // Strategy 2: Native Wake Lock API
     tryNativeWakeLock();
 
-    // Strategy 3: Video playback (larger, visible-enough for TV OS detection)
-    startVideoKeepAwake();
-
-    // Strategy 4: Web Audio silent tone (keeps audio pipeline active)
+    // Strategy 3: Web Audio silent tone (keeps audio pipeline active)
     startSilentAudio();
 
-    // Strategy 5: Canvas animation (keeps GPU/rendering active)
-    startCanvasAnimation();
-
-    // Strategy 6: Periodic page refresh to reset TV idle timer
+    // Strategy 4: Periodic page refresh to reset TV idle timer
     startPeriodicRefresh();
 
-    // Strategy 7: Simulate activity via DOM mutations
+    // Strategy 5: Simulate activity via DOM mutations
     startDOMMutationKeepAlive();
 
     console.log('[WakeLock] All anti-sleep strategies activated');
@@ -94,87 +86,7 @@ async function tryNativeWakeLock() {
     }
 }
 
-// --- Strategy 3: Video playback keep-awake ---
-function startVideoKeepAwake() {
-    try {
-        // Create a canvas-generated video stream instead of a static file
-        // This is more reliable on smart TVs as it's an active media stream
-        const canvas = document.createElement('canvas');
-        canvas.width = 2;
-        canvas.height = 2;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, 2, 2);
-
-        const video = document.createElement('video');
-        video.setAttribute('playsinline', '');
-        video.setAttribute('muted', '');
-        video.setAttribute('loop', '');
-        video.muted = true;
-        video.volume = 0;
-        // Make it small but NOT invisible — some TVs ignore 0-size or fully hidden elements
-        video.style.cssText = 'position:fixed;bottom:0;right:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:9999;';
-        document.body.appendChild(video);
-        _wakeLockVideo = video;
-
-        // Try canvas captureStream (works on Chromium-based TV browsers)
-        if (canvas.captureStream) {
-            const stream = canvas.captureStream(1); // 1 fps
-            video.srcObject = stream;
-
-            // Animate the canvas to keep the stream active
-            const animateCanvas = () => {
-                ctx.fillStyle = `rgb(0,0,${Math.random() > 0.5 ? 1 : 0})`;
-                ctx.fillRect(0, 0, 2, 2);
-                requestAnimationFrame(animateCanvas);
-            };
-            animateCanvas();
-        } else {
-            // Fallback: use base64 webm
-            video.src = 'data:video/webm;base64,GkXfo0AgQoaBAUL3gQFC8oEEQvOBCEKCQAR3ZWJtQoeBAkKFgQIYU4BnQI0VSalmQCgq17FAAw9CQE2AQAZ3aGFtbXlXQUAGd2hhbW15RIlACECPQAAAAAAAFlSua0AxrkAu14EBY8WBAZyBACK1nEADdW5khkAFVl9WUDglhohAA1ZQOIOBAeBABrCBCLqBCB9DtnVAIueBAKNAHIEAAIAwAQCdASoIAAgAAUAmJaQAA3AA/vz0AAA=';
-        }
-
-        const playVideo = () => {
-            video.play().then(() => {
-                console.log('[WakeLock] ✓ Video playing');
-            }).catch(() => {
-                // Wait for user interaction
-                const startOnInteract = () => {
-                    video.play().catch(() => {});
-                    document.removeEventListener('click', startOnInteract);
-                    document.removeEventListener('keydown', startOnInteract);
-                    document.removeEventListener('touchstart', startOnInteract);
-                };
-                document.addEventListener('click', startOnInteract);
-                document.addEventListener('keydown', startOnInteract);
-                document.addEventListener('touchstart', startOnInteract);
-            });
-        };
-
-        playVideo();
-
-        // Auto-restart if paused
-        video.addEventListener('pause', () => {
-            setTimeout(() => video.play().catch(() => {}), 200);
-        });
-        video.addEventListener('ended', () => {
-            video.currentTime = 0;
-            video.play().catch(() => {});
-        });
-
-        // Periodically ensure video is still playing
-        setInterval(() => {
-            if (video.paused) {
-                video.play().catch(() => {});
-            }
-        }, 10000);
-
-    } catch (e) {
-        console.log('[WakeLock] Video strategy failed:', e.message);
-    }
-}
-
-// --- Strategy 4: Web Audio silent tone ---
+// --- Strategy 3: Web Audio silent tone ---
 function startSilentAudio() {
     try {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -225,44 +137,17 @@ function startSilentAudio() {
     }
 }
 
-// --- Strategy 5: Canvas animation (keeps GPU active) ---
-function startCanvasAnimation() {
-    try {
-        const canvas = document.createElement('canvas');
-        canvas.width = 1;
-        canvas.height = 1;
-        canvas.style.cssText = 'position:fixed;bottom:0;left:0;width:1px;height:1px;opacity:0.01;pointer-events:none;z-index:-1;';
-        document.body.appendChild(canvas);
-        _wakeLockCanvas = canvas;
-
-        const ctx = canvas.getContext('2d');
-        let frame = 0;
-
-        const animate = () => {
-            frame++;
-            // Tiny pixel change to force GPU render
-            ctx.fillStyle = frame % 2 === 0 ? '#000' : '#001';
-            ctx.fillRect(0, 0, 1, 1);
-            requestAnimationFrame(animate);
-        };
-        animate();
-        console.log('[WakeLock] ✓ Canvas animation active');
-    } catch (e) {
-        console.log('[WakeLock] Canvas strategy failed:', e.message);
-    }
-}
-
-// --- Strategy 6: Periodic page refresh (nuclear option for stubborn TVs) ---
+// --- Strategy 4: Periodic page refresh (nuclear option for stubborn TVs) ---
 function startPeriodicRefresh() {
-    // Reload the page every 4 minutes to reset the TV's idle timer
-    // This is a last resort but very reliable on all TV platforms
+    // Reload the page every 4 minutes to reset the TV's idle timer. The reload is meant
+    // to be invisible: the board saves its position on pagehide and comes back at once
+    // from cached data, then changes only if the fresh data differs (see next-app.js).
     const REFRESH_INTERVAL = 4 * 60 * 1000; // 4 minutes
 
     setInterval(() => {
         // Never interrupt a pending initial load, background revalidation or manual refresh.
         if (document.getElementById('settings-dialog').hidden && !document.querySelector('.board.loading') && Date.now() - lastInteraction > 30000) {
             console.log('[WakeLock] Performing keep-alive refresh...');
-            // Use soft refresh — preserves state via localStorage
             window.location.reload();
         }
     }, REFRESH_INTERVAL);
@@ -270,7 +155,7 @@ function startPeriodicRefresh() {
     console.log('[WakeLock] ✓ Periodic refresh armed (every 4 min)');
 }
 
-// --- Strategy 7: DOM mutation keep-alive ---
+// --- Strategy 5: DOM mutation keep-alive ---
 function startDOMMutationKeepAlive() {
     // Periodically mutate the DOM to simulate page activity
     // Some TVs track DOM changes as a sign of active content

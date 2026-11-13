@@ -2,6 +2,8 @@
   let checking = false, denied = false;
   function clearPrivateView() {
     if (denied) return; denied = true;
+    // The board's reload mask (new.html, next-app.js) checks this before un-hiding the page.
+    window.heliosAccessDenied = true;
     document.documentElement.style.visibility = 'hidden';
     // A lost/expired browser session must not erase the operator's chosen layout,
     // language, visibility and other defaults. Only historical ranking data and

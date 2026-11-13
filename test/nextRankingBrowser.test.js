@@ -139,6 +139,48 @@ test('an admin whose rows render before the login status resolves still gets the
  release();await monthly.locator('button.warning').waitFor({state:'attached'});assert.equal(await monthly.locator('.warning.pending').count(),0);
  assert.equal(await monthly.locator('.all-track').evaluate(track=>track.getAnimations()[0]?.playState),'running');
 });
+test('the keep-awake reload is invisible: the cached board comes back where it was, then stays when fresh data arrives',async t=>{
+ const{page,state}=await fixture(t);
+ const scrollProgress=()=>page.evaluate(()=>{const a=document.querySelector('[data-key="monthly-ranking"] .all-track')?.getAnimations()[0];return a?a.currentTime/a.effect.getTiming().duration:null});
+ const tickerProgress=()=>page.evaluate(()=>{const a=document.querySelector('.ticker-line').getAnimations()[0];return a?a.currentTime/a.effect.getTiming().duration:null});
+ await page.waitForFunction(()=>{const a=document.querySelector('[data-key="monthly-ranking"] .all-track')?.getAnimations()[0];return a&&a.currentTime/a.effect.getTiming().duration>0.03},null,{timeout:15000});
+ assert.ok(await scrollProgress()>0.03);
+ state.held=true;await page.reload();await page.waitForFunction(()=>document.querySelector('.kpi b').textContent==='400');
+ state.delay=1500;let responses=0;page.on('response',r=>{if(r.url().includes('/api/leaderboard/next'))responses++});
+ // The head script runs on the real page (no CSP blocks it) and holds the page until the board is ready.
+ await page.route('**/next-app.js*',async route=>{await new Promise(r=>setTimeout(r,300));await route.continue()});
+ const before=await scrollProgress(),tickerBefore=await tickerProgress();assert.ok(before>0.03);
+ await page.reload({waitUntil:'commit'});
+ await page.waitForFunction(()=>document.documentElement&&document.documentElement.style.visibility==='hidden',null,{timeout:2000});
+ assert.equal(await page.evaluate(()=>sessionStorage.getItem('helios_next_resume')!==null),true,'still unread while the app script loads');
+ await page.waitForFunction(()=>document.documentElement.style.visibility==='',null,{timeout:1500});
+ const monthly=page.locator('[data-key="monthly-ranking"]');
+ assert.ok(await monthly.locator('.row:not(.skeleton)').count()>0,'real rows while the API is pending');assert.equal(await page.locator('.row.skeleton').count(),0);
+ assert.equal(await page.locator('.kpi b').textContent(),'400','the header total does not flash a dash');assert.match(await page.locator('.kpi-yesterday').textContent(),/300/);
+ const resumed=await scrollProgress();assert.ok(Math.abs(resumed-before)<0.08,'scroll resumed near '+before+', got '+resumed);
+ const tickerResumed=await tickerProgress();assert.ok(tickerBefore>0&&Math.abs(tickerResumed-tickerBefore)<0.2,'ticker resumed near '+tickerBefore+', got '+tickerResumed);
+ assert.equal(await page.evaluate(()=>sessionStorage.getItem('helios_next_resume')),null,'a resume is used once');
+ assert.equal(await page.locator('body > video').count(),0);assert.equal(await page.locator('body > canvas').count(),0);
+ assert.equal(responses,0,'the checks above ran while the API was still pending');
+ await page.waitForFunction(()=>!/cached|bộ nhớ|đệm/i.test(document.getElementById('connection').textContent),null,{timeout:6000});assert.ok(responses>0);
+ assert.ok(await monthly.locator('.row:not(.skeleton)').count()>0);assert.equal(await page.locator('.row.skeleton').count(),0);assert.equal(await page.locator('.kpi b').textContent(),'400');
+ const settled=await scrollProgress();assert.ok(settled>=resumed&&settled-before<0.2,'scroll kept going after fresh data: '+settled);
+});
+test('a resumed reload never un-hides a page whose access was denied',async t=>{
+ const{page}=await fixture(t);let denied=false;
+ // Same injection as servePrivateHtml. /auth answers late so the denied page can be inspected first.
+ await page.route('**/new',async route=>{const response=await route.fetch();await route.fulfill({response,body:(await response.text()).replace('<head>','<head><script src="/access-guard.js"></script>')})});
+ await page.route('**/auth/status',route=>route.fulfill({json:{authorized:!denied}}));
+ await page.route('**/auth',async route=>{await new Promise(r=>setTimeout(r,6000));await route.fulfill({contentType:'text/html',body:'<!doctype html><title>auth</title>'}).catch(()=>{})});
+ await page.reload();await page.locator('[data-key="monthly-ranking"] .row:not(.skeleton)').first().waitFor({state:'attached'});
+ await page.waitForFunction(()=>document.documentElement.style.visibility==='');
+ // While a navigation to /auth is pending Playwright cannot evaluate, so the page reports its own state
+ // after the 3s mask timeout and the 800ms reveal have both passed.
+ const reported=new Promise(done=>page.on('console',m=>{if(m.text().startsWith('visibility:'))done(m.text())}));
+ await page.addInitScript(()=>setTimeout(()=>console.log('visibility:'+(window.heliosAccessDenied?'denied ':'')+document.documentElement.style.visibility),3400));
+ denied=true;await page.reload({waitUntil:'commit'});
+ assert.equal(await reported,'visibility:denied hidden');
+});
 test('the total leads with today even while the board holds the finished day, with yesterday on a small line',async t=>{
  const{page,state}=await fixture(t);assert.equal(await page.locator('.kpi b').textContent(),'400');assert.match(await page.locator('.kpi-yesterday').textContent(),/300/);
  state.held=true;await page.reload();await page.waitForFunction(()=>document.querySelector('.kpi b').textContent==='400');
