@@ -99,3 +99,78 @@ dialog h2{margin:0;font-size:18px}
 .chip.eye{display:inline-flex;align-items:center;gap:5px;padding-inline:10px}.chip.eye #out-count{font-weight:800;font-variant-numeric:tabular-nums}.chip.eye .eye-slash{display:none}.chip.eye:not(.on) .eye-slash{display:inline}
 .modes button,.chip.icon-chip{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:36px}.modes button svg,.chip svg{display:block}
 .admin-chip{position:relative}.badge-count{position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#d9534f;color:#fff;font-size:11px;font-weight:800;line-height:18px;text-align:center;box-sizing:border-box}.admin-panel{margin:10px 0}
+/* PK stage: compact match cards per track, upper/lower tables with the cut line, voting order. Mobile first. */
+.revive-tag{display:inline-block;margin-right:6px;padding:0 5px;border-radius:6px;background:#1f3d2c;color:#9ff0c0;font-size:10px;font-weight:800;vertical-align:1px}
+.pk-board{margin:4px 6px 10px;border:1px solid #ffffff1f;border-radius:12px;background:#ffffff06;overflow:hidden}
+.pk-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:8px 10px 6px}
+.pk-head .pk-title{margin:0}
+.pk-phase{padding:2px 8px;border-radius:999px;font-size:11px;font-weight:800;border:1px solid var(--line);background:var(--panel2);white-space:nowrap}
+.pk-phase.ph-pk,.pk-phase.ph-voting{border-color:var(--accent2);background:#3a2550;color:#e9d2ff}
+.pk-phase.ph-chasing{border-color:#edba70;background:#4a3420;color:#ffe4b2}
+.pk-phase.ph-done{border-color:#6fd29a;background:#173323;color:#9ff0c0}
+.pk-rule{color:var(--muted);font-size:11px;margin-left:auto}
+.pk-fold{border-top:1px solid #ffffff14}
+.pk-fold>summary{display:flex;align-items:center;gap:8px;padding:9px 10px;cursor:pointer;list-style:none;font-weight:800;font-size:13px;color:#f3dcc4}
+.pk-fold>summary::-webkit-details-marker{display:none}
+.pk-fold>summary::before{content:'▸';color:var(--muted);transition:transform .15s}
+.pk-fold[open]>summary::before{transform:rotate(90deg)}
+.fold-count{margin-left:auto;color:var(--muted);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
+.pk-track{padding:0 8px 8px}
+.track-head{display:flex;align-items:baseline;gap:8px;padding:2px 2px 6px;font-size:13px}
+.track-head b{color:#e9cdb0}.track-count{margin-left:auto;color:var(--muted);font-size:12px}
+.match-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:6px}
+.match{min-width:0;padding:6px 8px;border:1px solid #5a4a3d;border-radius:10px;background:var(--panel2)}
+.match.running,.match.reviving{border-color:var(--accent2);box-shadow:0 0 0 1px #af69ef55 inset}
+.match.reviving{border-color:#edba70;box-shadow:0 0 0 1px #edba7055 inset}
+.match.pending{opacity:.75}
+.m-head{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);margin-bottom:3px}
+.m-id{font-weight:800;color:#e9cdb0}
+.m-score{font-weight:900;font-size:14px;color:#fff9f2;font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.m-status{margin-left:auto;padding:0 6px;border-radius:6px;font-weight:800;font-size:10px;background:#ffffff10;white-space:nowrap}
+.m-status.running{background:#3a2550;color:#e9d2ff}.m-status.reviving{background:#4a3420;color:#ffe4b2}.m-status.done{background:#173323;color:#9ff0c0}
+.m-talents{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.m-talents li{display:flex;align-items:center;gap:4px;min-width:0;font-size:13px;padding:1px 0}
+.m-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.m-pt{flex:none;min-width:14px;text-align:right;font-variant-numeric:tabular-nums}
+.m-talents li.win{color:var(--gold);font-weight:800}.m-talents li.win .m-name::before{content:'★ '}
+.m-talents li.lose{opacity:.5}
+.m-marks{display:inline-flex;gap:2px;flex:none}
+.rv{display:inline-block;padding:0 3px;border-radius:5px;font-size:10px;font-weight:800;line-height:15px}
+.rv.ok{background:#1f3d2c;color:#9ff0c0}.rv.fail{background:#5a2a2a;color:#ffb8b8}.rv.wait{background:#4a3420;color:#ffe4b2}
+.pk-tables{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px;padding:0 8px 8px}
+.pk-table{min-width:0;border:1px solid #5a4a3d;border-radius:10px;background:var(--panel2);overflow:hidden}
+.table-head{padding:6px 8px;font-size:12px;font-weight:800;border-bottom:1px solid #ffffff14}
+.pk-table.upper .table-head{color:#9ff0c0;background:#173323aa}.pk-table.lower .table-head{color:#ffb8b8;background:#4a2321aa}
+.table-rows,.vote-order{list-style:none;margin:0;padding:4px 6px 6px}
+.table-rows li,.vote-order li{display:flex;align-items:center;gap:5px;min-width:0;padding:3px 2px;font-size:13px}
+.t-no{flex:none;min-width:18px;text-align:right;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+.t-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.table-rows li.cut{opacity:.5}.table-rows li.cut .t-name{text-decoration:line-through}
+.cut-mark{flex:none;color:#ff9a9a;font-size:12px}
+.table-rows li.cut-line{display:block;margin:4px 0;padding:2px 0 0;border-top:2px dashed #b85b52;color:#ff9a9a;font-size:10px;font-weight:800;text-align:center}
+.table-rows li.empty,.vote-order li.empty{display:block;padding:8px;color:var(--muted);text-align:center;font-size:12px}
+.pk-voting{padding:0 8px 8px}
+.vote-order{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:4px;padding:0}
+.vote-order li{padding:4px 6px;border:1px solid #5a4a3d;border-radius:8px;background:var(--panel2)}
+.vote-order li.done{opacity:.6}.vote-done{flex:none;color:#9ff0c0;font-weight:900}
+.vote-order li.current{border-color:var(--gold);background:#4a3420;color:#ffe4b2;font-weight:800;box-shadow:0 0 10px #ffcf5b44}
+.vote-order li.current .t-no{color:var(--gold)}
+.rounds{padding:0 10px 10px;display:grid;gap:8px}
+.round-head{display:flex;align-items:baseline;gap:8px;font-size:13px;margin-bottom:4px}.round-head b{color:#ffb8b8}.round-count{color:var(--muted);font-size:12px}
+.round-names{display:flex;flex-wrap:wrap;gap:4px}
+.round-name{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:2px 7px;border-radius:8px;background:#5a2a2a55;border:1px solid #8a3b3b;font-size:12px}
+.round-name small{color:var(--muted);font-size:10px}.round-name.back{background:#1f3d2c55;border-color:#3f7a57}
+.talents>.pk-fold{margin:4px 6px 10px;border:1px solid #ffffff1f;border-radius:12px;background:#ffffff06}
+@media(min-width:900px){.match-grid{grid-template-columns:repeat(auto-fill,minmax(180px,1fr))}.m-talents li,.table-rows li{font-size:14px}}
+@media(prefers-reduced-motion:reduce){.pk-fold>summary::before{transition:none}}
+/* Organiser update: round history (ties replayed, rounds cancelled by a revive), revive chases with their target. */
+.m-rounds{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px}
+.m-round{display:inline-flex;align-items:center;gap:3px;max-width:100%;padding:0 5px;border-radius:6px;background:#ffffff0d;font-size:10px;line-height:16px;color:#e8d7c6}
+.m-rn{color:var(--muted);font-weight:800}.m-rw{min-width:0;max-width:84px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.m-round.tie{background:#4a342055;color:#ffe4b2}.m-round.tie .m-rw{max-width:none}
+.m-round.cancelled{background:#ffffff08}.m-round.cancelled .m-rw{color:var(--muted)}
+.m-revive{display:flex;align-items:center;gap:5px;min-width:0;margin-top:3px;font-size:11px}
+.m-revive span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.m-revive small{margin-left:auto;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+.m-revive.ok{color:#9ff0c0}.m-revive.fail{color:#ffb8b8}.m-revive.wait{color:#ffe4b2}
+.table-note{margin-left:6px;font-weight:700;color:var(--muted)}
+.t-score{flex:none;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}

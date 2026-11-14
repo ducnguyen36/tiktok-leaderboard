@@ -74,16 +74,76 @@ function overallScores(participants,gifts,windowGifts=[]){const window=scoreOver
 // Each entry may carry rank/of: HeliosControl's panel position when the talent went out (1 = best) and how
 // many were still in just before. Returns talentName -> {at: ISO|null, rank, of} (rank/of null when missing).
 const posInt=v=>Number.isInteger(Number(v))&&Number(v)>0?Number(v):null;
+// Entries may also carry round: the phase label when it happened ('PK', 'Voting', 'Chasing 1'), shown grouped.
+const LABEL_MAX=40;
+const cleanLabel=value=>{const text=cleanName(value);return text?[...text].slice(0,LABEL_MAX).join(''):''};
 function eliminatedMap(list){
   const out=new Map();if(!Array.isArray(list))return out;
-  for(const e of list){const name=typeof e?.talentName==='string'?e.talentName:'';if(!name)continue;const at=new Date(e?.at);out.set(name,{at:Number.isFinite(+at)?at.toISOString():null,rank:posInt(e?.rank),of:posInt(e?.of)})}
+  for(const e of list){const name=typeof e?.talentName==='string'?e.talentName:'';if(!name)continue;const at=new Date(e?.at);out.set(name,{at:Number.isFinite(+at)?at.toISOString():null,rank:posInt(e?.rank),of:posInt(e?.of),round:cleanLabel(e?.round)||null})}
   return out;
 }
-// Fill rank/of from eliminatedLog when an eliminated[] entry lacks them: the 'out' line of the same talent and moment.
+// Fill rank/of (and round) from eliminatedLog when an eliminated[] entry lacks them: the 'out' line of the same talent and moment.
 function withLogRanks(list,log){
   if(!Array.isArray(list))return [];if(!Array.isArray(log))return list;
-  return list.map(e=>{if(posInt(e?.rank))return e;const at=+new Date(e?.at);const hit=[...log].reverse().find(l=>l?.action==='out'&&l.talentName===e?.talentName&&+new Date(l.at)===at&&posInt(l.rank));return hit?{...e,rank:hit.rank,of:hit.of}:e});
+  return list.map(e=>{
+    const needRank=!posInt(e?.rank),needRound=!cleanLabel(e?.round);if(!needRank&&!needRound)return e;
+    const at=+new Date(e?.at),lines=[...log].reverse().filter(l=>l?.action==='out'&&l.talentName===e?.talentName&&+new Date(l.at)===at);
+    const rank=needRank&&lines.find(l=>posInt(l.rank)),round=needRound&&lines.find(l=>cleanLabel(l.round));
+    return rank||round?{...e,...(rank?{rank:rank.rank,of:rank.of}:{}),...(round?{round:round.round}:{})}:e;
+  });
 }
+// "Who went out in each round", when HeliosControl labels eliminations with a round: from the eliminatedLog
+// 'out' lines (a talent revived since stays listed, flagged back:true) plus labelled eliminated[] entries the
+// log lacks. Newest round (by its latest elimination) first; null when nothing carries a round.
+function eliminationRounds(eliminated,log){
+  const now=eliminatedMap(eliminated),seen=new Set(),groups=new Map();
+  const add=(round,talentName,at)=>{const key=`${round}\u0000${talentName}\u0000${at}`;if(seen.has(key))return;seen.add(key);const group=groups.get(round)||groups.set(round,{round,last:-Infinity,talents:[]}).get(round);const t=msOf(at);if(t>group.last)group.last=t;group.talents.push({talentName,at:at||null,back:!now.has(talentName)||msOf(now.get(talentName).at)>t})};
+  if(Array.isArray(log))for(const l of log){const round=cleanLabel(l?.round),name=typeof l?.talentName==='string'?l.talentName:'';if(l?.action!=='out'||!round||!name)continue;const at=new Date(l.at);add(round,name,Number.isFinite(+at)?at.toISOString():null)}
+  for(const [name,e] of now)if(e.round)add(e.round,name,e.at);
+  if(!groups.size)return null;
+  return [...groups.values()].sort((a,b)=>b.last-a.last).slice(0,30).map(g=>({round:g.round,talents:g.talents.sort((a,b)=>msOf(a.at)-msOf(b.at)||a.talentName.localeCompare(b.talentName)).slice(0,60)}));
+}
+// competitions.pkStage (written by HeliosControl, see the PK stage contract): read defensively, since older
+// competitions have none and a newer panel may write it partially. Names ≤ 60, ≤ 60 talents, ≤ 40 matches,
+// ≤ 6 talents per match, labels ≤ 40. Returns null when there is nothing usable.
+const REVIVE_MODES=['gap','fixed','formula','manual'],LOWER_BY=['seed','score'];
+const PK_PHASES=['setup','pk','voting','chasing','done'],MATCH_STATUS=['pending','running','reviving','done'],VOTING_STATUS=['pending','running','done'];
+const iso=v=>{if(v==null||v==='')return null;const d=new Date(v);return Number.isFinite(+d)?d.toISOString():null};
+const names=(list,max=60)=>{const out=[];if(Array.isArray(list))for(const v of list){const n=validName(v);if(n&&!out.includes(n))out.push(n);if(out.length>=max)break}return out};
+const oneName=v=>validName(v)||null;
+const nonNeg=v=>Number.isFinite(Number(v))&&Number(v)>=0?Math.floor(Number(v)):0;
+function cleanPkStage(raw){
+  if(!raw||typeof raw!=='object'||Array.isArray(raw))return null;
+  const phase=PK_PHASES.includes(raw.phase)?raw.phase:'setup',firstTo=posInt(raw.firstTo)||2,takeLower=posInt(raw.takeLower);
+  const tracks=[];if(Array.isArray(raw.tracks))for(const t of raw.tracks.slice(0,6)){const id=cleanLabel(t?.id);if(!id||tracks.some(x=>x.id===id))continue;tracks.push({id,label:cleanLabel(t?.label)||id,fromRank:posInt(t?.fromRank),toRank:posInt(t?.toRank)})}
+  const matches=[];
+  if(Array.isArray(raw.matches))for(const m of raw.matches.slice(0,40)){
+    const id=cleanLabel(m?.id),talents=names(m?.talents,6);if(!id||!talents.length||matches.some(x=>x.id===id))continue;
+    const points={};for(const n of talents)points[n]=nonNeg(m?.points&&typeof m.points==='object'?m.points[n]:0);
+    const winner=talents.includes(validName(m?.winner))?validName(m.winner):null;
+    const revives=[];if(Array.isArray(m?.revives))for(const r of m.revives.slice(0,20)){const n=validName(r?.talentName);if(!n||!talents.includes(n))continue;const target=r?.target==null||r.target===''||!Number.isFinite(Number(r.target))||Number(r.target)<0?null:Math.round(Number(r.target));revives.push({talentName:n,at:iso(r?.at),success:r?.success===true?true:r?.success===false?false:null,mode:REVIVE_MODES.includes(r?.mode)?r.mode:null,target,round:posInt(r?.round)})}
+    // Round history (organiser update): a tie gives no point and is replayed; a successful revive cancels the winning round.
+    const rounds=[];if(Array.isArray(m?.rounds))m.rounds.slice(0,30).forEach((r,i)=>{if(!r||typeof r!=='object')return;const diamonds={};if(r.diamonds&&typeof r.diamonds==='object')for(const n of talents)if(Number.isFinite(Number(r.diamonds[n])))diamonds[n]=Math.round(Number(r.diamonds[n]));
+      const win=talents.includes(validName(r.winner))?validName(r.winner):null,cancel=talents.includes(validName(r.cancelledByRevive))?validName(r.cancelledByRevive):null;rounds.push({n:posInt(r.n)||i+1,winner:win,tied:win?[]:names(r.tied,6).filter(n=>talents.includes(n)),diamonds,cancelledByRevive:win?cancel:null})});
+    matches.push({id,track:cleanLabel(m?.track)||null,order:posInt(m?.order),talents,status:MATCH_STATUS.includes(m?.status)?m.status:'pending',points,winner,losers:names(m?.losers,6).filter(n=>talents.includes(n)&&n!==winner),rounds,revives,startedAt:iso(m?.startedAt),endedAt:iso(m?.endedAt)});
+  }
+  const tables=raw.tables&&typeof raw.tables==='object'?{upper:names(raw.tables.upper),lower:names(raw.tables.lower),cut:names(raw.tables.cut),lowerBy:LOWER_BY.includes(raw.tables.lowerBy)?raw.tables.lowerBy:'seed'}:null;
+  const v=raw.voting&&typeof raw.voting==='object'?raw.voting:null;
+  const voting=v?{order:names(v.order),done:names(v.done),current:oneName(v.current),status:VOTING_STATUS.includes(v.status)?v.status:'pending'}:null;
+  const seed=names(raw.seed),revivesUsed=names(raw.revivesUsed);
+  if(!matches.length&&!seed.length&&!(tables&&(tables.upper.length||tables.lower.length))&&!(voting&&voting.order.length))return null;
+  return{phase,firstTo,takeLower,seed,tracks,matches,revivesUsed,tables,voting,updatedAt:iso(raw.updatedAt)};
+}
+// competitions.standing (HeliosControl's panel zones): passed through cleaned, for snapshots and future use.
+const STANDING_GROUPS=['upper','lower','out'];
+function cleanStanding(raw){
+  if(!raw||typeof raw!=='object'||!Array.isArray(raw.rows))return null;
+  const rows=[];for(const r of raw.rows.slice(0,60)){const n=validName(r?.talentName);if(!n||rows.some(x=>x.talentName===n))continue;rows.push({talentName:n,place:posInt(r?.place),group:STANDING_GROUPS.includes(r?.group)?r.group:null,zone:cleanLabel(r?.zone)||null})}
+  if(!rows.length)return null;
+  return{rows,safeAfter:posInt(raw.safeAfter),cutAfter:posInt(raw.cutAfter),safeLabel:cleanLabel(raw.safeLabel)||null,cutLabel:cleanLabel(raw.cutLabel)||null,updatedAt:iso(raw.updatedAt)};
+}
+// Successful PK revives per talent (match.revives success:true); they are not in eliminatedLog since a PK loser is not out.
+function pkReviveCounts(pk){const out=new Map();for(const m of pk?.matches||[])for(const r of m.revives)if(r.success===true)out.set(r.talentName,(out.get(r.talentName)||0)+1);return out}
 // Fallback when HeliosControl wrote no rank (older competitions or panel versions): M = players still in just
 // before that elimination; talents out at the same moment take M-g+1..M by their score at that moment
 // (higher score = better rank). With eliminatedLog, "still in" is replayed from the log (revivals at that
@@ -108,20 +168,24 @@ function fallbackRanks(out,participants,gifts,log=null){
 }
 // Successful revivals per talent: the 'in' lines of eliminatedLog (shown as ↺N).
 function reviveCounts(log){const out=new Map();if(Array.isArray(log))for(const l of log)if(l?.action==='in'&&typeof l.talentName==='string')out.set(l.talentName,(out.get(l.talentName)||0)+1);return out}
-const eliminatedFields=e=>e?{eliminated:true,eliminatedAt:e.at,eliminatedRank:e.rank,eliminatedOf:e.of,eliminatedRankSource:e.rank?(e.computed?'computed':'helioscontrol'):null}:{eliminated:false,eliminatedAt:null,eliminatedRank:null,eliminatedOf:null,eliminatedRankSource:null};
+const eliminatedFields=e=>e?{eliminated:true,eliminatedAt:e.at,eliminatedRank:e.rank,eliminatedOf:e.of,eliminatedRankSource:e.rank?(e.computed?'computed':'helioscontrol'):null,eliminatedRound:e.round||null}:{eliminated:false,eliminatedAt:null,eliminatedRank:null,eliminatedOf:null,eliminatedRankSource:null,eliminatedRound:null};
 // rows/groups carry both modes; overall (array by participant index) defaults to the competition gifts alone.
 // Eliminated talents keep their rows (flagged) and still count in their group: the gifts are the group's income.
-function buildBoard(participants,gifts,{windowGifts=[],overall=null,eliminated=null,eliminatedLog=null}={}){
-  const competition=scoreGifts(gifts),total=overall||overallScores(participants,gifts,windowGifts),out=fallbackRanks(eliminatedMap(eliminated),participants,gifts,eliminatedLog),revives=reviveCounts(eliminatedLog);
-  const rows=(participants||[]).map((p,i)=>({talentName:p.talentName||'',talentUid:String(p.talentUid||''),profileId:String(p.profileId||''),profileName:p.profileName||'',competition:competition.get(p.talentName)||0,overall:total[i]||0,...eliminatedFields(out.get(p.talentName||'')),revives:revives.get(p.talentName||'')||0}));
+// revives = eliminatedLog 'in' lines + successful PK revives. pkStage/standing/rounds are added only when present.
+function buildBoard(participants,gifts,{windowGifts=[],overall=null,eliminated=null,eliminatedLog=null,pkStage=null,standing=null}={}){
+  const pk=cleanPkStage(pkStage),stand=cleanStanding(standing),rounds=eliminationRounds(eliminated,eliminatedLog);
+  const competition=scoreGifts(gifts),total=overall||overallScores(participants,gifts,windowGifts),out=fallbackRanks(eliminatedMap(eliminated),participants,gifts,eliminatedLog),revives=reviveCounts(eliminatedLog),pkRevives=pkReviveCounts(pk);
+  const rows=(participants||[]).map((p,i)=>({talentName:p.talentName||'',talentUid:String(p.talentUid||''),profileId:String(p.profileId||''),profileName:p.profileName||'',competition:competition.get(p.talentName)||0,overall:total[i]||0,...eliminatedFields(out.get(p.talentName||'')),revives:(revives.get(p.talentName||'')||0)+(pkRevives.get(p.talentName||'')||0)}));
   rows.sort((a,b)=>b.competition-a.competition||b.overall-a.overall||a.talentName.localeCompare(b.talentName));
   const groups=new Map();
   for(const row of rows){const key=row.profileId||row.profileName,group=groups.get(key)||{profileId:row.profileId,profileName:row.profileName,competition:0,overall:0};group.competition+=row.competition;group.overall+=row.overall;groups.set(key,group)}
-  return{rows,groups:[...groups.values()].sort((a,b)=>b.competition-a.competition||b.overall-a.overall)};
+  return{rows,groups:[...groups.values()].sort((a,b)=>b.competition-a.competition||b.overall-a.overall),...(pk?{pkStage:pk}:{}),...(stand?{standing:stand}:{}),...(rounds?{rounds}:{})};
 }
 // Snapshots taken before the two modes only stored rows[].total (= competition); overall is then unknown (null).
 const num=v=>v==null||v===''||!Number.isFinite(Number(v))?null:Number(v);
-function snapshotEntry(entry,row){const out={profileId:String(entry?.profileId||''),profileName:entry?.profileName||'',competition:num(entry?.competition)??num(entry?.total)??0,overall:num(entry?.overall)};return row?{talentName:entry?.talentName||'',talentUid:String(entry?.talentUid||''),...out,eliminated:entry?.eliminated===true,eliminatedAt:entry?.eliminated===true&&entry?.eliminatedAt?String(entry.eliminatedAt):null,eliminatedRank:entry?.eliminated===true?posInt(entry?.eliminatedRank):null,eliminatedOf:entry?.eliminated===true?posInt(entry?.eliminatedOf):null,eliminatedRankSource:entry?.eliminated===true&&posInt(entry?.eliminatedRank)?(entry.eliminatedRankSource==='computed'?'computed':'helioscontrol'):null,revives:posInt(entry?.revives)||0}:out}
+function snapshotEntry(entry,row){const out={profileId:String(entry?.profileId||''),profileName:entry?.profileName||'',competition:num(entry?.competition)??num(entry?.total)??0,overall:num(entry?.overall)};return row?{talentName:entry?.talentName||'',talentUid:String(entry?.talentUid||''),...out,eliminated:entry?.eliminated===true,eliminatedAt:entry?.eliminated===true&&entry?.eliminatedAt?String(entry.eliminatedAt):null,eliminatedRank:entry?.eliminated===true?posInt(entry?.eliminatedRank):null,eliminatedOf:entry?.eliminated===true?posInt(entry?.eliminatedOf):null,eliminatedRankSource:entry?.eliminated===true&&posInt(entry?.eliminatedRank)?(entry.eliminatedRankSource==='computed'?'computed':'helioscontrol'):null,eliminatedRound:entry?.eliminated===true&&cleanLabel(entry?.eliminatedRound)||null,revives:posInt(entry?.revives)||0}:out}
+// Stored rounds (snapshots) are re-cleaned on the way out like everything else read back from the database.
+function cleanRounds(list){if(!Array.isArray(list))return null;const out=[];for(const g of list.slice(0,30)){const round=cleanLabel(g?.round);if(!round)continue;const talents=[];for(const t of Array.isArray(g?.talents)?g.talents.slice(0,60):[]){const n=validName(t?.talentName);if(n)talents.push({talentName:n,at:iso(t?.at),back:t?.back===true})}if(talents.length)out.push({round,talents})}return out.length?out:null}
 function cookieSecret(req){for(const part of (req.headers.cookie||'').split(';')){const i=part.indexOf('=');if(i>0&&part.slice(0,i).trim()===COOKIE)return part.slice(i+1).trim()}return ''}
 // Small in-memory budget; behind the Cloudflare tunnel every visitor shares one IP, so it is global.
 function createBudget(max,windowMs,clock){let hits=[];return()=>{const now=clock();hits=hits.filter(t=>now-t<windowMs);if(hits.length>=max)return false;hits.push(now);return true}}
@@ -156,11 +220,11 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
     giftCache.delete(key);giftCache.set(key,{at:clock(),gifts});if(giftCache.size>6)giftCache.delete(giftCache.keys().next().value);
     return gifts;
   }
-  // Elimination state is read fresh at the gifts' pace, not from the 30 s competition list.
+  // Elimination and PK state (pkStage, standing) are read fresh at the gifts' pace, not from the 30 s competition list.
   async function loadEliminated(comp,fresh=false){
     const key=String(comp._id),cached=eliminatedCache.get(key),ttl=comp.status==='active'?LIVE_TTL:ENDED_TTL;
     if(!fresh&&cached&&clock()-cached.at<ttl)return cached.list;
-    const doc=await db().collection('competitions').findOne({_id:comp._id},{projection:{eliminated:1,eliminatedLog:1}}),log=Array.isArray(doc?.eliminatedLog)?doc.eliminatedLog:[],list=withLogRanks(Array.isArray(doc?.eliminated)?doc.eliminated:[],log);list.log=log;
+    const doc=await db().collection('competitions').findOne({_id:comp._id},{projection:{eliminated:1,eliminatedLog:1,pkStage:1,standing:1}}),log=Array.isArray(doc?.eliminatedLog)?doc.eliminatedLog:[],list=withLogRanks(Array.isArray(doc?.eliminated)?doc.eliminated:[],log);list.log=log;list.pkStage=doc?.pkStage||null;list.standing=doc?.standing||null;
     eliminatedCache.delete(key);eliminatedCache.set(key,{at:clock(),list});if(eliminatedCache.size>6)eliminatedCache.delete(eliminatedCache.keys().next().value);
     return list;
   }
@@ -207,12 +271,13 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
     return{admin:false,by:grant.request.name};
   }
   const publicCompetition=comp=>({id:String(comp._id),name:comp.name||'',slug:comp.slug,status:comp.status||'created',createdAt:comp.createdAt||null,startedAt:comp.startedAt||null,endedAt:comp.endedAt||null});
-  const publicSnapshot=(snap,admin)=>({id:String(snap._id),name:snap.name,at:snap.at,createdAt:snap.createdAt,createdBy:admin?snap.createdBy:undefined,rows:(snap.rows||[]).map(r=>snapshotEntry(r,true)),groups:(snap.groups||[]).map(g=>snapshotEntry(g,false))});
+  // A snapshot taken during the PK stage keeps the PK state (matches, tables, voting) and round list of its time.
+  const publicSnapshot=(snap,admin)=>{const pk=cleanPkStage(snap.pkStage),stand=cleanStanding(snap.standing),rounds=cleanRounds(snap.rounds);return{id:String(snap._id),name:snap.name,at:snap.at,createdAt:snap.createdAt,createdBy:admin?snap.createdBy:undefined,rows:(snap.rows||[]).map(r=>snapshotEntry(r,true)),groups:(snap.groups||[]).map(g=>snapshotEntry(g,false)),...(pk?{pkStage:pk}:{}),...(stand?{standing:stand}:{}),...(rounds?{rounds}:{})}};
   const competitionFor=handler=>endpoint(async(req,res)=>{const comp=await bySlug(req.params.slug);if(!comp)return fail(res,404,'not_found');return handler(req,res,comp)});
   async function liveBoard(comp,fresh=false){
     const [gifts,window,eliminated]=await Promise.all([loadGifts(comp,fresh),loadWindow(comp,fresh),loadEliminated(comp,fresh)]);
     const overall=scoreOverall(comp.participants,gifts,{skip:window.ids,scores:window.scores}).scores;
-    return{at:clock(),...buildBoard(comp.participants,gifts,{overall,eliminated,eliminatedLog:eliminated.log})};
+    return{at:clock(),...buildBoard(comp.participants,gifts,{overall,eliminated,eliminatedLog:eliminated.log,pkStage:eliminated.pkStage,standing:eliminated.standing})};
   }
 
   for(const file of STATIC_FILES)router.get(`/${file}`,(req,res)=>{res.set({'Cache-Control':'public, max-age=3600','X-Content-Type-Options':'nosniff'});res.sendFile(file,{root:publicDir})});
@@ -254,7 +319,7 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
     const col=db().collection(SNAPSHOTS),competitionId=String(comp._id);
     if(await col.countDocuments({competitionId})>=MAX_SNAPSHOTS)return fail(res,409,'too_many_snapshots');
     const board=await liveBoard(comp,true);
-    const doc={_id:new ObjectId(),competitionId,name,at:board.at,createdAt:new Date(board.at),createdBy:who.by,rows:board.rows,groups:board.groups};
+    const doc={_id:new ObjectId(),competitionId,name,at:board.at,createdAt:new Date(board.at),createdBy:who.by,rows:board.rows,groups:board.groups,...(board.pkStage?{pkStage:board.pkStage}:{}),...(board.standing?{standing:board.standing}:{}),...(board.rounds?{rounds:board.rounds}:{})};
     await col.insertOne(doc);noStore(res).json({status:'ok',snapshot:publicSnapshot(doc,who.admin)});
   }));
   router.post('/api/competitions/:slug/snapshots/:id/rename',json,competitionFor(async(req,res,comp)=>{
@@ -295,4 +360,4 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
   async function ensureIndexes(){const d=db();await Promise.all([d.collection(ACCESS).createIndex({competitionId:1,secretHash:1}),d.collection(ACCESS).createIndex({secretHash:1,status:1}),d.collection(SNAPSHOTS).createIndex({competitionId:1,at:-1})])}
   return{router,ensureIndexes,competitions,bySlug,loadGifts,loadEliminated,reset(){list=null;listAt=0;missAt=0;giftCache.clear();windowCache.clear();eliminatedCache.clear()}};
 }
-module.exports={createCompetitionPages,slugify,assignSlugs,scoreGifts,scoreOverall,overallScores,buildBoard,eliminatedMap,withLogRanks,fallbackRanks,reviveCounts,snapshotEntry,giftTalents,giftReceivers,validName,RESERVED};
+module.exports={createCompetitionPages,slugify,assignSlugs,scoreGifts,scoreOverall,overallScores,buildBoard,eliminatedMap,withLogRanks,fallbackRanks,reviveCounts,snapshotEntry,cleanPkStage,cleanStanding,eliminationRounds,giftTalents,giftReceivers,validName,RESERVED};

@@ -213,3 +213,68 @@ test('podium toggle shows provisional final standings 1..N during the competitio
  assert.equal(await fresh.locator('.page.live .talents .row.out').count(),0,'ended: nobody dimmed');assert.equal(await fresh.locator('.page.live .talents .row.out-final').count(),2);
  assert.ok(await fresh.locator('.page.live .talents .row.out-final').first().evaluate(e=>Number(getComputedStyle(e).opacity)===1),'shown clearly');
 });
+test('PK stage on a phone: match cards and tables lead mid-PK, voting order while voting, score ranking leads once chasing; rounds of eliminations',async t=>{
+ const pkFixtures=require('./support/pk-fixtures');
+ const {app,state}=createCompetitionFixture(),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base=`http://127.0.0.1:${server.address().port}`;
+ const comp=state.db.rows('competitions')[0];comp.pkStage=pkFixtures.midPk();
+ const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']}),errors=[];
+ t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});
+ const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);
+ const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
+ const live=page.locator('.page.live'),noScroll=()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth);
+ const open=async()=>{state.pages.reset();await page.goto(`${base}/pk-battle-16-10`);await live.locator('.talents .row').first().waitFor()};
+ // pk leads when it comes before the ranking list inside the talents column.
+ const pkFirst=()=>live.locator('.talents').evaluate(t=>{const pk=t.querySelector('.pk-board'),rows=t.querySelector('.rows');return Boolean(pk&&rows&&(pk.compareDocumentPosition(rows)&Node.DOCUMENT_POSITION_FOLLOWING))});
+ // --- Mid-PK ---
+ await open();const pk=live.locator('.pk-board');await pk.waitFor();
+ assert.equal(await pkFirst(),true,'PK board leads the page during the PK');assert.match(await pk.locator('.pk-phase').textContent(),/Đang PK/);
+ assert.deepEqual(await pk.locator('.track-head b').allTextContents(),['Track 1–7'],'one track per competition');
+ const card=id=>pk.locator(`.match[data-match="${id}"]`);
+ assert.equal(await card('A1').locator('.m-score').textContent(),'1–2','current score after the cancelled round');assert.equal(await card('A1').locator('li.win .m-name').textContent(),'RYAN');
+ assert.ok(Number(await card('A1').locator('li.lose').evaluate(e=>getComputedStyle(e).opacity))<0.7,'loser dimmed');
+ assert.deepEqual(await card('A1').locator('.m-marks .rv').allTextContents(),['↺✗','↺✓'],'LILY failed her revive, RYAN revived');
+ assert.deepEqual(await card('A1').locator('.m-round').allTextContents(),['V1LILY 🍉','V2hòa – đánh lại','V3LILY 🍉↺ RYAN','V4RYAN','V5RYAN'],'round history: tie replayed, round 3 cancelled by RYAN');
+ assert.equal(await card('A1').locator('.m-round.cancelled s').textContent(),'LILY 🍉','the cancelled round is struck through');
+ assert.deepEqual(await card('A1').locator('.m-revive').allTextContents(),['↺ RYAN✓1.200 💎','↺ LILY 🍉✗2.000 💎'],'revive chases with their target');
+ assert.equal(await card('A2').locator('.m-status').textContent(),'Đang đấu');assert.equal(await card('A2').locator('.m-score').textContent(),'1–1');
+ assert.equal(await card('A3').locator('.m-score').textContent(),'1–0–2','three-way match');assert.match(await card('A3').locator('.m-round.tie').textContent(),/hòa/);
+ const tables=pk.locator('.pk-tables');assert.equal(await tables.isVisible(),true);
+ assert.deepEqual(await tables.locator('.upper .t-name').allTextContents(),['RYAN','G']);
+ assert.deepEqual(await tables.locator('.lower li').evaluateAll(l=>l.map(li=>li.classList.contains('cut-line')?'---':li.querySelector('.t-name').textContent+(li.classList.contains('cut')?' ✂':''))),['LILY 🍉','E','---','F ✂'],'cut line after the top takeLower');
+ assert.match(await live.locator('.talents .row',{hasText:'RYAN'}).locator('.revive-tag').textContent(),/↺/,'revived and still in: ↺ on the ranking row');
+ assert.equal(await pk.locator('.pk-voting').count(),0,'no voting order before voting');
+ assert.equal(await noScroll(),true,'no horizontal scroll at 375px mid-PK');
+ // Folding a section survives the 10 s refresh.
+ await pk.locator('.pk-matches-fold > summary').click();assert.equal(await pk.locator('.pk-matches-fold').evaluate(d=>d.open),false);
+ comp.pkStage.matches[1].points['Chanee🌸']=2;state.pages.reset();await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
+ await page.waitForFunction(()=>document.querySelector('.page.live .match[data-match="A2"] .m-score')?.textContent==='2–1');assert.equal(await live.locator('.pk-matches-fold').evaluate(d=>d.open),false,'re-rendered with new points, still folded');
+ // --- Voting ---
+ comp.pkStage=pkFixtures.voting();await open();await pk.waitFor();
+ assert.equal(await pkFirst(),true);assert.match(await pk.locator('.pk-phase').textContent(),/Đang bình chọn/);
+ const vote=pk.locator('.vote-order li');assert.deepEqual(await vote.locator('.t-name').allTextContents(),['RYAN','Chanee🌸','G','LILY 🍉','D']);
+ assert.equal(await pk.locator('.vote-order li.done').count(),2);assert.equal(await pk.locator('.vote-order li[aria-current="step"] .t-name').textContent(),'G');
+ assert.match(await pk.locator('.pk-voting-fold .fold-count').textContent(),/2\/5/);
+ assert.deepEqual(await pk.locator('.pk-tables .lower li').evaluateAll(l=>l.map(li=>li.classList.contains('cut-line')?'---':li.querySelector('.t-name').textContent)),['LILY 🍉','D','---','E','F']);
+ assert.equal(await noScroll(),true,'no horizontal scroll at 375px while voting');
+ // --- Chasing: the score ranking is the main view, the PK result follows it, folded. ---
+ comp.pkStage=pkFixtures.chasing();await open();await pk.waitFor();
+ assert.equal(await pkFirst(),false,'ranking leads once chasing');assert.match(await pk.locator('.pk-phase').textContent(),/Rượt điểm/);
+ assert.equal(await pk.locator('.pk-voting').count(),0);assert.equal(await pk.locator('.pk-tables-fold').evaluate(d=>d.open),false);
+ assert.deepEqual(await live.locator('.talents .row .who b').allTextContents(),['LILY 🍉','RYAN','Chanee🌸'],'score ranking unchanged');
+ // --- Done, with eliminations labelled by round ---
+ const now=Date.now();comp.pkStage=pkFixtures.done();
+ comp.eliminatedLog=[{talentName:'Chanee🌸',action:'out',at:new Date(now-90000),round:'PK'},{talentName:'Chanee🌸',action:'in',at:new Date(now-80000)},{talentName:'RYAN',action:'out',at:new Date(now-30000),round:'Voting'}];
+ comp.eliminated=[{talentName:'RYAN',at:new Date(now-30000),round:'Voting'}];
+ await open();await pk.waitFor();assert.equal(await pkFirst(),false);assert.match(await pk.locator('.pk-phase').textContent(),/Đã xong PK/);
+ await live.locator('.pk-tables-fold > summary').click();
+ assert.deepEqual(await pk.locator('.pk-tables .lower li').evaluateAll(l=>l.map(li=>li.classList.contains('cut-line')?'---':li.querySelector('.t-name').textContent+(li.classList.contains('cut')?' ✂':''))),['LILY 🍉','D','---','E ✂','F ✂'],'lowerBy score: ordered by score, cut follows that order');
+ assert.match(await pk.locator('.pk-tables .lower .table-head').textContent(),/theo điểm/);
+ const rounds=live.locator('.rounds-fold');assert.deepEqual(await rounds.locator('.round-head b').allTextContents(),['Voting','PK'],'newest round first');
+ assert.equal(await rounds.locator('.round-name.back .t-name').textContent(),'Chanee🌸','revived since: marked');
+ await page.locator('#out-toggle').click();assert.match(await live.locator('.talents .row.out .out-tag').textContent(),/^Bị loại · Voting · \d\d:\d\d ↺1$/,'out tag names the round');
+ assert.match(await live.locator('.talents .row',{hasText:'Chanee🌸'}).locator('.revive-tag').textContent(),/↺/);
+ assert.equal(await noScroll(),true);
+ // --- A competition without pkStage: nothing PK-related appears. ---
+ delete comp.pkStage;delete comp.eliminatedLog;delete comp.eliminated;await open();
+ assert.equal(await live.locator('.pk-board').count(),0);assert.equal(await live.locator('.rounds-fold').count(),0);assert.equal(await live.locator('.talents .row').count(),3);
+});

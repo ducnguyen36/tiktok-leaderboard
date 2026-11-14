@@ -54,8 +54,8 @@
  const outNames=snap=>{const gone=new Set();for(const r of snap?.rows||[])if(r.eliminated)gone.add(r.talentName);gone.at=snap?.at??null;gone.outAt=new Map((snap?.rows||[]).filter(r=>r.eliminated).map(r=>[r.talentName,r.eliminatedAt||null]));return gone};
  const isGone=(page,row)=>{if(!row.eliminated||!page.gone.has(row.talentName))return false;const before=page.gone.outAt.get(row.talentName),now=row.eliminatedAt;return !(before&&now&&Date.parse(now)>Date.parse(before))};
  function pages(){
-  const live=board.live,snaps=board.snapshots,list=[{id:'live',live:true,title:'LIVE',sub:'Cộng dồn từ đầu cuộc thi',rows:live.rows,groups:live.groups,gone:outNames(snaps[0])}];
-  snaps.forEach((s,i)=>list.push({id:s.id,title:s.name,sub:`${when(s.at)}${s.createdBy?` · ${s.createdBy}`:''}`,rows:s.rows,groups:s.groups,gone:outNames(snaps[i+1])}));
+  const live=board.live,snaps=board.snapshots,list=[{id:'live',live:true,title:'LIVE',sub:'Cộng dồn từ đầu cuộc thi',rows:live.rows,groups:live.groups,gone:outNames(snaps[0]),pk:live.pkStage||null,rounds:live.rounds||null}];
+  snaps.forEach((s,i)=>list.push({id:s.id,title:s.name,sub:`${when(s.at)}${s.createdBy?` · ${s.createdBy}`:''}`,rows:s.rows,groups:s.groups,gone:outNames(snaps[i+1]),pk:s.pkStage||null,rounds:s.rounds||null}));
   return list;
  }
  // "Cuộc thi": talents out since an earlier round are gone; those out in this round are hidden behind the eye
@@ -87,9 +87,111 @@
   placed(visible,page,group).forEach((row,i)=>{const isOut=!group&&roundOut(page,row),rank=i+1;// Eliminated rows are dimmed while the competition runs; the final standings of an ended one show everyone clearly.
    const dim=isOut&&board.competition?.status!=='ended',li=el('li',`row${dim?' out':isOut?' out-final':''}${!isOut&&rank<=3?` top${rank}`:''}`);li.append(el('span','rank',String(rank)));const name=group?row.profileName:row.talentName;
    if(!group)li.append(el('span','avatar',Array.from(name||'?')[0]||'?'));
-   const who=el('div','who');who.append(el('b','',name||'—'));if(!group){const sub=el('small','',row.profileName||'');if(isOut){const at=row.eliminatedAt?hhmm.format(new Date(row.eliminatedAt)):'',tag=el('span','out-tag',`Bị loại${at?` · ${at}`:''}${row.revives?` ↺${row.revives}`:''}`);
-     tag.title=[row.eliminatedAt?`Bị loại lúc ${when(row.eliminatedAt)}`:'',row.revives?`đã hồi sinh ${row.revives} lần`:''].filter(Boolean).join(' · ');sub.prepend(tag)}who.append(sub)}li.append(who,score(row));ol.append(li)});
+   const who=el('div','who');who.append(el('b','',name||'—'));if(!group){const sub=el('small','',row.profileName||'');if(isOut){const at=row.eliminatedAt?hhmm.format(new Date(row.eliminatedAt)):'',tag=el('span','out-tag',`Bị loại${row.eliminatedRound?` · ${row.eliminatedRound}`:''}${at?` · ${at}`:''}${row.revives?` ↺${row.revives}`:''}`);
+     tag.title=[row.eliminatedAt?`Bị loại lúc ${when(row.eliminatedAt)}`:'',row.eliminatedRound?`vòng ${row.eliminatedRound}`:'',row.revives?`đã hồi sinh ${row.revives} lần`:''].filter(Boolean).join(' · ');sub.prepend(tag)}
+     // Revived and back in: the ↺ mark stays on the row.
+     else if(row.revives){const tag=el('span','revive-tag',`↺${row.revives>1?row.revives:''}`);tag.title=`Đã hồi sinh ${row.revives} lần`;tag.setAttribute('aria-label',tag.title);sub.prepend(tag)}who.append(sub)}li.append(who,score(row));ol.append(li)});
   wrap.append(ol);return wrap;
+ }
+ // ---- PK stage (competitions.pkStage, see the PK stage contract and the organiser's update) ----
+ // One competition = one track: tables, voting order and cut are this competition's own.
+ const PHASES={setup:'Chuẩn bị PK',pk:'Đang PK',voting:'Đang bình chọn',chasing:'Rượt điểm',done:'Đã xong PK'};
+ const MATCH_STATUS={pending:'Chờ',running:'Đang đấu',reviving:'Hồi sinh',done:'Xong'};
+ const REVIVE_MODE={gap:'theo chênh lệch',fixed:'số cố định',formula:'theo công thức',manual:'MC chấm'};
+ const pkLeads=pk=>['setup','pk','voting'].includes(pk.phase);
+ // Open/closed sections survive the 10 s refresh (kept per section kind, the same on every page).
+ const opened=new Map();
+ function fold(key,title,defaultOpen,content,extra){
+  const d=el('details',`pk-fold ${key}`),s=el('summary');s.append(el('span','fold-title',title));if(extra)s.append(extra);d.append(s,content);
+  d.open=opened.has(key)?opened.get(key):defaultOpen;d.addEventListener('toggle',()=>opened.set(key,d.open));return d;
+ }
+ const reviveText=r=>`Hồi sinh${r.round?` (hủy ván ${r.round})`:''}: ${r.success===true?'thành công':r.success===false?'thất bại':'đang chờ'}${r.target!=null?` · mục tiêu ${fmt(r.target)} 💎`:''}${r.mode?` · ${REVIVE_MODE[r.mode]}`:''}`;
+ const reviveSign=r=>r.success===true?'✓':r.success===false?'✗':'…',reviveCls=r=>`rv ${r.success===true?'ok':r.success===false?'fail':'wait'}`;
+ function reviveMarks(m,name){
+  const box=el('span','m-marks');
+  for(const r of m.revives.filter(r=>r.talentName===name)){const mark=el('span',reviveCls(r),`↺${reviveSign(r)}`);mark.title=reviveText(r);mark.setAttribute('aria-label',mark.title);box.append(mark)}
+  return box;
+ }
+ // Round history: "V1 RYAN", a tie "V2 hòa – đánh lại", a round cancelled by a revive struck through "↺ name".
+ function roundsLine(m){
+  const line=el('div','m-rounds');
+  for(const r of m.rounds){const chip=el('span',`m-round${r.winner?'':' tie'}${r.cancelledByRevive?' cancelled':''}`);
+   chip.append(el('span','m-rn',`V${r.n}`));
+   if(r.winner){const w=el(r.cancelledByRevive?'s':'span','m-rw',r.winner);chip.append(w)}else chip.append(el('span','m-rw','hòa – đánh lại'));
+   if(r.cancelledByRevive)chip.append(el('span','rv ok',`↺ ${r.cancelledByRevive}`));
+   const d=Object.entries(r.diamonds||{});chip.title=[`Ván ${r.n}`,r.winner?`${r.winner} thắng`:`hòa${r.tied.length?`: ${r.tied.join(', ')}`:''}`,...d.map(([n,v])=>`${n} ${fmt(v)} 💎`),r.cancelledByRevive?`bị hủy do ${r.cancelledByRevive} hồi sinh`:''].filter(Boolean).join(' · ');
+   line.append(chip)}
+  return line;
+ }
+ function matchCard(m){
+  const card=el('div',`match ${m.status}`);card.dataset.match=m.id;
+  const head=el('div','m-head');head.append(el('span','m-id',m.id),el('span','m-score',m.talents.map(n=>m.points[n]??0).join('–')),el('span',`m-status ${m.status}`,MATCH_STATUS[m.status]||''));card.append(head);
+  const ul=el('ul','m-talents'),done=m.status==='done'&&m.winner;
+  for(const n of m.talents){const won=m.winner===n,lost=done&&!won,li=el('li',won?'win':lost?'lose':'');
+   li.append(el('span','m-name',n),reviveMarks(m,n),el('b','m-pt',String(m.points[n]??0)));if(won)li.title='Thắng trận';ul.append(li)}
+  card.append(ul);if(m.rounds.length)card.append(roundsLine(m));
+  // Revive chases with their target (when known).
+  for(const r of m.revives){const line=el('div',`m-revive ${r.success===true?'ok':r.success===false?'fail':'wait'}`);line.title=reviveText(r);
+   line.append(el('span','',`↺ ${r.talentName}`),el('b','',reviveSign(r)));if(r.target!=null)line.append(el('small','',`${fmt(r.target)} 💎`));else if(r.mode==='manual')line.append(el('small','','MC'));card.append(line)}
+  return card;
+ }
+ function matchesView(pk){
+  const box=el('div','pk-tracks'),ids=pk.tracks.map(t=>t.id);for(const m of pk.matches)if(m.track&&!ids.includes(m.track))ids.push(m.track);
+  const groups=ids.map(id=>({id,label:pk.tracks.find(t=>t.id===id)?.label||`Track ${id}`,matches:pk.matches.filter(m=>m.track===id)})).filter(g=>g.matches.length);
+  const loose=pk.matches.filter(m=>!m.track||!ids.includes(m.track));if(loose.length)groups.push({id:'',label:groups.length?'Trận khác':'',matches:loose});
+  for(const g of groups){const t=el('section','pk-track');
+   if(g.label||groups.length>1){const h=el('div','track-head');h.append(el('b','',g.label||'Các trận'),el('span','track-count',`${g.matches.filter(m=>m.status==='done').length}/${g.matches.length} xong`));t.append(h)}
+   const grid=el('div','match-grid');[...g.matches].sort((a,b)=>(a.order??999)-(b.order??999)).forEach(m=>grid.append(matchCard(m)));t.append(grid);box.append(t)}
+  return box;
+ }
+ function revivedSet(pk){const s=new Set();for(const m of pk.matches)for(const r of m.revives)if(r.success===true)s.add(r.talentName);return s}
+ function tableList(cls,title,names,pk,{cutAt=null,cut=new Set(),scores=null,note=''}={}){
+  const box=el('div',`pk-table ${cls}`),revived=revivedSet(pk),head=el('div','table-head',`${title} · ${names.length}`);if(note)head.append(el('small','table-note',note));box.append(head);
+  const ol=el('ol','table-rows');if(!names.length)ol.append(el('li','empty','Chưa có'));
+  names.forEach((n,i)=>{
+   if(cutAt!=null&&i===cutAt){const line=el('li','cut-line',`✂ Top ${cutAt} đi tiếp`);line.setAttribute('role','separator');ol.append(line)}
+   const isCut=cut.has(n),li=el('li',isCut?'cut':'');li.append(el('span','t-no',String(i+1)),el('span','t-name',n));
+   if(revived.has(n)){const r=el('span','rv ok','↺');r.title='Đã hồi sinh';li.append(r)}
+   if(scores&&scores.has(n))li.append(el('span','t-score',fmt(scores.get(n))));
+   if(isCut){const c=el('span','cut-mark','✂');c.title='Bị cắt';c.setAttribute('aria-label','Bị cắt');li.append(c)}
+   ol.append(li)});
+  box.append(ol);return box;
+ }
+ // Lower table: in seed order, or by score (tables.lowerBy 'score', after a chasing) from this page's ranking;
+ // the cut line sits after the top takeLower of that order and the talents below it are marked ✂.
+ function tablesView(pk,rows){
+  const t=pk.tables,byScore=t.lowerBy==='score',scores=new Map((rows||[]).map(r=>[r.talentName,Number(r.competition)||0]));
+  const lower=byScore?t.lower.map((n,i)=>[n,i]).sort((a,b)=>(scores.has(b[0])?scores.get(b[0]):-Infinity)-(scores.has(a[0])?scores.get(a[0]):-Infinity)||a[1]-b[1]).map(([n])=>n):t.lower;
+  let cut;if(byScore&&pk.takeLower!=null)cut=new Set(lower.slice(pk.takeLower));else{cut=new Set(t.cut);if(pk.takeLower!=null)lower.slice(pk.takeLower).forEach(n=>cut.add(n))}
+  let cutAt=pk.takeLower!=null&&lower.length>pk.takeLower?pk.takeLower:null;
+  if(cutAt==null&&cut.size){const i=lower.findIndex(n=>cut.has(n));if(i>=0)cutAt=i}
+  const box=el('div','pk-tables');box.append(tableList('upper','Bảng thắng',t.upper,pk),tableList('lower','Bảng thua',lower,pk,{cutAt,cut,scores:byScore?scores:null,note:byScore?'theo điểm':''}));return box;
+ }
+ function votingView(pk){
+  const v=pk.voting,done=new Set(v.done),box=el('div','pk-voting'),ol=el('ol','vote-order');
+  v.order.forEach((n,i)=>{const isDone=done.has(n),isNow=v.current===n&&!isDone,li=el('li',isNow?'current':isDone?'done':'');
+   li.append(el('span','t-no',String(i+1)),el('span','t-name',n));if(isDone)li.append(el('span','vote-done','✓'));if(isNow){li.setAttribute('aria-current','step');li.title='Đang bình chọn'}ol.append(li)});
+  box.append(ol);return box;
+ }
+ function pkView(pk,rows){
+  const wrap=el('section',`pk-board ph-${pk.phase}`),head=el('div','pk-head');
+  head.append(el('span','section-title pk-title','Vòng PK'),el('span',`pk-phase ph-${pk.phase}`,PHASES[pk.phase]||''),el('span','pk-rule',`Thắng ${pk.firstTo} điểm${pk.takeLower!=null?` · bảng thua lấy top ${pk.takeLower}${pk.tables?.lowerBy==='score'?' theo điểm':''}`:''}`));
+  wrap.append(head);
+  const leads=pkLeads(pk);
+  if(pk.phase==='voting'&&pk.voting&&pk.voting.order.length){const v=pk.voting;wrap.append(fold('pk-voting-fold','Thứ tự bình chọn',true,votingView(pk),el('span','fold-count',`${v.done.length}/${v.order.length} xong`)))}
+  if(pk.matches.length){const running=pk.matches.filter(m=>m.status==='running'||m.status==='reviving').length,count=el('span','fold-count',running?`${running} đang đấu`:`${pk.matches.filter(m=>m.status==='done').length}/${pk.matches.length} xong`);
+   wrap.append(fold('pk-matches-fold','Trận đấu',pk.phase==='pk'||pk.phase==='setup',matchesView(pk),count))}
+  if(pk.tables&&(pk.tables.upper.length||pk.tables.lower.length))wrap.append(fold('pk-tables-fold','Bảng thắng · Bảng thua',leads,tablesView(pk,rows)));
+  return wrap;
+ }
+ // "Bị loại theo vòng": HeliosControl's round labels, newest round first; talents revived since are marked ↺.
+ function roundsView(rounds){
+  const box=el('div','rounds');
+  for(const g of rounds){const r=el('div','round'),h=el('div','round-head');h.append(el('b','',g.round),el('span','round-count',String(g.talents.length)));r.append(h);
+   const names=el('div','round-names');for(const t of g.talents){const c=el('span',`round-name${t.back?' back':''}`);c.append(el('span','t-name',t.talentName));
+    if(t.at)c.append(el('small','',hhmm.format(new Date(t.at))));if(t.back){const m=el('span','rv ok','↺');m.title='Đã hồi sinh, đang thi tiếp';m.setAttribute('aria-label',m.title);c.append(m)}names.append(c)}
+   r.append(names);box.append(r)}
+  return fold('rounds-fold','Bị loại theo vòng',true,box,el('span','fold-count',String(rounds.reduce((n,g)=>n+g.talents.length,0))));
  }
  function applyGroups(){$('board-view').classList.toggle('groups-on',showGroups);$('groups-toggle').setAttribute('aria-pressed',String(showGroups))}
  function applyMode(){for(const b of document.querySelectorAll('.modes button'))b.setAttribute('aria-pressed',String(b.dataset.mode===mode))}
@@ -104,7 +206,11 @@
    titles.append(row,el('div','page-sub',p.sub));head.append(titles);
    if(!p.live&&board.admin)head.append(iconButton('trash','Xóa snapshot',{remove:p.id},'danger'));
    if(mode==='overall'&&p.rows.some(r=>r.overall==null))page.append(head,el('div','old-note','Snapshot cũ chưa lưu số Tổng cộng.'));else page.append(head);
-   const body=el('div','page-body');body.append(list('Tổng theo nhóm',p.groups,true),list('Xếp hạng talent',p.rows,false,p));page.append(body);box.append(page);
+   const body=el('div','page-body'),talents=list('Xếp hạng talent',p.rows,false,p);
+   // PK stage: during setup/PK/voting the PK board leads; once chasing (or done) the score ranking is the main view.
+   if(p.pk){const pk=pkView(p.pk,p.rows);if(pkLeads(p.pk))talents.prepend(pk);else talents.append(pk)}
+   if(p.rounds&&mode==='competition')talents.append(roundsView(p.rounds));
+   body.append(list('Tổng theo nhóm',p.groups,true),talents);page.append(body);box.append(page);
    const dot=el('button');dot.type='button';dot.setAttribute('aria-label',p.title);dot.dataset.page=String(i);dots.append(dot);
   });
   const index=Math.max(0,all.findIndex(p=>p.id===current));current=all[index].id;
