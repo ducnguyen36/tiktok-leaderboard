@@ -37,16 +37,17 @@ function seed(db,now){
   gift([{name:'Lily tên cũ',uid:'1'}],50,now-2500,foreign,null),gift(['RYAN'],10,start-60000,foreign,null),gift(['LILY 🍉'],1000,now-85000000,old,null));
  return{id,session,foreign,gift};
 }
+// testDb: HeliosControl's "Test DB" database (helioscontrol_test), empty unless a test seeds it (seed(state.testDb,now)).
 function createCompetitionFixture({clock=Date.now}={}){
- const db=memoryDb(),now=clock(),seeded=seed(db,now),app=express(),state={db,...seeded};
+ const db=memoryDb(),testDb=memoryDb(),now=clock(),seeded=seed(db,now),app=express(),state={db,testDb,...seeded};
  const cookie=req=>(req.headers.cookie||'').includes('test_admin=1');
  const auth={origin:undefined,isAdmin:async req=>cookie(req),
   adminMutation:async(req,res)=>{if(cookie(req)&&req.get('x-csrf-token')==='test-csrf')return{email:'admin@example.test'};res.status(403).json({status:'error',error:'csrf_required'});return null}};
- const pages=createCompetitionPages({getDb:()=>db,auth,assetVersion:()=>'test',clock});state.pages=pages;
+ const pages=createCompetitionPages({getDb:()=>db,getTestDb:()=>state.testDb,auth,assetVersion:()=>'test',clock});state.pages=pages;
  app.use(pages.router);
  app.get('/auth/status',(req,res)=>res.json({authorized:cookie(req),admin:cookie(req),csrf:cookie(req)?'test-csrf':undefined}));
  app.get('/old',(req,res)=>res.type('text').send('old board'));
  app.use((req,res)=>res.status(404).type('text').send('not found'));
  return{app,state};
 }
-module.exports={memoryDb,matches,createCompetitionFixture};
+module.exports={memoryDb,matches,seed,createCompetitionFixture};

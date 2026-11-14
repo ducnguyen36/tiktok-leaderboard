@@ -1,6 +1,6 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const {slugify,assignSlugs,scoreGifts,overallScores,buildBoard,snapshotEntry,validName,eliminatedMap,withLogRanks}=require('../competitionPages');
-const {createCompetitionFixture}=require('./support/competition-server');
+const {createCompetitionFixture,seed:seedCompetition}=require('./support/competition-server');
 test('slugs fold Vietnamese, styled letters and emoji; the newest namesake keeps the plain slug',()=>{
  assert.equal(slugify('PK BATTLE 16/10'),'pk-battle-16-10');assert.equal(slugify('  Cuộc thi Đại chiến 🔥 Mùa 2 '),'cuoc-thi-dai-chien-mua-2');
  assert.equal(slugify('𝓗𝓪𝓷𝓲 🐙'),'hani');assert.equal(slugify('🔥🔥'),'cuoc-thi');assert.equal(slugify('Crown__War--S8!!'),'crown-war-s8');
@@ -220,4 +220,68 @@ test('eliminations grouped by round label (newest round first), revived talents 
  assert.deepEqual(Object.fromEntries(b.rows.map(r=>[r.talentName,r.eliminatedRound])),{A:'PK',B:'Chasing 1',C:'Voting',D:null},'C takes its round from the log line of the same moment');
  assert.deepEqual(b.rounds.map(g=>g.round),['Chasing 1','Voting','PK']);assert.equal(b.rows.find(r=>r.talentName==='B').revives,1);
  assert.equal(snapshotEntry({talentName:'C',eliminated:true,eliminatedRound:'Voting'},true).eliminatedRound,'Voting');assert.equal(snapshotEntry({talentName:'C',eliminated:false,eliminatedRound:'Voting'},true).eliminatedRound,null);
+});
+// --- Test DB competitions (HeliosControl "Test DB" mode -> helioscontrol_test) served at /test-<slug> ---
+// The test DB gets the same seeded "PK BATTLE 16/10" (same name as the real one) plus a test-only "Giải Thử" with an older namesake.
+function seedTestDb(state,now){
+ const {ObjectId}=require('mongodb'),seeded=seedCompetition(state.testDb,now);
+ const thu=new ObjectId(),thuOld=new ObjectId();
+ state.testDb.rows('competitions').push({_id:thu,name:'Giải Thử',status:'active',createdAt:new Date(now-1000),startedAt:new Date(now-1000),participants:[]},
+  {_id:thuOld,name:'GIẢI THỬ',status:'ended',createdAt:new Date(now-86400000),participants:[]});
+ // Only the test DB: RYAN +5000 in the test competition's own session, so its board differs from the real one.
+ state.testDb.rows('gifts').push(seeded.gift(['RYAN'],5000,now-1500,seeded.session,seeded.id));
+ return{...seeded,thu,thuOld};
+}
+// Records which collections a memory DB is asked for.
+function spy(db){const seen=[],collection=db.collection.bind(db);db.collection=name=>{seen.push(name);return collection(name)};return seen}
+test('test competitions: /test-<slug> from the test DB slugs only; test-only names never resolve without the prefix',async t=>{
+ const {state,call,now}=await server(t),tdb=seedTestDb(state,now());
+ const real=(await call('/api/competitions/pk-battle-16-10/state')).json.competition;
+ assert.equal(real.id,String(state.id));assert.equal(real.slug,'pk-battle-16-10');assert.equal('test' in real,false,'real competitions carry no test flag');
+ const test=(await call('/api/competitions/test-pk-battle-16-10/state')).json.competition;
+ assert.equal(test.id,String(tdb.id),'the namesake in the test DB is a different competition');assert.equal(test.slug,'test-pk-battle-16-10');assert.equal(test.test,true);
+ assert.equal((await call('/test-pk-battle-16-10')).status,200);assert.equal((await call('/test-giai-thu')).status,200);
+ assert.equal((await call('/api/competitions/test-giai-thu/state')).json.competition.id,String(tdb.thu),'newest namesake keeps the plain slug');
+ assert.equal((await call('/api/competitions/test-giai-thu-2/state')).json.competition.id,String(tdb.thuOld),'older namesake gets -2 inside the test DB');
+ assert.equal((await call('/giai-thu')).status,404,'a test competition is never reachable without test-');
+ assert.equal((await call('/api/competitions/giai-thu/state')).status,404);
+ assert.equal((await call('/test-')).status,404);assert.equal((await call('/test-nope')).status,404);assert.equal((await call('/api/competitions/test-nope/state')).status,404);
+});
+test('test competitions: board, PK stage, eliminated, gifts, grants and snapshots all use the test DB',async t=>{
+ const {state,call,now}=await server(t),tdb=seedTestDb(state,now()),slug='/api/competitions/test-pk-battle-16-10',realSlug='/api/competitions/pk-battle-16-10';
+ const tcomp=state.testDb.rows('competitions').find(c=>String(c._id)===String(tdb.id)),at=new Date(now());
+ tcomp.eliminated=[{talentName:'Chanee🌸',at,rank:3,of:3}];tcomp.pkStage={phase:'pk',matches:[{id:'A1',talents:['LILY 🍉','RYAN'],status:'running'}]};
+ await call(realSlug+'/state');const realSeen=spy(state.db);
+ const board=(await call(slug+'/board',admin)).json;
+ assert.deepEqual(board.live.rows.map(r=>[r.talentName,r.competition,r.overall]),[['RYAN',5040,6039],['LILY 🍉',104,154],['Chanee🌸',4,4]],'gifts and window gifts come from the test DB');
+ assert.equal(board.live.rows.find(r=>r.talentName==='Chanee🌸').eliminated,true);assert.equal(board.live.pkStage.matches[0].id,'A1');assert.equal(board.competition.test,true);
+ assert.deepEqual([...new Set(realSeen)].filter(n=>n!=='competitions'),[],'the real DB is only asked whether a real competition owns the path (throttled list refresh); no gifts, sessions or grants');
+ const realBoard=(await call(realSlug+'/board',admin)).json.live;
+ assert.deepEqual(realBoard.rows.map(r=>[r.talentName,r.competition,r.eliminated]),[['LILY 🍉',104,false],['RYAN',40,false],['Chanee🌸',4,false]],'the real competition is untouched');assert.equal('pkStage' in realBoard,false);
+ // Access grants live in the test DB and only open the test competition.
+ const sent=await call(slug+'/request',{method:'POST',body:{name:'Kế toán'}}),visitor=sent.headers.get('set-cookie').split(';')[0];
+ assert.equal(state.testDb.rows('competition_access').length,1);assert.equal(state.db.rows('competition_access').length,0);
+ const requests=(await call(slug+'/requests',admin)).json.requests;assert.equal(requests.length,1);assert.equal((await call(realSlug+'/requests',admin)).json.requests.length,0);
+ assert.equal((await call(`${slug}/requests/${requests[0].id}`,{method:'POST',body:{action:'snapshot'},...admin})).status,200);
+ assert.equal((await call(slug+'/board',{cookie:visitor})).status,200);assert.equal((await call(realSlug+'/board',{cookie:visitor})).status,401,'a test grant never opens the real competition');
+ const snap=await call(slug+'/snapshots',{method:'POST',body:{name:'Thử 1'},cookie:visitor});assert.equal(snap.status,200);
+ assert.equal(state.testDb.rows('competition_snapshots').length,1);assert.equal(state.db.rows('competition_snapshots').length,0);
+ assert.deepEqual((await call(slug+'/board',{cookie:visitor})).json.snapshots.map(s=>s.name),['Thử 1']);assert.deepEqual((await call(realSlug+'/board',admin)).json.snapshots,[]);
+ // Admin list: real and test competitions, test ones flagged with their /test- url and their own pending counts.
+ await call('/api/competitions/test-giai-thu/request',{method:'POST',body:{name:'B'}});
+ const list=(await call('/api/competitions',admin)).json.competitions,find=url=>list.find(c=>c.url===url);
+ assert.equal(find('/pk-battle-16-10').test,undefined);assert.equal(find('/test-pk-battle-16-10').test,true);assert.equal(find('/test-giai-thu').pending,1);assert.equal(find('/test-giai-thu-2').test,true);
+ // Test DB unavailable: real pages and the list keep working, test pages are simply not there.
+ state.testDb=null;state.pages.reset();
+ assert.equal((await call(realSlug+'/state')).status,200);assert.equal((await call('/test-giai-thu')).status,404);assert.equal((await call('/api/competitions/test-giai-thu/state')).status,503);
+ assert.deepEqual((await call('/api/competitions',admin)).json.competitions.map(c=>c.url),['/pk-battle-16-10']);
+});
+test('a real competition whose own slug starts with test- wins over a test competition with the same path',async t=>{
+ const {state,call,now}=await server(t),{ObjectId}=require('mongodb'),realId=new ObjectId(),testId=new ObjectId();
+ state.db.rows('competitions').push({_id:realId,name:'Test ABC',status:'active',createdAt:new Date(now()),participants:[]});
+ state.testDb.rows('competitions').push({_id:testId,name:'ABC',status:'active',createdAt:new Date(now()),participants:[]});
+ const comp=(await call('/api/competitions/test-abc/state')).json.competition;assert.equal(comp.id,String(realId));assert.equal('test' in comp,false);
+ assert.equal((await call('/test-abc')).status,200);
+ const list=(await call('/api/competitions',admin)).json.competitions;
+ assert.deepEqual(list.filter(c=>c.url==='/test-abc').map(c=>c.id),[String(realId)],'the shadowed test competition is left out of the list');
 });

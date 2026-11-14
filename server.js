@@ -71,7 +71,9 @@ app.get(['/privacy', '/privacy.html'], (req, res) => {
 });
 // Competition score pages (/<slug>) for outside accounting staff: mounted before the TV access
 // middleware because visitors are not paired TVs; the router enforces its own per-competition grants.
-const competitionPages = createCompetitionPages({ getDb: () => db, auth: leaderboardAuth, assetVersion: () => ASSET_VERSION });
+// Competitions HeliosControl recorded in its "Test DB" mode live in helioscontrol_test and are served at
+// /test-<slug> (getTestDb = same MongoClient, other database; null while disconnected).
+const competitionPages = createCompetitionPages({ getDb: () => db, getTestDb, auth: leaderboardAuth, assetVersion: () => ASSET_VERSION });
 app.use(competitionPages.router);
 if (accessControlEnabled) app.use(leaderboardAuth.middleware);
 else {
@@ -196,6 +198,9 @@ app.get('/api/debug', async (req, res) => {
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 let db = null;
 let mongoClient = null;
+// HeliosControl's "Test DB" mode database (fixed name there): read through the same client, never a second one.
+const TEST_DB_NAME = 'helioscontrol_test';
+function getTestDb() { return db && mongoClient ? mongoClient.db(TEST_DB_NAME) : null; }
 let isReconnecting = false;
 
 // --- SSE (Server-Sent Events) for real-time push ---

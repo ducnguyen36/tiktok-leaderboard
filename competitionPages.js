@@ -3,6 +3,15 @@
 // They are mounted BEFORE the TV access middleware, so every route here does its own
 // access control: admins (leaderboardAuth.isAdmin) see everything, anyone else needs a
 // per-competition grant approved by an admin and tied to a random httpOnly browser cookie.
+//
+// Test competitions: HeliosControl's "Test DB" mode writes competitions, sessions and gifts to the
+// helioscontrol_test database (getTestDb). Such a competition lives at /test-<slug>, where <slug> is
+// assignSlugs() over the test DB's competitions only (newest namesake keeps the plain slug there too).
+// Everything for it (board, PK stage, eliminated, gifts, access grants, snapshots) is read from and
+// written to the test DB, so test grants never unlock a real competition and vice versa.
+// Resolution order: the path is first looked up among the REAL competitions; only when no real
+// competition owns it and it starts with "test-" is the rest looked up among the test competitions.
+// So a real competition named "Test ABC" (slug test-abc) wins over a test competition named "ABC".
 const crypto=require('node:crypto'),fs=require('node:fs'),path=require('node:path'),express=require('express');
 const {ObjectId}=require('mongodb');
 const ACCESS='competition_access',SNAPSHOTS='competition_snapshots',COOKIE='helios_comp',COOKIE_AGE=180*86400000;
@@ -11,6 +20,7 @@ const LIST_TTL=30000,MISS_REFRESH=10000,LIVE_TTL=8000,ENDED_TTL=60000,WINDOW_LIV
 const GIFT_FIELDS={_id:1,cost:1,timeStamp:1,receivedTalent:1,receivedTalentUid:1,receivedTalents:1};
 // Single-segment paths that belong to the board itself; a competition never takes them.
 const RESERVED=new Set(['old','new','auth','api','privacy','userdata','avatars','overlay','v1','index','competition','public','static','health','admin']);
+const TEST_PREFIX='test-';
 const STATIC_FILES=['competition.js','competition.css','helios-asset-23.png'];
 const hash=value=>crypto.createHash('sha256').update(value).digest('hex');
 const validSecret=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{43}$/.test(value);
@@ -189,30 +199,42 @@ function cleanRounds(list){if(!Array.isArray(list))return null;const out=[];for(
 function cookieSecret(req){for(const part of (req.headers.cookie||'').split(';')){const i=part.indexOf('=');if(i>0&&part.slice(0,i).trim()===COOKIE)return part.slice(i+1).trim()}return ''}
 // Small in-memory budget; behind the Cloudflare tunnel every visitor shares one IP, so it is global.
 function createBudget(max,windowMs,clock){let hits=[];return()=>{const now=clock();hits=hits.filter(t=>now-t<windowMs);if(hits.length>=max)return false;hits.push(now);return true}}
-function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'public'),assetVersion=()=>'',clock=Date.now}){
+// Each competition object carries its source (real or test DB) under this symbol; the JSON never shows it.
+const SOURCE=Symbol('competitionSource');
+function createCompetitionPages({getDb,getTestDb=null,auth,publicDir=path.join(__dirname,'public'),assetVersion=()=>'',clock=Date.now}){
   const router=express.Router(),json=express.json({limit:'4kb'});
   const requestBudget=createBudget(40,600000,clock),snapshotBudget=createBudget(30,600000,clock);
-  let list=null,listAt=0,listLoading=null,missAt=0;const giftCache=new Map(),eliminatedCache=new Map(),windowCache=new Map(),windowLoading=new Map();
-  const db=()=>{const d=getDb();if(!d)throw Object.assign(Error('Database unavailable'),{status:503});return d};
+  // One source per database: its own competition list, slugs and caches.
+  const makeSource=(test,get)=>({test,prefix:test?TEST_PREFIX:'',db(){const d=get();if(!d)throw Object.assign(Error('Database unavailable'),{status:503});return d},
+    list:null,listAt:0,listLoading:null,missAt:0,giftCache:new Map(),eliminatedCache:new Map(),windowCache:new Map(),windowLoading:new Map()});
+  const real=makeSource(false,getDb),testSource=typeof getTestDb==='function'?makeSource(true,getTestDb):null;
+  const src=comp=>comp[SOURCE]||real,db=comp=>src(comp).db();
   const noStore=res=>res.set({'Cache-Control':'private, no-store, max-age=0','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','X-Frame-Options':'DENY'});
   const fail=(res,code,error)=>noStore(res).status(code).json({status:'error',error});
   const endpoint=handler=>async(req,res,next)=>{try{await handler(req,res,next)}catch(error){if(!res.headersSent)fail(res,error.status||503,error.status===503||!error.status?'unavailable':error.message)}};
-  async function competitions(force=false){
-    if(!force&&list&&clock()-listAt<LIST_TTL)return list;
-    if(!listLoading)listLoading=db().collection('competitions').find({},{projection:{name:1,status:1,createdAt:1,startedAt:1,endedAt:1,participants:1,tiktokUsername:1}}).toArray().then(docs=>{const slugs=assignSlugs(docs);list=docs.map(doc=>({...doc,slug:slugs.get(String(doc._id))}));listAt=clock();return list}).finally(()=>listLoading=null);
-    return listLoading;
+  // comp.slug is the full path segment: "<slug>" for real competitions, "test-<slug>" for test ones.
+  async function competitions(force=false,source=real){
+    if(!force&&source.list&&clock()-source.listAt<LIST_TTL)return source.list;
+    if(!source.listLoading)source.listLoading=source.db().collection('competitions').find({},{projection:{name:1,status:1,createdAt:1,startedAt:1,endedAt:1,participants:1,tiktokUsername:1}}).toArray().then(docs=>{const slugs=assignSlugs(docs);source.list=docs.map(doc=>({...doc,slug:source.prefix+slugs.get(String(doc._id)),[SOURCE]:source}));source.listAt=clock();return source.list}).finally(()=>source.listLoading=null);
+    return source.listLoading;
   }
-  async function bySlug(slug){
-    if(typeof slug!=='string'||!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)||slug.length>90||RESERVED.has(slug))return null;
-    let found=(await competitions()).find(c=>c.slug===slug);
+  async function findIn(source,slug){
+    let found=(await competitions(false,source)).find(c=>c.slug===slug);
     // A competition created in HeliosControl a moment ago: re-read, but at most every 10 s for unknown paths.
-    if(!found&&clock()-missAt>MISS_REFRESH){missAt=clock();found=(await competitions(true)).find(c=>c.slug===slug)}
+    if(!found&&clock()-source.missAt>MISS_REFRESH){source.missAt=clock();found=(await competitions(true,source)).find(c=>c.slug===slug)}
     return found||null;
   }
+  // Real competitions first; "test-..." falls back to the test DB only when no real competition owns the path.
+  async function bySlug(slug){
+    if(typeof slug!=='string'||!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)||slug.length>96||RESERVED.has(slug))return null;
+    const found=slug.length<=90?await findIn(real,slug):null;
+    if(found||!testSource||!slug.startsWith(TEST_PREFIX)||slug.length===TEST_PREFIX.length)return found;
+    return findIn(testSource,slug);
+  }
   async function loadGifts(comp,fresh=false){
-    const key=String(comp._id),cached=giftCache.get(key),ttl=comp.status==='active'?LIVE_TTL:ENDED_TTL;
+    const {giftCache}=src(comp),key=String(comp._id),cached=giftCache.get(key),ttl=comp.status==='active'?LIVE_TTL:ENDED_TTL;
     if(!fresh&&cached&&clock()-cached.at<ttl)return cached.gifts;
-    const d=db(),sessions=await d.collection('sessions').find({profileId:{$in:[`competition_${key}`,`comp_${key}`]}},{projection:{_id:1}}).toArray();
+    const d=db(comp),sessions=await d.collection('sessions').find({profileId:{$in:[`competition_${key}`,`comp_${key}`]}},{projection:{_id:1}}).toArray();
     const query={competitionId:comp._id};
     // Competitions recorded before session tagging fall back to every gift stamped with the competition.
     if(sessions.length){const ids=sessions.map(s=>s._id);query.sessionId={$in:[...ids,...ids.map(String)]}}
@@ -222,9 +244,9 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
   }
   // Elimination and PK state (pkStage, standing) are read fresh at the gifts' pace, not from the 30 s competition list.
   async function loadEliminated(comp,fresh=false){
-    const key=String(comp._id),cached=eliminatedCache.get(key),ttl=comp.status==='active'?LIVE_TTL:ENDED_TTL;
+    const {eliminatedCache}=src(comp),key=String(comp._id),cached=eliminatedCache.get(key),ttl=comp.status==='active'?LIVE_TTL:ENDED_TTL;
     if(!fresh&&cached&&clock()-cached.at<ttl)return cached.list;
-    const doc=await db().collection('competitions').findOne({_id:comp._id},{projection:{eliminated:1,eliminatedLog:1,pkStage:1,standing:1}}),log=Array.isArray(doc?.eliminatedLog)?doc.eliminatedLog:[],list=withLogRanks(Array.isArray(doc?.eliminated)?doc.eliminated:[],log);list.log=log;list.pkStage=doc?.pkStage||null;list.standing=doc?.standing||null;
+    const doc=await db(comp).collection('competitions').findOne({_id:comp._id},{projection:{eliminated:1,eliminatedLog:1,pkStage:1,standing:1}}),log=Array.isArray(doc?.eliminatedLog)?doc.eliminatedLog:[],list=withLogRanks(Array.isArray(doc?.eliminated)?doc.eliminated:[],log);list.log=log;list.pkStage=doc?.pkStage||null;list.standing=doc?.standing||null;
     eliminatedCache.delete(key);eliminatedCache.set(key,{at:clock(),list});if(eliminatedCache.size>6)eliminatedCache.delete(eliminatedCache.keys().next().value);
     return list;
   }
@@ -232,7 +254,7 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
   // Heavier, so it is cached longer and concurrent loads share one query; the competition gifts are added per request.
   const participantSig=comp=>JSON.stringify((comp.participants||[]).map(p=>[p.talentName||'',String(p.talentUid||'')]));
   async function loadWindow(comp,fresh=false){
-    const key=String(comp._id),sig=participantSig(comp),cached=windowCache.get(key),ttl=comp.status==='active'?WINDOW_LIVE_TTL:WINDOW_TTL;
+    const {windowCache,windowLoading}=src(comp),key=String(comp._id),sig=participantSig(comp),cached=windowCache.get(key),ttl=comp.status==='active'?WINDOW_LIVE_TTL:WINDOW_TTL;
     if(!fresh&&cached&&cached.sig===sig&&clock()-cached.at<ttl)return cached;
     if(!fresh&&windowLoading.has(key))return windowLoading.get(key);
     const load=(async()=>{
@@ -240,7 +262,7 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
       // so "Tổng cộng" is just the competition gifts, which only exist after Start.
       const started=comp.status!=='created'&&comp.startedAt,start=started?+new Date(comp.startedAt):0,end=comp.endedAt?+new Date(comp.endedAt):clock();let gifts=[];
       if(start>0&&end>=start){
-        const d=db(),from=new Date(start),to=new Date(end);
+        const d=db(comp),from=new Date(start),to=new Date(end);
         const sessions=await d.collection('sessions').find({$and:[{$or:[{createdAt:{$lte:to}},{sessionStartedAt:{$lte:to}}]},{updatedAt:{$gte:from}}]},{projection:{_id:1}}).toArray();
         if(sessions.length){const ids=sessions.map(s=>s._id);gifts=await d.collection('gifts').find({sessionId:{$in:[...ids,...ids.map(String)]},timeStamp:{$gte:start,$lte:end}},{projection:GIFT_FIELDS}).toArray()}
       }
@@ -250,11 +272,11 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
     })().finally(()=>{if(windowLoading.get(key)===load)windowLoading.delete(key)});
     windowLoading.set(key,load);return load;
   }
-  async function snapshotsOf(comp){return db().collection(SNAPSHOTS).find({competitionId:String(comp._id)}).sort({at:-1}).limit(MAX_SNAPSHOTS).toArray()}
+  async function snapshotsOf(comp){return db(comp).collection(SNAPSHOTS).find({competitionId:String(comp._id)}).sort({at:-1}).limit(MAX_SNAPSHOTS).toArray()}
   async function access(req,comp){
     if(await auth.isAdmin(req))return{admin:true,role:'admin',request:null};
     const secret=cookieSecret(req);if(!validSecret(secret))return{admin:false,role:null,request:null};
-    const request=await db().collection(ACCESS).findOne({competitionId:String(comp._id),secretHash:hash(secret)});
+    const request=await db(comp).collection(ACCESS).findOne({competitionId:String(comp._id),secretHash:hash(secret)});
     return{admin:false,role:request?.status==='approved'&&ROLES.includes(request.role)?request.role:null,request};
   }
   // Non-admin writes: browser-enforced same origin plus a JSON body (a cross-site form cannot send one).
@@ -270,7 +292,7 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
     if(!roles.includes(grant.role)){fail(res,403,'role_required');return null}
     return{admin:false,by:grant.request.name};
   }
-  const publicCompetition=comp=>({id:String(comp._id),name:comp.name||'',slug:comp.slug,status:comp.status||'created',createdAt:comp.createdAt||null,startedAt:comp.startedAt||null,endedAt:comp.endedAt||null});
+  const publicCompetition=comp=>({id:String(comp._id),name:comp.name||'',slug:comp.slug,status:comp.status||'created',createdAt:comp.createdAt||null,startedAt:comp.startedAt||null,endedAt:comp.endedAt||null,...(src(comp).test?{test:true}:{})});
   // A snapshot taken during the PK stage keeps the PK state (matches, tables, voting) and round list of its time.
   const publicSnapshot=(snap,admin)=>{const pk=cleanPkStage(snap.pkStage),stand=cleanStanding(snap.standing),rounds=cleanRounds(snap.rounds);return{id:String(snap._id),name:snap.name,at:snap.at,createdAt:snap.createdAt,createdBy:admin?snap.createdBy:undefined,rows:(snap.rows||[]).map(r=>snapshotEntry(r,true)),groups:(snap.groups||[]).map(g=>snapshotEntry(g,false)),...(pk?{pkStage:pk}:{}),...(stand?{standing:stand}:{}),...(rounds?{rounds}:{})}};
   const competitionFor=handler=>endpoint(async(req,res)=>{const comp=await bySlug(req.params.slug);if(!comp)return fail(res,404,'not_found');return handler(req,res,comp)});
@@ -283,9 +305,13 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
   for(const file of STATIC_FILES)router.get(`/${file}`,(req,res)=>{res.set({'Cache-Control':'public, max-age=3600','X-Content-Type-Options':'nosniff'});res.sendFile(file,{root:publicDir})});
   router.get('/api/competitions',endpoint(async(req,res)=>{
     if(!await auth.isAdmin(req))return fail(res,403,'admin_required');
-    const [comps,pending]=await Promise.all([competitions(true),db().collection(ACCESS).find({status:'pending'},{projection:{competitionId:1}}).toArray()]);
-    const counts={};for(const p of pending)counts[p.competitionId]=(counts[p.competitionId]||0)+1;
-    noStore(res).json({status:'ok',competitions:[...comps].sort((a,b)=>+new Date(b.createdAt||0)-+new Date(a.createdAt||0)).map(c=>({...publicCompetition(c),url:`/${c.slug}`,participants:(c.participants||[]).length,pending:counts[String(c._id)]||0}))});
+    // Test competitions are listed too (test:true, url /test-<slug>); an unreachable test DB just leaves them out.
+    const load=async source=>{const d=source.db();return Promise.all([competitions(true,source),d.collection(ACCESS).find({status:'pending'},{projection:{competitionId:1}}).toArray()])};
+    const [[comps,pending],[tests,testPending]]=await Promise.all([load(real),testSource?load(testSource).catch(()=>[[],[]]):[[],[]]]);
+    const counts=new Map();for(const [source,list] of [[real,pending],[testSource,testPending]]){const c={};for(const p of list)c[p.competitionId]=(c[p.competitionId]||0)+1;counts.set(source,c)}
+    // A test competition whose path a real one owns is unreachable, so it is left out of the list.
+    const realSlugs=new Set(comps.map(c=>c.slug)),all=[...comps,...tests.filter(c=>!realSlugs.has(c.slug))];
+    noStore(res).json({status:'ok',competitions:all.sort((a,b)=>+new Date(b.createdAt||0)-+new Date(a.createdAt||0)).map(c=>({...publicCompetition(c),url:`/${c.slug}`,participants:(c.participants||[]).length,pending:counts.get(src(c))[String(c._id)]||0}))});
   }));
   router.get('/api/competitions/:slug/state',competitionFor(async(req,res,comp)=>{
     const grant=await access(req,comp);
@@ -294,7 +320,7 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
   router.post('/api/competitions/:slug/request',json,competitionFor(async(req,res,comp)=>{
     if(!sameOrigin(req))return fail(res,403,'same_origin_required');
     const name=validName(req.body?.name);if(!name)return fail(res,400,'invalid_name');
-    const col=db().collection(ACCESS);let secret=cookieSecret(req);
+    const col=db(comp).collection(ACCESS);let secret=cookieSecret(req);
     if(!validSecret(secret)){secret=crypto.randomBytes(32).toString('base64url');res.cookie(COOKIE,secret,{httpOnly:true,sameSite:'lax',secure:Boolean(auth.origin?.startsWith('https:')),path:'/',maxAge:COOKIE_AGE})}
     const secretHash=hash(secret),competitionId=String(comp._id),existing=await col.findOne({competitionId,secretHash}),now=new Date(clock());
     if(existing?.status==='approved')return noStore(res).json({status:'ok',request:{name:existing.name,status:existing.status}});
@@ -316,7 +342,7 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
     const who=await writer(req,res,comp,['snapshot']);if(!who)return;
     const name=validName(req.body?.name);if(!name)return fail(res,400,'invalid_name');
     if(!snapshotBudget())return fail(res,429,'rate_limited');
-    const col=db().collection(SNAPSHOTS),competitionId=String(comp._id);
+    const col=db(comp).collection(SNAPSHOTS),competitionId=String(comp._id);
     if(await col.countDocuments({competitionId})>=MAX_SNAPSHOTS)return fail(res,409,'too_many_snapshots');
     const board=await liveBoard(comp,true);
     const doc={_id:new ObjectId(),competitionId,name,at:board.at,createdAt:new Date(board.at),createdBy:who.by,rows:board.rows,groups:board.groups,...(board.pkStage?{pkStage:board.pkStage}:{}),...(board.standing?{standing:board.standing}:{}),...(board.rounds?{rounds:board.rounds}:{})};
@@ -326,18 +352,18 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
     if(!/^[a-f0-9]{24}$/.test(req.params.id))return fail(res,400,'invalid_snapshot');
     const who=await writer(req,res,comp,['snapshot']);if(!who)return;
     const name=validName(req.body?.name);if(!name)return fail(res,400,'invalid_name');
-    const result=await db().collection(SNAPSHOTS).updateOne({_id:new ObjectId(req.params.id),competitionId:String(comp._id)},{$set:{name,renamedAt:new Date(clock()),renamedBy:who.by}});
+    const result=await db(comp).collection(SNAPSHOTS).updateOne({_id:new ObjectId(req.params.id),competitionId:String(comp._id)},{$set:{name,renamedAt:new Date(clock()),renamedBy:who.by}});
     if(!result.matchedCount)return fail(res,404,'not_found');noStore(res).json({status:'ok'});
   }));
   router.post('/api/competitions/:slug/snapshots/:id/delete',json,competitionFor(async(req,res,comp)=>{
     if(!/^[a-f0-9]{24}$/.test(req.params.id))return fail(res,400,'invalid_snapshot');
     if(!await auth.isAdmin(req))return fail(res,403,'admin_required');if(!await auth.adminMutation(req,res))return;
-    const result=await db().collection(SNAPSHOTS).deleteOne({_id:new ObjectId(req.params.id),competitionId:String(comp._id)});
+    const result=await db(comp).collection(SNAPSHOTS).deleteOne({_id:new ObjectId(req.params.id),competitionId:String(comp._id)});
     if(!result.deletedCount)return fail(res,404,'not_found');noStore(res).json({status:'ok'});
   }));
   router.get('/api/competitions/:slug/requests',competitionFor(async(req,res,comp)=>{
     if(!await auth.isAdmin(req))return fail(res,403,'admin_required');
-    const docs=await db().collection(ACCESS).find({competitionId:String(comp._id),status:{$in:['pending','approved']}},{projection:{secretHash:0}}).sort({createdAt:-1}).toArray();
+    const docs=await db(comp).collection(ACCESS).find({competitionId:String(comp._id),status:{$in:['pending','approved']}},{projection:{secretHash:0}}).sort({createdAt:-1}).toArray();
     noStore(res).json({status:'ok',requests:docs.map(d=>({id:d._id,name:d.name,status:d.status,role:d.role||null,createdAt:d.createdAt,updatedAt:d.updatedAt,decidedBy:d.decidedBy||null}))});
   }));
   router.post('/api/competitions/:slug/requests/:id',json,competitionFor(async(req,res,comp)=>{
@@ -345,7 +371,7 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
     const admin=await auth.adminMutation(req,res);if(!admin)return;
     const action=req.body?.action;if(![...ROLES,'revoke'].includes(action))return fail(res,400,'invalid_action');
     const set=action==='revoke'?{status:'revoked',role:null}:{status:'approved',role:action};
-    const result=await db().collection(ACCESS).updateOne({_id:req.params.id,competitionId:String(comp._id)},{$set:{...set,updatedAt:new Date(clock()),decidedBy:admin.email||'admin'}});
+    const result=await db(comp).collection(ACCESS).updateOne({_id:req.params.id,competitionId:String(comp._id)},{$set:{...set,updatedAt:new Date(clock()),decidedBy:admin.email||'admin'}});
     if(!result.matchedCount)return fail(res,404,'not_found');noStore(res).json({status:'ok'});
   }));
   // Last: any other single-segment path that names a competition. Everything else falls through untouched.
@@ -357,7 +383,10 @@ function createCompetitionPages({getDb,auth,publicDir=path.join(__dirname,'publi
     const html=fs.readFileSync(path.join(publicDir,'competition.html'),'utf8').replace('/competition.css',`/competition.css?v=${version}`).replace('/competition.js',`/competition.js?v=${version}`);
     noStore(res).set('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'").type('html').send(html);
   }));
-  async function ensureIndexes(){const d=db();await Promise.all([d.collection(ACCESS).createIndex({competitionId:1,secretHash:1}),d.collection(ACCESS).createIndex({secretHash:1,status:1}),d.collection(SNAPSHOTS).createIndex({competitionId:1,at:-1})])}
-  return{router,ensureIndexes,competitions,bySlug,loadGifts,loadEliminated,reset(){list=null;listAt=0;missAt=0;giftCache.clear();windowCache.clear();eliminatedCache.clear()}};
+  const indexes=d=>Promise.all([d.collection(ACCESS).createIndex({competitionId:1,secretHash:1}),d.collection(ACCESS).createIndex({secretHash:1,status:1}),d.collection(SNAPSHOTS).createIndex({competitionId:1,at:-1})]);
+  // The test DB's indexes are best effort: a failure there never blocks the real pages.
+  async function ensureIndexes(){await indexes(real.db());if(testSource)await indexes(testSource.db()).catch(error=>console.error('[Competition] test DB index setup failed:',error.message))}
+  const resetSource=s=>{s.list=null;s.listAt=0;s.missAt=0;s.giftCache.clear();s.windowCache.clear();s.eliminatedCache.clear()};
+  return{router,ensureIndexes,competitions,bySlug,loadGifts,loadEliminated,reset(){resetSource(real);if(testSource)resetSource(testSource)}};
 }
-module.exports={createCompetitionPages,slugify,assignSlugs,scoreGifts,scoreOverall,overallScores,buildBoard,eliminatedMap,withLogRanks,fallbackRanks,reviveCounts,snapshotEntry,cleanPkStage,cleanStanding,eliminationRounds,giftTalents,giftReceivers,validName,RESERVED};
+module.exports={createCompetitionPages,slugify,assignSlugs,scoreGifts,scoreOverall,overallScores,buildBoard,eliminatedMap,withLogRanks,fallbackRanks,reviveCounts,snapshotEntry,cleanPkStage,cleanStanding,eliminationRounds,giftTalents,giftReceivers,validName,RESERVED,TEST_PREFIX};
