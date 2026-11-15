@@ -157,15 +157,17 @@
    ol.append(li)});
   box.append(ol);return box;
  }
- // Lower table: in seed order, or by score (tables.lowerBy 'score', after a chasing) from this page's ranking;
- // the cut line sits after the top takeLower of that order and the talents below it are marked ✂.
+ // Both tables by score (this page's ranking, high first; ties keep the app's order), so the
+ // board matches the points whatever order the app seeded the stage in; the cut line sits after
+ // the top takeLower of the lower table and the talents below it are marked ✂.
  function tablesView(pk,rows){
-  const t=pk.tables,byScore=t.lowerBy==='score',scores=new Map((rows||[]).map(r=>[r.talentName,Number(r.competition)||0]));
-  const lower=byScore?t.lower.map((n,i)=>[n,i]).sort((a,b)=>(scores.has(b[0])?scores.get(b[0]):-Infinity)-(scores.has(a[0])?scores.get(a[0]):-Infinity)||a[1]-b[1]).map(([n])=>n):t.lower;
-  let cut;if(byScore&&pk.takeLower!=null)cut=new Set(lower.slice(pk.takeLower));else{cut=new Set(t.cut);if(pk.takeLower!=null)lower.slice(pk.takeLower).forEach(n=>cut.add(n))}
+  const t=pk.tables,scores=new Map((rows||[]).map(r=>[r.talentName,Number(r.competition)||0]));
+  const byScore=list=>list.map((n,i)=>[n,i]).sort((a,b)=>(scores.has(b[0])?scores.get(b[0]):-Infinity)-(scores.has(a[0])?scores.get(a[0]):-Infinity)||a[1]-b[1]).map(([n])=>n);
+  const upper=byScore(t.upper),lower=byScore(t.lower);
+  const cut=pk.takeLower!=null?new Set(lower.slice(pk.takeLower)):new Set(t.cut);
   let cutAt=pk.takeLower!=null&&lower.length>pk.takeLower?pk.takeLower:null;
   if(cutAt==null&&cut.size){const i=lower.findIndex(n=>cut.has(n));if(i>=0)cutAt=i}
-  const box=el('div','pk-tables');box.append(tableList('upper','Bảng thắng',t.upper,pk),tableList('lower','Bảng thua',lower,pk,{cutAt,cut,scores:byScore?scores:null,note:byScore?'theo điểm':''}));return box;
+  const box=el('div','pk-tables');box.append(tableList('upper','Bảng thắng',upper,pk,{scores,note:'theo điểm'}),tableList('lower','Bảng thua',lower,pk,{cutAt,cut,scores,note:'theo điểm'}));return box;
  }
  function votingView(pk){
   const v=pk.voting,done=new Set(v.done),box=el('div','pk-voting'),ol=el('ol','vote-order');
@@ -175,7 +177,7 @@
  }
  function pkView(pk,rows){
   const wrap=el('section',`pk-board ph-${pk.phase}`),head=el('div','pk-head');
-  head.append(el('span','section-title pk-title','Vòng PK'),el('span',`pk-phase ph-${pk.phase}`,PHASES[pk.phase]||''),el('span','pk-rule',`Thắng ${pk.firstTo} điểm${pk.takeLower!=null?` · bảng thua lấy top ${pk.takeLower}${pk.tables?.lowerBy==='score'?' theo điểm':''}`:''}`));
+  head.append(el('span','section-title pk-title','Vòng PK'),el('span',`pk-phase ph-${pk.phase}`,PHASES[pk.phase]||''),el('span','pk-rule',`Thắng ${pk.firstTo} điểm${pk.takeLower!=null?` · bảng thua lấy top ${pk.takeLower} theo điểm`:''}`));
   wrap.append(head);
   const leads=pkLeads(pk);
   if(pk.phase==='voting'&&pk.voting&&pk.voting.order.length){const v=pk.voting;wrap.append(fold('pk-voting-fold','Thứ tự bình chọn',true,votingView(pk),el('span','fold-count',`${v.done.length}/${v.order.length} xong`)))}
