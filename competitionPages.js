@@ -348,6 +348,8 @@ function createCompetitionPages({getDb,getTestDb=null,auth,publicDir=path.join(_
   router.get('/api/competitions/:slug/board',competitionFor(async(req,res,comp)=>{
     const grant=await access(req,comp);if(!grant.role)return fail(res,401,'access_required');
     const [snaps,live]=await Promise.all([snapshotsOf(comp),liveBoard(comp)]);
+    // snapshots taken before the chase diamonds were kept: filled the same way as the live board
+    for(const s of snaps)if(s&&s.pkStage){try{s.pkStage=await withChaseDiamonds(db(comp),s.pkStage)}catch(e){/* the history is optional */}}
     noStore(res).json({status:'ok',competition:publicCompetition(comp),admin:grant.admin,role:grant.role,canSnapshot:grant.admin||grant.role==='snapshot',live,snapshots:snaps.map(s=>publicSnapshot(s,grant.admin))});
   }));
   router.post('/api/competitions/:slug/snapshots',json,competitionFor(async(req,res,comp)=>{
