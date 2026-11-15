@@ -236,11 +236,15 @@ test('PK stage on a phone: match cards and tables lead mid-PK, voting order whil
  assert.equal(await card('A1').locator('.m-score').textContent(),'1–2','current score after the cancelled round');assert.equal(await card('A1').locator('li.win .m-name').textContent(),'RYAN');
  assert.ok(Number(await card('A1').locator('li.lose').evaluate(e=>getComputedStyle(e).opacity))<0.7,'loser dimmed');
  assert.deepEqual(await card('A1').locator('.m-marks .rv').allTextContents(),['↺✗','↺✓'],'LILY failed her revive, RYAN revived');
- assert.deepEqual(await card('A1').locator('.m-round').allTextContents(),['V1LILY 🍉','V2hòa – đánh lại','V3LILY 🍉↺ RYAN','V4RYAN','V5RYAN'],'round history: tie replayed, round 3 cancelled by RYAN');
- assert.equal(await card('A1').locator('.m-round.cancelled s').textContent(),'LILY 🍉','the cancelled round is struck through');
+ // the rounds with each talent's diamonds: the winner lit, a tie "hòa", round 3 cancelled by RYAN struck through
+ assert.deepEqual(await card('A1').locator('.m-scores thead th').allTextContents(),['Ván','LILY 🍉','RYAN']);
+ assert.deepEqual(await card('A1').locator('.m-scores tbody tr').evaluateAll(rs=>rs.map(r=>[...r.children].map(c=>c.textContent))),[['V1','500','300'],['V2 hòa','400','400'],['V3↺','900','300'],['V4','100','700'],['V5','200','800']]);
+ assert.deepEqual(await card('A1').locator('.m-scores td.w').allTextContents(),['500','900','700','800'],'the winner of each round lit');
+ assert.equal(await card('A1').locator('.m-scores tr.cancelled').count(),1,'the cancelled round is struck through');
+ assert.equal(await card('A2').locator('.m-round').count()>0,true,'no diamonds sent: the winners line as before');
  assert.deepEqual(await card('A1').locator('.m-revive').allTextContents(),['↺ RYAN✓1.200 💎','↺ LILY 🍉✗2.000 💎'],'revive chases with their target');
  assert.equal(await card('A2').locator('.m-status').textContent(),'Đang đấu');assert.equal(await card('A2').locator('.m-score').textContent(),'1–1');
- assert.equal(await card('A3').locator('.m-score').textContent(),'1–0–2','three-way match');assert.match(await card('A3').locator('.m-round.tie').textContent(),/hòa/);
+ assert.equal(await card('A3').locator('.m-score').textContent(),'1–0–2','three-way match');assert.match(await card('A3').locator('.m-scores tr.tie').textContent(),/hòa/);
  const tables=pk.locator('.pk-tables');assert.equal(await tables.isVisible(),true);
  assert.deepEqual(await tables.locator('.upper .t-name').allTextContents(),['RYAN','G']);
  assert.deepEqual(await tables.locator('.lower li').evaluateAll(l=>l.map(li=>li.classList.contains('cut-line')?'---':li.querySelector('.t-name').textContent+(li.classList.contains('cut')?' ✂':''))),['LILY 🍉','E','---','F ✂'],'cut line after the top takeLower');
