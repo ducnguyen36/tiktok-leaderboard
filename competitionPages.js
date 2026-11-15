@@ -131,7 +131,7 @@ function cleanPkStage(raw){
     const id=cleanLabel(m?.id),talents=names(m?.talents,6);if(!id||!talents.length||matches.some(x=>x.id===id))continue;
     const points={};for(const n of talents)points[n]=nonNeg(m?.points&&typeof m.points==='object'?m.points[n]:0);
     const winner=talents.includes(validName(m?.winner))?validName(m.winner):null;
-    const revives=[];if(Array.isArray(m?.revives))for(const r of m.revives.slice(0,20)){const n=validName(r?.talentName);if(!n||!talents.includes(n))continue;const target=r?.target==null||r.target===''||!Number.isFinite(Number(r.target))||Number(r.target)<0?null:Math.round(Number(r.target));revives.push({talentName:n,at:iso(r?.at),success:r?.success===true?true:r?.success===false?false:null,mode:REVIVE_MODES.includes(r?.mode)?r.mode:null,target,round:posInt(r?.round)})}
+    const revives=[];if(Array.isArray(m?.revives))for(const r of m.revives.slice(0,20)){const n=validName(r?.talentName);if(!n||!talents.includes(n))continue;const target=r?.target==null||r.target===''||!Number.isFinite(Number(r.target))||Number(r.target)<0?null:Math.round(Number(r.target));const diamonds=r?.diamonds==null||r.diamonds===''||!Number.isFinite(Number(r.diamonds))?null:nonNeg(r.diamonds);revives.push({talentName:n,at:iso(r?.at),success:r?.success===true?true:r?.success===false?false:null,mode:REVIVE_MODES.includes(r?.mode)?r.mode:null,target,round:posInt(r?.round),...(diamonds!=null?{diamonds}:{})})}
     // Round history (organiser update): a tie gives no point and is replayed; a successful revive cancels the winning round.
     const rounds=[];if(Array.isArray(m?.rounds))m.rounds.slice(0,30).forEach((r,i)=>{if(!r||typeof r!=='object')return;const diamonds={};if(r.diamonds&&typeof r.diamonds==='object')for(const n of talents)if(Number.isFinite(Number(r.diamonds[n])))diamonds[n]=Math.round(Number(r.diamonds[n]));
       const win=talents.includes(validName(r.winner))?validName(r.winner):null,cancel=talents.includes(validName(r.cancelledByRevive))?validName(r.cancelledByRevive):null;rounds.push({n:posInt(r.n)||i+1,winner:win,tied:win?[]:names(r.tied,6).filter(n=>talents.includes(n)),diamonds,cancelledByRevive:win?cancel:null})});
@@ -143,6 +143,17 @@ function cleanPkStage(raw){
   const seed=names(raw.seed),revivesUsed=names(raw.revivesUsed);
   if(!matches.length&&!seed.length&&!(tables&&(tables.upper.length||tables.lower.length))&&!(voting&&voting.order.length))return null;
   return{phase,firstTo,takeLower,seed,tracks,matches,revivesUsed,tables,voting,updatedAt:iso(raw.updatedAt)};
+}
+// A PK revive's chase diamonds are not competition points (the lower table ranks without them). HeliosControl
+// writes them on the revive (diamonds) from 4.1.4; earlier revives get them from its gameplay history: the
+// single-talent chasing round of that talent that ended just before the revive was answered (its tally).
+const reviveChase=(hist,r)=>{const at=msOf(r.at);if(!Number.isFinite(at))return null;let best=null;for(const h of hist){const end=Number(h?.endedAt);if(!Array.isArray(h?.names)||h.names.length!==1||h.names[0]!==r.talentName||!Number.isFinite(end)||end>at+5000||end<at-300000)continue;if(!best||end>Number(best.endedAt))best=h}return best?nonNeg(best.result?.tally):null};
+async function withChaseDiamonds(database,pkStage){
+  const ms=Array.isArray(pkStage?.matches)?pkStage.matches:[],missing=ms.flatMap(m=>Array.isArray(m?.revives)?m.revives.filter(r=>r&&r.diamonds==null&&r.success!=null&&r.at):[]);
+  if(!missing.length||!database)return pkStage;
+  const from=Math.min(...missing.map(r=>msOf(r.at)))-300000;
+  const hist=await database.collection('gameplay_history').find({type:{$in:['chasing','revive']},endedAt:{$gte:from}},{projection:{names:1,endedAt:1,result:1}}).limit(500).toArray();
+  return{...pkStage,matches:ms.map(m=>Array.isArray(m?.revives)?{...m,revives:m.revives.map(r=>r&&r.diamonds==null&&r.success!=null&&r.at?{...r,diamonds:reviveChase(hist,r)}:r)}:m)};
 }
 // competitions.standing (HeliosControl's panel zones): passed through cleaned, for snapshots and future use.
 const STANDING_GROUPS=['upper','lower','out'];
@@ -247,6 +258,7 @@ function createCompetitionPages({getDb,getTestDb=null,auth,publicDir=path.join(_
     const {eliminatedCache}=src(comp),key=String(comp._id),cached=eliminatedCache.get(key),ttl=comp.status==='active'?LIVE_TTL:ENDED_TTL;
     if(!fresh&&cached&&clock()-cached.at<ttl)return cached.list;
     const doc=await db(comp).collection('competitions').findOne({_id:comp._id},{projection:{eliminated:1,eliminatedLog:1,pkStage:1,standing:1}}),log=Array.isArray(doc?.eliminatedLog)?doc.eliminatedLog:[],list=withLogRanks(Array.isArray(doc?.eliminated)?doc.eliminated:[],log);list.log=log;list.pkStage=doc?.pkStage||null;list.standing=doc?.standing||null;
+    try{list.pkStage=await withChaseDiamonds(db(comp),list.pkStage)}catch(e){/* the history is optional */}
     eliminatedCache.delete(key);eliminatedCache.set(key,{at:clock(),list});if(eliminatedCache.size>6)eliminatedCache.delete(eliminatedCache.keys().next().value);
     return list;
   }
@@ -389,4 +401,4 @@ function createCompetitionPages({getDb,getTestDb=null,auth,publicDir=path.join(_
   const resetSource=s=>{s.list=null;s.listAt=0;s.missAt=0;s.giftCache.clear();s.windowCache.clear();s.eliminatedCache.clear()};
   return{router,ensureIndexes,competitions,bySlug,loadGifts,loadEliminated,reset(){resetSource(real);if(testSource)resetSource(testSource)}};
 }
-module.exports={createCompetitionPages,slugify,assignSlugs,scoreGifts,scoreOverall,overallScores,buildBoard,eliminatedMap,withLogRanks,fallbackRanks,reviveCounts,snapshotEntry,cleanPkStage,cleanStanding,eliminationRounds,giftTalents,giftReceivers,validName,RESERVED,TEST_PREFIX};
+module.exports={withChaseDiamonds,createCompetitionPages,slugify,assignSlugs,scoreGifts,scoreOverall,overallScores,buildBoard,eliminatedMap,withLogRanks,fallbackRanks,reviveCounts,snapshotEntry,cleanPkStage,cleanStanding,eliminationRounds,giftTalents,giftReceivers,validName,RESERVED,TEST_PREFIX};
