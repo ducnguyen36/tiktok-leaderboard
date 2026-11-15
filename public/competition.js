@@ -9,7 +9,7 @@
  const VIEWS=['loading-view','missing-view','request-view','pending-view','board-view'],MODES={competition:'Cuộc thi',overall:'Tổng cộng'};
  // Per-browser view preferences; storage can be unavailable (private mode, blocked site data).
  const stored=key=>{try{return localStorage.getItem(`heliosComp.${key}`)}catch{return null}},store=(key,value)=>{try{localStorage.setItem(`heliosComp.${key}`,value)}catch{}};
- let board=null,csrf='',mode=MODES[stored('mode')]?stored('mode'):'competition',showGroups=stored('groups')==='1',showOut=stored('out')==='1',standingsPref=stored('standings'),showAdmin=false,timer=0,current='live',pageSig='',adminSig='',dialogMode=null,toastTimer=0;
+ let board=null,csrf='',mode=MODES[stored('mode')]?stored('mode'):'competition',showGroups=stored('groups')==='1',showOut=stored('out')!=='0',standingsPref=stored('standings'),showAdmin=false,timer=0,current='live',pageSig='',adminSig='',dialogMode=null,toastTimer=0;
  function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
  const ICONS={pencil:'M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4',trash:'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6'};
  function iconButton(icon,label,data,cls=''){
@@ -73,8 +73,8 @@
   snaps.forEach((s,i)=>list.push({id:s.id,title:s.name,sub:`${when(s.at)}${s.createdBy?` · ${s.createdBy}`:''}`,rows:withPkCut(s.rows,s.pkStage),groups:s.groups,gone:outNames(snaps[i+1]),pk:s.pkStage||null,rounds:s.rounds||null}));
   return list;
  }
- // "Cuộc thi": talents out since an earlier round are gone; those out in this round are hidden behind the eye
- // (shown dimmed and unnumbered when it is on). "Tổng cộng" (revenue) lists everyone normally.
+ // "Cuộc thi": talents out since an earlier round are gone; those out in this round show dimmed at the bottom
+ // by default (the eye hides them, remembered per viewer). "Tổng cộng" (revenue) lists everyone normally.
  // "Bảng chung cuộc" (podium): the provisional final standings, everyone 1..N with every eliminated talent
  // below those still in (by elimination order). On by default once the competition has ended.
  const standingsOn=()=>standingsPref==null?board?.competition?.status==='ended':standingsPref==='1';

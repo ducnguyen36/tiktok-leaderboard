@@ -85,11 +85,14 @@ test('eliminated talents are left out of the ranking; the toolbar eye shows thei
  state.db.rows('competitions')[0].eliminated=[{talentName:'RYAN',at:new Date()}];
  const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']}),errors=[];
  t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});
- const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);
+ const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);await context.addInitScript(()=>{if(localStorage.getItem('heliosComp.out')==null)localStorage.setItem('heliosComp.out','0')});
  const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
  await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();
  const rows=()=>live.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.rank').textContent,r.querySelector('.who b').textContent,r.classList.contains('out')]));
- assert.deepEqual(await rows(),[['1','LILY 🍉',false],['2','Chanee🌸',false]],'hidden by default; ranks continuous');
+ assert.deepEqual(await rows(),[['1','LILY 🍉',false],['2','Chanee🌸',false]],'hidden once the viewer chose to hide; ranks continuous');
+ {const other=await browser.newContext({viewport:{width:375,height:812}});await other.addCookies([{name:'test_admin',value:'1',url:base}]);const p2=await other.newPage();p2.on('pageerror',e=>errors.push(e.message));await p2.goto(`${base}/pk-battle-16-10`);const l2=p2.locator('.page.live');await l2.locator('.talents .row').first().waitFor();
+  assert.deepEqual(await l2.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.who b').textContent,r.classList.contains('out')])),[['LILY 🍉',false],['Chanee🌸',false],['RYAN',true]],'by default the eliminated of this round show dimmed at the bottom');
+  assert.equal(await p2.locator('#out-toggle').getAttribute('aria-pressed'),'true');await other.close()}
  const eye=page.locator('#out-toggle');assert.equal(await eye.isVisible(),true);assert.equal((await eye.textContent()).trim(),'1','eye icon shows only the count');assert.equal(await live.locator('.out-toggle').count(),0,'no text button in the list');
  const [eyeBox,groupsBox]=await Promise.all([eye.boundingBox(),page.getByRole('button',{name:'Nhóm'}).boundingBox()]);assert.ok(Math.abs(eyeBox.y-groupsBox.y)<4,'eye sits on the toolbar row with Nhóm');
  assert.equal(await eye.getAttribute('aria-label'),'Hiện 1 người bị loại');await eye.click();
@@ -110,7 +113,7 @@ test('earlier-round eliminations vanish from LIVE, this round ones are behind th
  state.db.rows('competitions')[0].eliminated=[{talentName:'RYAN',at:new Date(now-600000)},{talentName:'Chanee🌸',at:new Date(now-60000)}];
  const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']}),errors=[];
  t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});
- const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);
+ const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);await context.addInitScript(()=>{if(localStorage.getItem('heliosComp.out')==null)localStorage.setItem('heliosComp.out','0')});
  const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
  await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();
  const names=p=>p.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.rank').textContent,r.querySelector('.who b').textContent]));
@@ -134,7 +137,7 @@ test('eliminated players rank by elimination order below everyone still in, not 
  state.db.rows('competitions')[0].eliminated=[{talentName:'RYAN',at:new Date(Date.now()-120000)},{talentName:'Chanee🌸',at:new Date(Date.now()-10000)}];
  const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']}),errors=[];
  t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});
- const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);
+ const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);await context.addInitScript(()=>{if(localStorage.getItem('heliosComp.out')==null)localStorage.setItem('heliosComp.out','0')});
  const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
  await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();
  const rows=()=>live.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.rank').textContent,r.querySelector('.who b').textContent,r.classList.contains('out')]));
@@ -150,7 +153,7 @@ test('eliminated rows at the same moment follow the panel rank; label shows the 
  const at=new Date(Date.now()-30000);state.db.rows('competitions')[0].eliminated=[{talentName:'RYAN',at,rank:3,of:3},{talentName:'Chanee🌸',at,rank:2,of:3}];
  const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']}),errors=[];
  t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});
- const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);
+ const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);await context.addInitScript(()=>{if(localStorage.getItem('heliosComp.out')==null)localStorage.setItem('heliosComp.out','0')});
  const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
  await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();await page.locator('#out-toggle').click();
  const rows=await live.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.rank').textContent,r.querySelector('.who b').textContent,r.querySelector('.out-tag')?.textContent||'']));
@@ -164,7 +167,7 @@ test('revivals can repeat a locked rank: the later out places higher and placing
  state.db.rows('competitions')[0].eliminated=[{talentName:'Chanee🌸',at:new Date(Date.now()-60000),rank:2,of:3},{talentName:'RYAN',at:new Date(Date.now()-30000),rank:2,of:2}];
  const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']}),errors=[];
  t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});
- const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);
+ const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);await context.addInitScript(()=>{if(localStorage.getItem('heliosComp.out')==null)localStorage.setItem('heliosComp.out','0')});
  const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
  await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();await page.locator('#out-toggle').click();
  const rows=await live.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.rank').textContent,r.querySelector('.who b').textContent,r.querySelector('.out-tag')?.textContent||'']));
@@ -179,7 +182,7 @@ test('revived then eliminated again: placed by the latest out, ↺1 label, placi
  comp.eliminated=[{talentName:'RYAN',at:at(90000)},{talentName:'Chanee🌸',at:at(10000)}];
  const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']}),errors=[];
  t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});
- const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);
+ const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);await context.addInitScript(()=>{if(localStorage.getItem('heliosComp.out')==null)localStorage.setItem('heliosComp.out','0')});
  const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
  await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();await page.locator('#out-toggle').click();
  const rows=await live.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.rank').textContent,r.querySelector('.who b').textContent,r.querySelector('.out-tag')?.textContent||'']));
@@ -195,7 +198,7 @@ test('podium toggle shows provisional final standings 1..N during the competitio
  const comp=state.db.rows('competitions')[0];comp.eliminated=[{talentName:'RYAN',at:new Date(now-600000)},{talentName:'Chanee🌸',at:new Date(now-60000)}];
  const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']}),errors=[];
  t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});
- const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);
+ const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);await context.addInitScript(()=>{if(localStorage.getItem('heliosComp.out')==null)localStorage.setItem('heliosComp.out','0')});
  const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
  await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();
  const rows=()=>live.locator('.talents .row').evaluateAll(list=>list.map(r=>[r.querySelector('.rank').textContent,r.querySelector('.who b').textContent,r.classList.contains('out')]));
@@ -219,7 +222,7 @@ test('PK stage on a phone: match cards and tables lead mid-PK, voting order whil
  const comp=state.db.rows('competitions')[0];comp.pkStage=pkFixtures.midPk();
  const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']}),errors=[];
  t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});
- const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);
+ const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);await context.addInitScript(()=>{if(localStorage.getItem('heliosComp.out')==null)localStorage.setItem('heliosComp.out','0')});
  const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
  const live=page.locator('.page.live'),noScroll=()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth);
  const open=async()=>{state.pages.reset();await page.goto(`${base}/pk-battle-16-10`);await live.locator('.talents .row').first().waitFor()};
