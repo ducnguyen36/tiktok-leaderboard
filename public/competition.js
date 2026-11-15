@@ -138,13 +138,27 @@
    line.append(chip)}
   return line;
  }
+ // Round by round with each talent's diamonds (when the app sent them): the winner's cell lit,
+ // a tie marked "hòa", a round cancelled by a revive struck through with ↺. Talents in match order.
+ function roundsTable(m){
+  const short=n=>Array.from(n||'').slice(0,9).join(''),tbl=el('table','m-scores'),head=el('tr');
+  head.append(el('th','m-rn','Ván'));for(const n of m.talents){const th=el('th','',short(n));th.title=n;head.append(th)}
+  const thead=el('thead');thead.append(head);const tb=el('tbody');
+  for(const r of m.rounds){const tr=el('tr',`${r.winner?'':'tie'}${r.cancelledByRevive?' cancelled':''}`);
+   const rn=el('th','m-rn',`V${r.n}${r.winner?'':' hòa'}`);if(r.cancelledByRevive)rn.append(el('span','rv ok',`↺`));tr.append(rn);
+   for(const n of m.talents){const v=r.diamonds?.[n],won=r.winner===n,tied=!r.winner&&r.tied.includes(n);
+    tr.append(el('td',won?(v!=null?'w':'w w0'):tied?'t':'',v!=null?fmt(v):won?'✓':'—'))}
+   const d=Object.entries(r.diamonds||{});tr.title=[`Ván ${r.n}`,r.winner?`${r.winner} thắng`:`hòa${r.tied.length?`: ${r.tied.join(', ')}`:''} – đánh lại`,...d.map(([n,v])=>`${n} ${fmt(v)} 💎`),r.cancelledByRevive?`bị hủy do ${r.cancelledByRevive} hồi sinh`:''].filter(Boolean).join(' · ');
+   tb.append(tr)}
+  tbl.append(thead,tb);const wrap=el('div','m-scores-wrap');wrap.append(tbl);return wrap;
+ }
  function matchCard(m){
   const card=el('div',`match ${m.status}`);card.dataset.match=m.id;
   const head=el('div','m-head');head.append(el('span','m-id',m.id),el('span','m-score',m.talents.map(n=>m.points[n]??0).join('–')),el('span',`m-status ${m.status}`,MATCH_STATUS[m.status]||''));card.append(head);
   const ul=el('ul','m-talents'),done=m.status==='done'&&m.winner;
   for(const n of m.talents){const won=m.winner===n,lost=done&&!won,li=el('li',won?'win':lost?'lose':'');
    li.append(el('span','m-name',n),reviveMarks(m,n),el('b','m-pt',String(m.points[n]??0)));if(won)li.title='Thắng trận';ul.append(li)}
-  card.append(ul);if(m.rounds.length)card.append(roundsLine(m));
+  card.append(ul);if(m.rounds.length)card.append(m.rounds.some(r=>Object.keys(r.diamonds||{}).length)?roundsTable(m):roundsLine(m));
   // Revive chases with their target (when known).
   for(const r of m.revives){const line=el('div',`m-revive ${r.success===true?'ok':r.success===false?'fail':'wait'}`);line.title=reviveText(r);
    line.append(el('span','',`↺ ${r.talentName}`),el('b','',reviveSign(r)));if(r.target!=null)line.append(el('small','',`${fmt(r.target)} 💎`));else if(r.mode==='manual')line.append(el('small','','MC'));card.append(line)}

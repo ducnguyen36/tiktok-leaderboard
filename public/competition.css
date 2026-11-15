@@ -169,6 +169,16 @@ dialog h2{margin:0;font-size:18px}
 .m-rn{color:var(--muted);font-weight:800}.m-rw{min-width:0;max-width:84px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .m-round.tie{background:#4a342055;color:#ffe4b2}.m-round.tie .m-rw{max-width:none}
 .m-round.cancelled{background:#ffffff08}.m-round.cancelled .m-rw{color:var(--muted)}
+.m-scores-wrap{margin-top:5px;overflow-x:auto}
+.m-scores{width:100%;border-collapse:collapse;font-size:10.5px;line-height:16px;font-variant-numeric:tabular-nums;color:#e8d7c6}
+.m-scores th,.m-scores td{padding:0 4px;text-align:right;white-space:nowrap}
+.m-scores thead th{color:var(--muted);font-weight:700;max-width:70px;overflow:hidden;text-overflow:ellipsis;border-bottom:1px solid #ffffff1a}
+.m-scores .m-rn{text-align:left;color:var(--muted);font-weight:800}
+.m-scores tbody tr+tr{border-top:1px solid #ffffff0d}
+.m-scores td.w{color:#ffd76a;font-weight:800}.m-scores td.w::after{content:' ✓';font-size:9px}
+.m-scores td.w0::after{content:none}
+.m-scores td.t{color:#ffe4b2}.m-scores tr.tie{background:#4a342033}
+.m-scores tr.cancelled td{text-decoration:line-through;color:var(--muted)}.m-scores tr.cancelled td.w{color:var(--muted)}
 .m-revive{display:flex;align-items:center;gap:5px;min-width:0;margin-top:3px;font-size:11px}
 .m-revive span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.m-revive small{margin-left:auto;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
 .m-revive.ok{color:#9ff0c0}.m-revive.fail{color:#ffb8b8}.m-revive.wait{color:#ffe4b2}
