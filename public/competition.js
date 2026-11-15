@@ -53,9 +53,24 @@
  // round. Someone revived and eliminated again after that snapshot went out in this round, so is not gone.
  const outNames=snap=>{const gone=new Set();for(const r of snap?.rows||[])if(r.eliminated)gone.add(r.talentName);gone.at=snap?.at??null;gone.outAt=new Map((snap?.rows||[]).filter(r=>r.eliminated).map(r=>[r.talentName,r.eliminatedAt||null]));return gone};
  const isGone=(page,row)=>{if(!row.eliminated||!page.gone.has(row.talentName))return false;const before=page.gone.outAt.get(row.talentName),now=row.eliminatedAt;return !(before&&now&&Date.parse(now)>Date.parse(before))};
+ // PK tables by score (this page's ranking, high first; ties keep the app's order); cut = the lower table
+ // after its top takeLower (or the app's cut when no takeLower).
+ function pkTables(pk,rows){
+  const t=pk.tables,scores=new Map((rows||[]).map(r=>[r.talentName,Number(r.competition)||0]));
+  const byScore=list=>list.map((n,i)=>[n,i]).sort((a,b)=>(scores.has(b[0])?scores.get(b[0]):-Infinity)-(scores.has(a[0])?scores.get(a[0]):-Infinity)||a[1]-b[1]).map(([n])=>n);
+  const upper=byScore(t.upper),lower=byScore(t.lower),cut=pk.takeLower!=null?new Set(lower.slice(pk.takeLower)):new Set(t.cut);
+  return{upper,lower,cut,scores};
+ }
+ // Once every PK match is done, the talents cut from the lower table count as out on this page (hidden
+ // behind the eye like the eliminated) before the app's ✂ writes them to eliminated.
+ function withPkCut(rows,pk){
+  if(!pk?.tables||pk.phase==='setup'||!pk.matches?.length||pk.matches.some(m=>m.status!=='done'))return rows;
+  const{cut}=pkTables(pk,rows);if(!cut.size)return rows;
+  return rows.map(r=>!r.eliminated&&cut.has(r.talentName)?{...r,eliminated:true,pkCut:true}:r);
+ }
  function pages(){
-  const live=board.live,snaps=board.snapshots,list=[{id:'live',live:true,title:'LIVE',sub:'Cộng dồn từ đầu cuộc thi',rows:live.rows,groups:live.groups,gone:outNames(snaps[0]),pk:live.pkStage||null,rounds:live.rounds||null}];
-  snaps.forEach((s,i)=>list.push({id:s.id,title:s.name,sub:`${when(s.at)}${s.createdBy?` · ${s.createdBy}`:''}`,rows:s.rows,groups:s.groups,gone:outNames(snaps[i+1]),pk:s.pkStage||null,rounds:s.rounds||null}));
+  const live=board.live,snaps=board.snapshots,list=[{id:'live',live:true,title:'LIVE',sub:'Cộng dồn từ đầu cuộc thi',rows:withPkCut(live.rows,live.pkStage),groups:live.groups,gone:outNames(snaps[0]),pk:live.pkStage||null,rounds:live.rounds||null}];
+  snaps.forEach((s,i)=>list.push({id:s.id,title:s.name,sub:`${when(s.at)}${s.createdBy?` · ${s.createdBy}`:''}`,rows:withPkCut(s.rows,s.pkStage),groups:s.groups,gone:outNames(snaps[i+1]),pk:s.pkStage||null,rounds:s.rounds||null}));
   return list;
  }
  // "Cuộc thi": talents out since an earlier round are gone; those out in this round are hidden behind the eye
@@ -87,7 +102,7 @@
   placed(visible,page,group).forEach((row,i)=>{const isOut=!group&&roundOut(page,row),rank=i+1;// Eliminated rows are dimmed while the competition runs; the final standings of an ended one show everyone clearly.
    const dim=isOut&&board.competition?.status!=='ended',li=el('li',`row${dim?' out':isOut?' out-final':''}${!isOut&&rank<=3?` top${rank}`:''}`);li.append(el('span','rank',String(rank)));const name=group?row.profileName:row.talentName;
    if(!group)li.append(el('span','avatar',Array.from(name||'?')[0]||'?'));
-   const who=el('div','who');who.append(el('b','',name||'—'));if(!group){const sub=el('small','',row.profileName||'');if(isOut){const at=row.eliminatedAt?hhmm.format(new Date(row.eliminatedAt)):'',tag=el('span','out-tag',`Bị loại${row.eliminatedRound?` · ${row.eliminatedRound}`:''}${at?` · ${at}`:''}${row.revives?` ↺${row.revives}`:''}`);
+   const who=el('div','who');who.append(el('b','',name||'—'));if(!group){const sub=el('small','',row.profileName||'');if(isOut){const at=row.eliminatedAt?hhmm.format(new Date(row.eliminatedAt)):'',tag=el('span','out-tag',row.pkCut?'✂ Bị cắt (Vòng PK)':`Bị loại${row.eliminatedRound?` · ${row.eliminatedRound}`:''}${at?` · ${at}`:''}${row.revives?` ↺${row.revives}`:''}`);
      tag.title=[row.eliminatedAt?`Bị loại lúc ${when(row.eliminatedAt)}`:'',row.eliminatedRound?`vòng ${row.eliminatedRound}`:'',row.revives?`đã hồi sinh ${row.revives} lần`:''].filter(Boolean).join(' · ');sub.prepend(tag)}
      // Revived and back in: the ↺ mark stays on the row.
      else if(row.revives){const tag=el('span','revive-tag',`↺${row.revives>1?row.revives:''}`);tag.title=`Đã hồi sinh ${row.revives} lần`;tag.setAttribute('aria-label',tag.title);sub.prepend(tag)}who.append(sub)}li.append(who,score(row));ol.append(li)});
@@ -161,10 +176,7 @@
  // board matches the points whatever order the app seeded the stage in; the cut line sits after
  // the top takeLower of the lower table and the talents below it are marked ✂.
  function tablesView(pk,rows){
-  const t=pk.tables,scores=new Map((rows||[]).map(r=>[r.talentName,Number(r.competition)||0]));
-  const byScore=list=>list.map((n,i)=>[n,i]).sort((a,b)=>(scores.has(b[0])?scores.get(b[0]):-Infinity)-(scores.has(a[0])?scores.get(a[0]):-Infinity)||a[1]-b[1]).map(([n])=>n);
-  const upper=byScore(t.upper),lower=byScore(t.lower);
-  const cut=pk.takeLower!=null?new Set(lower.slice(pk.takeLower)):new Set(t.cut);
+  const{upper,lower,cut,scores}=pkTables(pk,rows);
   let cutAt=pk.takeLower!=null&&lower.length>pk.takeLower?pk.takeLower:null;
   if(cutAt==null&&cut.size){const i=lower.findIndex(n=>cut.has(n));if(i>=0)cutAt=i}
   const box=el('div','pk-tables');box.append(tableList('upper','Bảng thắng',upper,pk,{scores,note:'theo điểm'}),tableList('lower','Bảng thua',lower,pk,{cutAt,cut,scores,note:'theo điểm'}));return box;

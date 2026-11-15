@@ -256,6 +256,14 @@ test('PK stage on a phone: match cards and tables lead mid-PK, voting order whil
  assert.match(await pk.locator('.pk-voting-fold .fold-count').textContent(),/2\/5/);
  assert.deepEqual(await pk.locator('.pk-tables .lower li').evaluateAll(l=>l.map(li=>li.classList.contains('cut-line')?'---':li.querySelector('.t-name').textContent)),['LILY 🍉','D','---','E','F']);
  assert.equal(await noScroll(),true,'no horizontal scroll at 375px while voting');
+ // Every match done: talents cut from the lower table count as out (behind the eye) before the app's ✂.
+ assert.equal(await live.locator('.talents .rows .row.out').count(),0,'takeLower 2: no participant cut');
+ {const v=pkFixtures.voting();comp.pkStage={...v,takeLower:null,tables:{...v.tables,cut:['LILY 🍉','E','F']}}}await open();await pk.waitFor();
+ assert.deepEqual(await live.locator('.talents .rows .row .who b').allTextContents(),['RYAN','Chanee🌸'],'LILY cut from the lower table: hidden');
+ await page.locator('#out-toggle').click();assert.match(await live.locator('.talents .rows .row.out .out-tag').textContent(),/Bị cắt \(Vòng PK\)/);
+ await page.locator('#out-toggle').click();
+ {const m=pkFixtures.midPk();comp.pkStage={...m,takeLower:null,tables:{...m.tables,cut:['LILY 🍉','E','F']}}}await open();await pk.waitFor();
+ assert.equal(await live.locator('.talents .rows .row').count(),3,'a match still running: nobody hidden yet');
  // --- Chasing: the score ranking is the main view, the PK result follows it, folded. ---
  comp.pkStage=pkFixtures.chasing();await open();await pk.waitFor();
  assert.equal(await pkFirst(),false,'ranking leads once chasing');assert.match(await pk.locator('.pk-phase').textContent(),/Rượt điểm/);
