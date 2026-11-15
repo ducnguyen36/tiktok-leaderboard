@@ -61,8 +61,8 @@
   const upper=byScore(t.upper),lower=byScore(t.lower),cut=pk.takeLower!=null?new Set(lower.slice(pk.takeLower)):new Set(t.cut);
   return{upper,lower,cut,scores};
  }
- // Once every PK match is done, the talents cut from the lower table count as out on this page (hidden
- // behind the eye like the eliminated) before the app's ✂ writes them to eliminated.
+ // Once every PK match is done, the talents cut from the lower table count as out on this page before the
+ // app's ✂ writes them to eliminated: always shown, dimmed at the bottom (not behind the eye).
  function withPkCut(rows,pk){
   if(!pk?.tables||pk.phase==='setup'||!pk.matches?.length||pk.matches.some(m=>m.status!=='done'))return rows;
   const{cut}=pkTables(pk,rows);if(!cut.size)return rows;
@@ -79,7 +79,7 @@
  // below those still in (by elimination order). On by default once the competition has ended.
  const standingsOn=()=>standingsPref==null?board?.competition?.status==='ended':standingsPref==='1';
  const roundOut=(page,row)=>mode==='competition'&&row.eliminated&&(standingsOn()||!isGone(page,row));
- function talentRows(page){return mode!=='competition'||standingsOn()?page.rows:page.rows.filter(r=>!isGone(page,r)&&(showOut||!r.eliminated))}
+ function talentRows(page){return mode!=='competition'||standingsOn()?page.rows:page.rows.filter(r=>!isGone(page,r)&&(showOut||!r.eliminated||r.pkCut))}
  // Sorted by the selected mode; unknown values (old snapshots in "Tổng cộng") go last.
  const value=(row,key=mode)=>row[key]==null?-Infinity:Number(row[key])||0,other=()=>mode==='competition'?'overall':'competition';
  function ranked(rows){return [...rows].sort((a,b)=>value(b)-value(a)||value(b,other())-value(a,other())||String(a.talentName||a.profileName).localeCompare(String(b.talentName||b.profileName)))}
@@ -233,7 +233,7 @@
  function indexNow(){const box=$('pages');let best=0,gap=Infinity;[...box.children].forEach((c,i)=>{const d=Math.abs(c.offsetLeft-box.scrollLeft);if(d<gap){gap=d;best=i}});return best}
  // Eye count follows the page in view (LIVE or a snapshot taken when fewer/more were out).
  function applyOut(index=indexNow()){
-  const page=board&&pages()[index],out=page?page.rows.filter(r=>roundOut(page,r)).length:0,b=$('out-toggle');
+  const page=board&&pages()[index],out=page?page.rows.filter(r=>roundOut(page,r)&&!r.pkCut).length:0,b=$('out-toggle');
   b.hidden=!out||standingsOn();const s=$('standings-toggle');s.hidden=mode!=='competition';s.setAttribute('aria-pressed',String(standingsOn()));
   $('out-count').textContent=String(out);b.setAttribute('aria-pressed',String(showOut));b.classList.toggle('on',showOut);
   const label=`${showOut?'Ẩn':'Hiện'} ${out} người bị loại`;b.setAttribute('aria-label',label);b.title=label;
