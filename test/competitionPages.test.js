@@ -286,12 +286,10 @@ test('a real competition whose own slug starts with test- wins over a test compe
  assert.deepEqual(list.filter(c=>c.url==='/test-abc').map(c=>c.id),[String(realId)],'the shadowed test competition is left out of the list');
 });
 
-test('a PK revive chase: its diamonds from the revive, else the gameplay history round just before it', async () => {
-  const { withChaseDiamonds, cleanPkStage } = require('../competitionPages');
-  const at = '2026-11-15T13:13:28.000Z', end = Date.parse(at) - 9000;
-  const pk = { phase: 'pk', matches: [{ id: 'A6', talents: ['Blue', 'Hannie'], revives: [{ talentName: 'Blue', at, success: true, mode: 'fixed', target: 5000 }, { talentName: 'Hannie', at, success: false, diamonds: 12 }] }] };
-  const hist = [{ names: ['Blue'], endedAt: end, result: { tally: 6000 } }, { names: ['Blue'], endedAt: end - 3600000, result: { tally: 99 } }, { names: ['Blue', 'Hannie'], endedAt: end, result: { tally: 0 } }];
-  const db = { collection: () => ({ find: () => ({ limit: () => ({ toArray: async () => hist }) }) }) };
-  const out = cleanPkStage(await withChaseDiamonds(db, pk)).matches[0].revives;
-  assert.deepStrictEqual(out.map(r => r.diamonds), [6000, 12]);
+test('"Cuộc thi" leaves out the gifts with 🏆 off (contest:false); "Tổng cộng" keeps them', () => {
+  const participants = [{ talentName: 'Blue', profileName: 'G' }, { talentName: 'RYAN', profileName: 'G' }];
+  const gifts = [{ cost: 4763, receivedTalent: 'Blue' }, { cost: 6000, receivedTalent: 'Blue', contest: false }, { cost: 6179, receivedTalent: 'RYAN', contest: true }];
+  const b = buildBoard(participants, gifts);
+  assert.deepEqual(b.rows.map(r => [r.talentName, r.competition, r.overall]), [['RYAN', 6179, 6179], ['Blue', 4763, 10763]]);
+  assert.equal(b.groups[0].competition, 10942);
 });

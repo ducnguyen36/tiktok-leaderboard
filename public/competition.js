@@ -56,9 +56,7 @@
  // PK tables by score (this page's ranking, high first; ties keep the app's order); cut = the lower table
  // after its top takeLower (or the app's cut when no takeLower).
  function pkTables(pk,rows){
-  // the tables rank by competition points without each PK revive's chase diamonds (not competition points)
-  const chase=new Map();for(const m of pk.matches||[])for(const r of m.revives||[])if(Number(r.diamonds)>0)chase.set(r.talentName,(chase.get(r.talentName)||0)+Number(r.diamonds));
-  const t=pk.tables,scores=new Map((rows||[]).map(r=>[r.talentName,(Number(r.competition)||0)-(chase.get(r.talentName)||0)]));
+  const t=pk.tables,scores=new Map((rows||[]).map(r=>[r.talentName,Number(r.competition)||0]));
   const byScore=list=>list.map((n,i)=>[n,i]).sort((a,b)=>(scores.has(b[0])?scores.get(b[0]):-Infinity)-(scores.has(a[0])?scores.get(a[0]):-Infinity)||a[1]-b[1]).map(([n])=>n);
   const upper=byScore(t.upper),lower=byScore(t.lower),cut=pk.takeLower!=null?new Set(lower.slice(pk.takeLower)):new Set(t.cut);
   return{upper,lower,cut,scores};
@@ -195,7 +193,7 @@
   const{upper,lower,cut,scores}=pkTables(pk,rows);
   let cutAt=pk.takeLower!=null&&lower.length>pk.takeLower?pk.takeLower:null;
   if(cutAt==null&&cut.size){const i=lower.findIndex(n=>cut.has(n));if(i>=0)cutAt=i}
-  const box=el('div','pk-tables');box.append(tableList('upper','Bảng thắng',upper,pk,{scores,note:'theo điểm, không tính hồi sinh'}),tableList('lower','Bảng thua',lower,pk,{cutAt,cut,scores,note:'theo điểm, không tính hồi sinh'}));return box;
+  const box=el('div','pk-tables');box.append(tableList('upper','Bảng thắng',upper,pk,{scores,note:'theo điểm'}),tableList('lower','Bảng thua',lower,pk,{cutAt,cut,scores,note:'theo điểm'}));return box;
  }
  function votingView(pk){
   const v=pk.voting,done=new Set(v.done),box=el('div','pk-voting'),ol=el('ol','vote-order');
