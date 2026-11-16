@@ -140,9 +140,9 @@ function cleanPkStage(raw){
   const tables=raw.tables&&typeof raw.tables==='object'?{upper:names(raw.tables.upper),lower:names(raw.tables.lower),cut:names(raw.tables.cut),lowerBy:LOWER_BY.includes(raw.tables.lowerBy)?raw.tables.lowerBy:'seed'}:null;
   const v=raw.voting&&typeof raw.voting==='object'?raw.voting:null;
   const voting=v?{order:names(v.order),done:names(v.done),current:oneName(v.current),status:VOTING_STATUS.includes(v.status)?v.status:'pending'}:null;
-  const seed=names(raw.seed),revivesUsed=names(raw.revivesUsed);
+  const seed=names(raw.seed),revivesUsed=names(raw.revivesUsed),forceIn=names(raw.forceIn),forceOut=names(raw.forceOut).filter(n=>!forceIn.includes(n));
   if(!matches.length&&!seed.length&&!(tables&&(tables.upper.length||tables.lower.length))&&!(voting&&voting.order.length))return null;
-  return{phase,firstTo,takeLower,seed,tracks,matches,revivesUsed,tables,voting,updatedAt:iso(raw.updatedAt)};
+  return{phase,firstTo,takeLower,seed,tracks,matches,revivesUsed,tables,voting,...(forceIn.length?{forceIn}:{}),...(forceOut.length?{forceOut}:{}),updatedAt:iso(raw.updatedAt)};
 }
 // competitions.standing (HeliosControl's panel zones): passed through cleaned, for snapshots and future use.
 const STANDING_GROUPS=['upper','lower','out'];
