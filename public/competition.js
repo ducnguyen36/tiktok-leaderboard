@@ -99,7 +99,9 @@
  }
  function list(title,rows,group,page){
   const wrap=el(group?'aside':'div',group?'groups':'talents');if(group)wrap.setAttribute('aria-label',title);
-  const head=el('div','section-head');head.append(el('div','section-title',`${title} · ${MODES[mode]}`));wrap.append(head);
+  const head=el('div','section-head');head.append(el('div','section-title',`${title} · ${MODES[mode]}`));
+  // Σ the whole competition (every talent, the eliminated too) in the mode shown
+  const sum=rows.reduce((n,r)=>n+(r[mode]==null?0:Number(r[mode])||0),0),tot=el('span','section-total');tot.append('Tổng ',el('b','',fmt(sum)),' 💎');tot.title=`Tổng ${MODES[mode]} của cả cuộc thi (mọi talent, kể cả người bị loại)`;head.append(tot);wrap.append(head);
   const visible=group?rows:talentRows(page);
   const ol=el('ol','rows');if(!visible.length)ol.append(el('li','empty',rows.length?'Tất cả đã bị loại':'Chưa có dữ liệu'));
   placed(visible,page,group).forEach((row,i)=>{const isOut=!group&&roundOut(page,row),rank=i+1;// Eliminated rows are dimmed while the competition runs; the final standings of an ended one show everyone clearly.

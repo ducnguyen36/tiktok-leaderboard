@@ -51,6 +51,8 @@ main{max-width:1100px;margin:0 auto;padding:0 16px 32px}
 .live-dot{display:inline-block;width:8px;height:8px;margin-right:6px;border-radius:50%;background:#ff4b6e;box-shadow:0 0 8px #ff4b6e;vertical-align:middle}
 .section-title{margin:12px 14px 4px;color:#e9cdb0;font-size:12px;letter-spacing:.12em;text-transform:uppercase;font-weight:800}
 .section-head{display:flex;align-items:center}
+.section-total{margin:12px 14px 4px auto;color:#e9cdb0;font-size:12px;white-space:nowrap}
+.section-total b{color:#ffd27a;font-size:14px;font-variant-numeric:tabular-nums}
 .row.out{opacity:.48}.row.out .rank{color:var(--muted)}.out-tag{display:inline-block;margin-right:6px;padding:0 6px;border-radius:6px;background:#5a2a2a;color:#ffb8b8;font-size:10px;font-weight:800;letter-spacing:.03em;vertical-align:1px}
 .rows{list-style:none;margin:0;padding:0 6px 8px}
 .row{display:grid;grid-template-columns:30px 36px minmax(0,1fr) auto;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #ffffff12}
