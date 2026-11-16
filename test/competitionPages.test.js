@@ -293,3 +293,11 @@ test('"Cuộc thi" leaves out the gifts with 🏆 off (contest:false); "Tổng c
   assert.deepEqual(b.rows.map(r => [r.talentName, r.competition, r.overall]), [['RYAN', 6179, 6179], ['Blue', 4763, 10763]]);
   assert.equal(b.groups[0].competition, 10942);
 });
+
+test('pkStage keeps the lower table by hand (forceIn / forceOut)', () => {
+  const { cleanPkStage } = require('../competitionPages');
+  const pk = cleanPkStage({ phase: 'pk', matches: [{ id: 'A1', talents: ['A', 'B'] }], forceIn: ['TOBU', 'TOBU'], forceOut: ['RYAN', 'TOBU'] });
+  assert.deepEqual(pk.forceIn, ['TOBU']);
+  assert.deepEqual(pk.forceOut, ['RYAN']);
+  assert.equal('forceIn' in cleanPkStage({ phase: 'pk', matches: [{ id: 'A1', talents: ['A', 'B'] }] }), false);
+});

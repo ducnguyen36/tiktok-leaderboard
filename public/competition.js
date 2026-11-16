@@ -58,7 +58,10 @@
  function pkTables(pk,rows){
   const t=pk.tables,scores=new Map((rows||[]).map(r=>[r.talentName,Number(r.competition)||0]));
   const byScore=list=>list.map((n,i)=>[n,i]).sort((a,b)=>(scores.has(b[0])?scores.get(b[0]):-Infinity)-(scores.has(a[0])?scores.get(a[0]):-Infinity)||a[1]-b[1]).map(([n])=>n);
-  const upper=byScore(t.upper),lower=byScore(t.lower),cut=pk.takeLower!=null?new Set(lower.slice(pk.takeLower)):new Set(t.cut);
+  // HeliosControl's say by hand: forceIn goes on first, forceOut gives her place (last)
+  const fin=(pk.forceIn||[]).filter(n=>t.lower.includes(n)),fout=(pk.forceOut||[]).filter(n=>t.lower.includes(n)&&!fin.includes(n)),sorted=byScore(t.lower);
+  const upper=byScore(t.upper),lower=fin.length||fout.length?[...fin,...sorted.filter(n=>!fin.includes(n)&&!fout.includes(n)),...fout]:sorted;
+  const cut=pk.takeLower!=null?new Set(lower.slice(pk.takeLower)):fout.length?new Set(fout):new Set(t.cut);
   return{upper,lower,cut,scores};
  }
  // Once every PK match is done, the talents cut from the lower table count as out on this page before the
