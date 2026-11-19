@@ -22,7 +22,7 @@ COPY server.js ./
 COPY leaderboardAuth.js authStore.js privateAssets.js sheetsConnection.js groupSheets.js sheetsKeyStore.js ./
 COPY monthlyWindows.js ./
 COPY leaderboardHistory.js ./
-COPY leaderboardAggregation.js ./
+COPY leaderboardAggregation.js talentIdentity.js ./
 COPY leaderboardPerformance.js ./
 COPY rankingNext.js sheetReconciliation.js backstageApi.js backstageCore.js backstageSheets.js liveJournal.js ./
 COPY reconciliationReport.js reconciliationKnownIssues.js boardSettings.js ./

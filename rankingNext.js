@@ -2,6 +2,7 @@
 const A=require('./leaderboardAggregation');
 const {decodeGiftBuckets}=require('./leaderboardPerformance');
 const {displayMonth}=require('./monthlyWindows');
+const {buildIndividualMaps}=require('./talentIdentity');
 const DAY=86400000, OFFSET=7*3600000;
 function dayKey(value,resetHour=0){const n=+new Date(value);return Number.isFinite(n)?new Date(n+OFFSET-resetHour*3600000).toISOString().slice(0,10):null}
 function dayStart(key,resetHour=0){return Date.parse(key+'T'+String(resetHour).padStart(2,'0')+':00:00+07:00')}
@@ -30,12 +31,16 @@ function shiftStarts(sessions){
 function liveGroups(states,now=Date.now()){
   const result=new Map();for(const state of states){const beat=+new Date(state.heartbeatAt);if(state.live===true&&state.profileId&&Number.isFinite(beat)&&beat<=now+5000&&now-beat<90000)result.set(String(state.profileId),{live:true,liveSince:state.liveSince,liveExpiresAt:new Date(beat+90000).toISOString()})}return result;
 }
-function scoreRows(profiles,gifts,sessions,avatar=value=>value||''){
+// identity 'new' (RANKING_IDENTITY, boards only): one idol row per person, see talentIdentity.js.
+// The sheet checks keep the default 'old'.
+function scoreRows(profiles,gifts,sessions,avatar=value=>value||'',identity='old'){
   const owners=Object.fromEntries(sessions.filter(s=>s.profileId).map(s=>[String(s._id),s.profileId])),owned=A.orderForOwnership(profiles,owners);
   const avatars=A.buildTalentAvatars(profiles),map=A.buildProfileMap(profiles),tp=A.buildTalentToProfileMap(owned),names=A.buildProfileNameToIdMap(profiles),uids=A.buildUidMaps(owned);
+  const im=identity==='new'?buildIndividualMaps(profiles,owners,{mode:'new'}):null;
+  const idol=im?im.visible(A.aggregateIndividual(gifts,im.talentAvatarMap,im.profileNameToId,im.uidToTalent,im.talentToProfile,im.profileMap,im.uidToProfile)).map(e=>{const group=im.groupOf(e._id)||{},t=im.talentAvatarMap[e._id]||{};return{name:e._id,value:e.totalDiamonds,groupId:group.groupId||'',locationId:group.locationId||'',avatar:avatar(t.avatarUrl,t.uniqueId)}}):null;
   return {
-    individual:A.aggregateIndividual(gifts,avatars,names,uids.uidToTalent,tp,map,uids.uidToProfile).map(e=>{const group=tp[e._id],p=map[group?.profileId]||{};return{name:e._id,value:e.totalDiamonds,groupId:String(group?.profileId||''),locationId:p.locationId||'',avatar:avatar(avatars[e._id]?.avatarUrl,avatars[e._id]?.uniqueId)}}),
-    group:A.aggregateGroup(gifts,tp,map,names,uids.uidToTalent,uids.uidToProfile,owners).map(e=>({name:e.name,value:e.totalDiamonds,groupId:String(e._id),locationId:map[e._id]?.locationId||'',avatar:avatar(map[e._id]?.avatar,map[e._id]?.username)}))
+    individual:idol||A.aggregateIndividual(gifts,avatars,names,uids.uidToTalent,tp,map,uids.uidToProfile).map(e=>{const group=tp[e._id],p=map[group?.profileId]||{};return{name:e._id,value:e.totalDiamonds,groupId:String(group?.profileId||''),locationId:p.locationId||'',avatar:avatar(avatars[e._id]?.avatarUrl,avatars[e._id]?.uniqueId)}}),
+    group:A.aggregateGroup(gifts,im?im.groupTalentToProfile(tp):tp,map,names,uids.uidToTalent,uids.uidToProfile,owners).map(e=>({name:e.name,value:e.totalDiamonds,groupId:String(e._id),locationId:map[e._id]?.locationId||'',avatar:avatar(map[e._id]?.avatar,map[e._id]?.username)}))
   };
 }
 // The workday (06:00 by default) decides which day a shift belongs to in the sheet
@@ -84,7 +89,7 @@ function decorateLive(rows,states,now){const groups=liveGroups(states,now);retur
 // once with it, marked as a snapshot, while the fresh board is computed. A snapshot
 // of an earlier day is never served.
 const SNAPSHOT_EVERY=60000;
-function createNextRankingForHour({getDb,current,readProfiles,readLocations,avatar,reconcile,groupRules,dayCount=()=>'gift-time',clock=Date.now,resetHour=0,holdUntil='',snapshots=null,contextKey=''}){
+function createNextRankingForHour({getDb,current,readProfiles,readLocations,avatar,reconcile,groupRules,dayCount=()=>'gift-time',clock=Date.now,resetHour=0,holdUntil='',snapshots=null,contextKey='',identity=()=>'old'}){
   let cached,pending,generation=0,restored=false,savedAt=0;
   async function build(force=false){
     const revision=generation,started=clock(),db=getDb(),mode=dayCount()==='session-start'?'session-start':'gift-time';if(!db)throw Error('Database unavailable');
@@ -95,7 +100,8 @@ function createNextRankingForHour({getDb,current,readProfiles,readLocations,avat
     const rules=groupRules?.(),groupHours=mode==='gift-time'?{}:groupResetHours(profiles,resetHour,rules),days=partitionSessions(sessions,started,resetHour,{holdUntil,groupHours}),{today,yesterday}=days;
     const owners=Object.fromEntries(sessions.map(s=>[String(s._id),s.profileId])),cutoff=giftCutoff(resetHour);
     for(const g of buckets)g.day=mode==='gift-time'?giftDay(g,days,owners,cutoff):days.keys.get(String(g.sessionId));
-    const scores=key=>scoreRows(profiles,buckets.filter(g=>g.day===key),sessions,avatar);
+    const idMode=identity();
+    const scores=key=>scoreRows(profiles,buckets.filter(g=>g.day===key),sessions,avatar,idMode);
     const daily=scores(today),prior=scores(yesterday);
     for(const kind of ['group','individual'])daily[kind]=daily[kind].map(row=>({...row,yesterday:prior[kind].find(p=>p.name===row.name&&p.groupId===row.groupId)||null}));
     const data={...monthly.data,individual:{...monthly.data.individual,daily:daily.individual,yesterday:prior.individual},group:{...monthly.data.group,daily:daily.group,yesterday:prior.group},frozen:false,dailyPeriod:{today,yesterday,resetHour,holdUntil,groupResetHours:groupHours,attribution:mode,...(mode==='gift-time'?{giftCutoffHour:cutoff}:{})}};

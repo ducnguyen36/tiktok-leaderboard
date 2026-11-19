@@ -87,6 +87,9 @@ const nameAliasKey = value => '#' + String(value || '').trim();
 // so prefixed keys never collide with them.
 const UNIQUE_ID_KEY = '@';
 const uniqueIdKey = value => UNIQUE_ID_KEY + String(value || '').trim().toLowerCase();
+// Another name of a person, used only when the uid and @uniqueId do not decide
+// (RANKING_IDENTITY=new; never set with 'old').
+const weakAliasKey = value => '~' + String(value || '').trim();
 
 // Maps talent UID -> { talentName, profileId, profileName }
 // Used to resolve gifts by UID instead of nickname. Also maps each talent's
@@ -132,7 +135,7 @@ function buildUidMaps(profiles) {
 function resolveTalentName(name, uid, uidToTalent) {
     // A confirmed display-name alias wins over the UID: shared host/guest-seat
     // UIDs show different people under different names.
-    return uidToTalent[nameAliasKey(name)] || (uid && uidToTalent[uid]) || uidToTalent[uniqueIdKey(name)] || name;
+    return uidToTalent[nameAliasKey(name)] || (uid && uidToTalent[uid]) || uidToTalent[uniqueIdKey(name)] || uidToTalent[weakAliasKey(name)] || name;
 }
 
 // ==========================================
@@ -425,4 +428,4 @@ function aggregateGroup(gifts, talentToProfile, profileMap, profileNameToId, uid
 }
 
 
-module.exports = { buildTalentAvatars, buildProfileMap, buildTalentToProfileMap, orderForOwnership, buildProfileNameToIdMap, buildUidMaps, resolveGiftTalents, aggregateIndividual, aggregateGroup };
+module.exports = { nameAliasKey, uniqueIdKey, weakAliasKey, buildTalentAvatars, buildProfileMap, buildTalentToProfileMap, orderForOwnership, buildProfileNameToIdMap, buildUidMaps, resolveGiftTalents, aggregateIndividual, aggregateGroup };

@@ -588,12 +588,14 @@ async function resolveAvatar(avatarUrl, tiktokUsername) {
 // PROFILE & TALENT DATA HELPERS
 // ==========================================
 async function readProfilesFromDb() {
-    const all = await db.collection('profiles').find({}, { projection: { name: 1, avatar: 1, username: 1, talents: 1, updatedAt: 1, locationId: 1 } }).toArray();
+    const all = await db.collection('profiles').find({}, { projection: { name: 1, avatar: 1, username: 1, talents: 1, updatedAt: 1, locationId: 1, uid: 1, inactiveTalents: 1, status: 1 } }).toArray();
     // Filter out accidental "new profile" entries.
-    return all.filter(profile => {
+    const profiles = all.filter(profile => {
         const name = (profile.name || '').toLowerCase().trim();
         return name !== 'new profile';
     });
+    // RANKING_IDENTITY=new: profiles a competition was made from are events, not groups.
+    return identityMode() === 'new' ? markEventProfiles(db, profiles) : profiles;
 }
 
 async function readSessionProfileMapFromDb() {
@@ -620,6 +622,7 @@ const liveDependencyRepository = {
 };
 
 const { buildTalentAvatars, buildProfileMap, buildTalentToProfileMap, orderForOwnership, buildProfileNameToIdMap, buildUidMaps, aggregateIndividual, aggregateGroup } = require('./leaderboardAggregation');
+const { identityMode, buildIndividualMaps, markEventProfiles } = require('./talentIdentity');
 
 // ==========================================
 // SHARED AGGREGATION (used by API + SSE push)
@@ -726,6 +729,9 @@ async function _buildLeaderboardDataInner(context, { force = false } = {}) {
     const talentToProfile = buildTalentToProfileMap(owned);
     const profileNameToId = buildProfileNameToIdMap(profiles);
     const { uidToTalent, uidToProfile } = buildUidMaps(owned);
+    // Idol rankings: one row per person with RANKING_IDENTITY=new (old: the maps above). Group totals keep the maps above.
+    const im = buildIndividualMaps(profiles, sessionProfileMap, { mode: identityMode() });
+    const groupTalentToProfile = im.groupTalentToProfile(talentToProfile);
 
     const allBuckets = await giftBucketStore.get(context, { force });
     const allDailyGifts = allBuckets.filter(g => g.daily);
@@ -744,19 +750,19 @@ async function _buildLeaderboardDataInner(context, { force = false } = {}) {
     // Run all 6 aggregations (today + yesterday for daily)
     // Individual + Group both include manual gifts; Group also uses the session map
     const [individualDaily, individualYesterday, individualMonthly, groupDaily, groupYesterday, groupMonthly] = await Promise.all([
-        aggregateIndividual(dailyGifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
-        aggregateIndividual(yesterdayGifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
-        aggregateIndividual(monthlyGifts, talentAvatarMap, profileNameToId, uidToTalent, talentToProfile, profileMap, uidToProfile),
-        aggregateGroup(allDailyGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap),
-        aggregateGroup(allYesterdayGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap),
-        aggregateGroup(allDisplayedMonthlyGifts, talentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap)
+        im.visible(aggregateIndividual(dailyGifts, im.talentAvatarMap, im.profileNameToId, im.uidToTalent, im.talentToProfile, im.profileMap, im.uidToProfile)),
+        im.visible(aggregateIndividual(yesterdayGifts, im.talentAvatarMap, im.profileNameToId, im.uidToTalent, im.talentToProfile, im.profileMap, im.uidToProfile)),
+        im.visible(aggregateIndividual(monthlyGifts, im.talentAvatarMap, im.profileNameToId, im.uidToTalent, im.talentToProfile, im.profileMap, im.uidToProfile)),
+        aggregateGroup(allDailyGifts, groupTalentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap),
+        aggregateGroup(allYesterdayGifts, groupTalentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap),
+        aggregateGroup(allDisplayedMonthlyGifts, groupTalentToProfile, profileMap, profileNameToId, uidToTalent, uidToProfile, sessionProfileMap)
     ]);
 
     // Format individual: resolve avatar from cache/disk only (non-blocking).
     // Missing avatars are fetched in the background and appear on the next build.
     function formatIndividual(raw) {
         return raw.map(entry => {
-            const talentInfo = talentAvatarMap[entry._id] || {};
+            const talentInfo = im.talentAvatarMap[entry._id] || {};
             const avatar = resolveAvatarFast(talentInfo.avatarUrl, talentInfo.uniqueId);
             return {
                 name: entry._id,
@@ -828,11 +834,14 @@ async function _buildLeaderboardDataInner(context, { force = false } = {}) {
 
     // Attach locationId + groupId to individual entries (groupId = the talent's profile/group)
     function attachLocationToIndividual(arr) {
-        return arr.map(entry => ({
-            ...entry,
-            locationId: talentLocationMap[entry.name] || '',
-            groupId: talentGroupMap[entry.name] || ''
-        }));
+        return arr.map(entry => {
+            const group = im.groupOf ? im.groupOf(entry.name) : null;
+            return {
+                ...entry,
+                locationId: group ? group.locationId : talentLocationMap[entry.name] || '',
+                groupId: group ? group.groupId : talentGroupMap[entry.name] || ''
+            };
+        });
     }
 
     // Groups list (every profile = a group) for client-side group filtering, grouped by location
@@ -870,6 +879,7 @@ async function buildHistoricalLeaderboardData(period) {
     const talentToProfile = buildTalentToProfileMap(owned);
     const profileNameToId = buildProfileNameToIdMap(profiles);
     const { uidToTalent, uidToProfile } = buildUidMaps(owned);
+    const im = buildIndividualMaps(profiles, sessionProfileMap, { mode: identityMode() });
 
     const allGifts = decodeGiftBuckets(await db.collection('gifts').aggregate(
         buildGiftBucketPipeline({ start: Date.parse(period.start), end: Date.parse(period.end), month: true, plainFrom: monthPlainFrom() }),
@@ -877,18 +887,18 @@ async function buildHistoricalLeaderboardData(period) {
     ).toArray());
     const individualGifts = allGifts; // Manual adjustments count for individual rankings too.
 
-    const individualRaw = aggregateIndividual(
+    const individualRaw = im.visible(aggregateIndividual(
         individualGifts,
-        talentAvatarMap,
-        profileNameToId,
-        uidToTalent,
-        talentToProfile,
-        profileMap,
-        uidToProfile
-    );
+        im.talentAvatarMap,
+        im.profileNameToId,
+        im.uidToTalent,
+        im.talentToProfile,
+        im.profileMap,
+        im.uidToProfile
+    ));
     const groupRaw = aggregateGroup(
         allGifts,
-        talentToProfile,
+        im.groupTalentToProfile(talentToProfile),
         profileMap,
         profileNameToId,
         uidToTalent,
@@ -907,14 +917,15 @@ async function buildHistoricalLeaderboardData(period) {
 
     return {
         individual: individualRaw.map(entry => {
-            const talent = talentAvatarMap[entry._id] || {};
+            const talent = im.talentAvatarMap[entry._id] || {};
+            const group = im.groupOf ? im.groupOf(entry._id) : null;
             return {
                 id: String(talent.id || entry._id),
                 name: entry._id,
                 value: entry.totalDiamonds,
                 avatar: resolveAvatarFast(talent.avatarUrl, talent.uniqueId),
-                groupId: talentGroupMap[entry._id] || '',
-                locationId: talentLocationMap[entry._id] || '',
+                groupId: group ? group.groupId : talentGroupMap[entry._id] || '',
+                locationId: group ? group.locationId : talentLocationMap[entry._id] || '',
             };
         }),
         group: groupRaw.map(entry => {
@@ -1163,7 +1174,7 @@ const rankingSnapshots={
     async load(key){const doc=await db?.collection('ranking_next_snapshots').findOne({_id:key});return doc?JSON.parse(doc.json):null},
     async save(key,result){await db?.collection('ranking_next_snapshots').updateOne({_id:key},{$set:{json:JSON.stringify(result),savedAt:new Date()}},{upsert:true})},
 };
-const nextRanking=createNextRanking({getDb:()=>db,snapshots:rankingSnapshots,current:getLeaderboardResult,readProfiles:readProfilesFromDb,readLocations:readLocationsFromDb,avatar:resolveAvatarFast,reconcile:sheetReconciliation,groupRules,dayCount:()=>boardSettings.dayCount()});
+const nextRanking=createNextRanking({getDb:()=>db,snapshots:rankingSnapshots,current:getLeaderboardResult,readProfiles:readProfilesFromDb,readLocations:readLocationsFromDb,avatar:resolveAvatarFast,reconcile:sheetReconciliation,groupRules,dayCount:()=>boardSettings.dayCount(),identity:identityMode});
 // Daily read-only reconciliation report (admin only). Built once a day from 09:00 Vietnam time.
 const dailyReport=createDailyReport({getDb:()=>db,groupRules,sheets:leaderboardAuth.sheets,readProfiles:readProfilesFromDb,current:getLeaderboardResult,appVersion:process.env.APP_VERSION||'dev',
     // RECON_REPORT_GROUPS (comma list) limits the report; default: all eight groups.
