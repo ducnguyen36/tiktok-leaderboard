@@ -284,7 +284,7 @@ function createCompetitionPages({getDb,getTestDb=null,auth,publicDir=path.join(_
   }
   // Non-admin writes: browser-enforced same origin plus a JSON body (a cross-site form cannot send one).
   function sameOrigin(req){
-    const origin=auth.origin||`${req.protocol}://${req.get('host')}`;
+    const origin=(auth.originFor&&auth.originFor(req))||auth.origin||`${req.protocol}://${req.get('host')}`;
     return req.get('origin')===origin&&req.get('sec-fetch-site')!=='cross-site'&&req.is('application/json')==='application/json';
   }
   // Admins pass leaderboardAuth's CSRF check; everyone else needs same origin + the given role.
