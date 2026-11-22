@@ -1007,7 +1007,9 @@ app.get('/api/leaderboard/stream', (req, res) => {
     res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'private, no-store',
-        'Connection': 'keep-alive'
+        'Connection': 'keep-alive',
+        // no buffering in nginx (DSM reverse proxy on the direct route), or updates arrive in bursts
+        'X-Accel-Buffering': 'no'
     });
 
     // Keep-alive

@@ -10,6 +10,10 @@ const { persistentSheetsKey } = require('./sheetsKeyStore');
 const TEN_MINUTES = 600000, DEVICE_LIFETIME = 180 * 86400000;
 const COOKIE = 'helios_access', FLOW_COOKIE = 'helios_oauth';
 const DEFAULT_ADMIN_EMAILS = 'ducnguyen36@gmail.com,heliostalentofficial@gmail.com,kimlinh727@gmail.com';
+// Other names the same app answers on. The NAS's own DDNS name goes straight to the office router
+// (DSM reverse proxy → this container), skipping the Cloudflare Tunnel that Viettel reaches badly.
+// EXTRA_PUBLIC_ORIGINS (comma separated, '' = none) overrides. Each needs its own Google redirect URI.
+const DEFAULT_EXTRA_ORIGINS = 'https://heliostalent.dscloud.biz:45050';
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const random = () => crypto.randomBytes(32).toString('base64url');
 const csrfFor = secret => hash(`csrf:${secret}`);
@@ -36,16 +40,33 @@ function configFromEnv() {
     try { sheetsKey = persistentSheetsKey('/app/avatars/.private'); } catch { /* fail closed; status reports setup required */ }
   }
   return { publicOrigin: process.env.PUBLIC_ORIGIN, googleClientId: process.env.GOOGLE_CLIENT_ID,
+    extraOrigins: (process.env.EXTRA_PUBLIC_ORIGINS ?? DEFAULT_EXTRA_ORIGINS).split(',').map(value => value.trim()).filter(Boolean),
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET, sheetsTokenEncryptionKey: sheetsKey,
     // The owner accounts are always administrators; ADMIN_EMAILS can add more.
     adminEmails: [...DEFAULT_ADMIN_EMAILS.split(','), ...(process.env.ADMIN_EMAILS || '').split(',')] };
 }
 function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, sheetsClientFactory, store = createAuthStore(getDb), now = () => new Date(), streamCheckMs = 5000 }) {
-  let origin;
-  try {
-    const parsed = new URL(config.publicOrigin);
-    if (parsed.origin === config.publicOrigin && (parsed.protocol === 'https:' || (parsed.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)))) origin = parsed.origin;
-  } catch { /* Invalid configuration remains locked. */ }
+  const validOrigin = value => {
+    try {
+      const parsed = new URL(value);
+      if (parsed.origin === value && (parsed.protocol === 'https:' || (parsed.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)))) return parsed.origin;
+    } catch { /* Invalid configuration remains locked. */ }
+    return undefined;
+  };
+  const origin = validOrigin(config.publicOrigin);
+  // Only alongside a valid main origin; an extra name never unlocks a broken configuration.
+  const origins = origin ? [...new Set([origin, ...(config.extraOrigins || []).map(validOrigin).filter(Boolean)])] : [];
+  // The allowed origin this request came in on (Host, else X-Forwarded-Host from a reverse proxy),
+  // else the main one. Only listed names can be chosen, so a forged header gains nothing.
+  function originFor(req) {
+    for (const header of ['host', 'x-forwarded-host']) {
+      const host = String(req.get?.(header) || '').split(',')[0].trim().toLowerCase();
+      const match = host && origins.find(item => new URL(item).host === host);
+      if (match) return match;
+    }
+    return origin;
+  }
+  const callbackFor = value => `${value}/auth/google/callback`;
   const emails = new Set((config.adminEmails || []).map(email => email.trim().toLowerCase()).filter(Boolean));
   const configured = Boolean(origin && config.googleClientId && config.googleClientSecret && emails.size);
   const secure = Boolean(origin?.startsWith('https:')), callback = `${origin}/auth/google/callback`;
@@ -96,7 +117,7 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
   };
   async function mutation(req, res, adminOnly = false) {
     if (!configured) { fail(res, 503, 'setup_required'); return null; }
-    if (req.get('origin') !== origin || req.get('sec-fetch-site') === 'cross-site') { fail(res, 403, 'same_origin_required'); return null; }
+    if (req.get('origin') !== originFor(req) || req.get('sec-fetch-site') === 'cross-site') { fail(res, 403, 'same_origin_required'); return null; }
     const record = await identity(req), secret = cookies(req)[COOKIE];
     if (!record || !validSecret(secret) || req.get('x-csrf-token') !== csrfFor(secret)) { fail(res, 403, 'csrf_required'); return null; }
     if (adminOnly && record.kind !== 'admin') { fail(res, 403, 'admin_required'); return null; }
@@ -128,11 +149,11 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     if (!configured) return fail(res, 503, 'setup_required');
     if (!await bounded(req, 'login', 20)) return fail(res, 429, 'rate_limited');
     const secret = random(), state = random(), nonce = random();
-    const pair = pairingCode(req.query.pair);
-    await store.put({ _id: `oauth:${hash(state)}`, binding: hash(secret), nonce: hash(nonce), pair: pair || undefined, expiresAt: new Date(+now() + TEN_MINUTES) });
+    const pair = pairingCode(req.query.pair), redirect = callbackFor(originFor(req));
+    await store.put({ _id: `oauth:${hash(state)}`, binding: hash(secret), nonce: hash(nonce), pair: pair || undefined, redirect, expiresAt: new Date(+now() + TEN_MINUTES) });
     setCookie(res, FLOW_COOKIE, secret, TEN_MINUTES);
     res.redirect(provider.generateAuthUrl({ scope: 'openid email', state, nonce, code_challenge_method: 'S256',
-      code_challenge: crypto.createHash('sha256').update(verifierFor(secret)).digest('base64url'), redirect_uri: callback, prompt: 'select_account' }));
+      code_challenge: crypto.createHash('sha256').update(verifierFor(secret)).digest('base64url'), redirect_uri: redirect, prompt: 'select_account' }));
   }));
   router.get('/auth/google/callback', endpoint(async (req, res) => {
     if (!configured) return fail(res, 503, 'setup_required');
@@ -140,9 +161,11 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     if (!validSecret(secret) || !validSecret(req.query.state) || typeof req.query.code !== 'string' || req.query.code.length > 4096) return fail(res, 400, 'invalid_callback');
     const transaction = await store.consume(`oauth:${hash(req.query.state)}`, now()); setCookie(res, FLOW_COOKIE, '', 0);
     if (!transaction || transaction.binding !== hash(secret)) return fail(res, 400, 'invalid_callback');
+    // the token exchange repeats the redirect URI the flow started with (one of ours, stored server side)
+    const redirect = origins.some(item => callbackFor(item) === transaction.redirect) ? transaction.redirect : callback;
     let claims, tokens;
     try {
-      ({ tokens } = await provider.getToken({ code: req.query.code, codeVerifier: verifierFor(secret), redirect_uri: callback }));
+      ({ tokens } = await provider.getToken({ code: req.query.code, codeVerifier: verifierFor(secret), redirect_uri: redirect }));
       const ticket = await provider.verifyIdToken({ idToken: tokens.id_token, audience: config.googleClientId }); claims = ticket.getPayload();
     } catch { return fail(res, 403, 'identity_denied'); }
     const email = typeof claims?.email === 'string' ? claims.email.toLowerCase() : '';
@@ -164,13 +187,13 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
   router.post('/auth/sheets/connect', endpoint(async (req, res) => {
     const admin = await mutation(req, res, true); if (!admin) return;
     if (!sheets.configured) return fail(res, 503, 'sheets_setup_required');
-    const secret = random(), state = random(), nonce = random();
-    await store.put({ _id: `oauth:${hash(state)}`, binding: hash(secret), nonce: hash(nonce), purpose: 'sheets',
+    const secret = random(), state = random(), nonce = random(), redirect = callbackFor(originFor(req));
+    await store.put({ _id: `oauth:${hash(state)}`, binding: hash(secret), nonce: hash(nonce), purpose: 'sheets', redirect,
       adminId: admin._id, subject: admin.subject, expiresAt: new Date(+now() + TEN_MINUTES) });
     setCookie(res, FLOW_COOKIE, secret, TEN_MINUTES);
     res.json({ url: provider.generateAuthUrl({ scope: ['openid', 'email', SHEETS_WRITE_SCOPE], state, nonce,
       code_challenge_method: 'S256', code_challenge: crypto.createHash('sha256').update(verifierFor(secret)).digest('base64url'),
-      redirect_uri: callback, access_type: 'offline', prompt: 'consent', login_hint: admin.email }) });
+      redirect_uri: redirect, access_type: 'offline', prompt: 'consent', login_hint: admin.email }) });
   }));
   router.post('/auth/sheets/disconnect', endpoint(async (req, res) => {
     if (!await mutation(req, res, true)) return;
@@ -200,7 +223,7 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
     if (record.kind !== 'pending') return fail(res, 400, 'already_authorized');
     const code = crypto.randomBytes(5).toString('hex').toUpperCase(), pairId = `pair:${hash(code)}`;
     const expiresAt = new Date(Math.min(+record.expiresAt, +now() + TEN_MINUTES));
-    const pairingUrl = `${origin}/auth?pair=${encodeURIComponent(code)}`;
+    const pairingUrl = `${originFor(req)}/auth?pair=${encodeURIComponent(code)}`;
     const qrSvg = await QRCode.toString(pairingUrl, { type: 'svg', errorCorrectionLevel: 'M', margin: 1, width: 320, color: { dark: '#171614', light: '#FFF6ED' } });
     await store.put({ _id: pairId, browserId: record._id, expiresAt, qrSvg });
     if (!await store.setPair(record._id, pairId, now(), record.pairId)) { await store.remove(pairId); return fail(res, 409, 'pairing_changed'); }
@@ -264,7 +287,8 @@ function createLeaderboardAuth({ getDb, config = configFromEnv(), googleClient, 
   async function session(req) { try { const record = await identity(req); return record ? { id: record._id, kind: record.kind } : null; } catch { return null; } }
   // Admin-only same-origin, CSRF-checked request; resolves to the admin record or null (response sent).
   async function adminMutation(req, res) { try { return await mutation(req, res, true); } catch { if (!res.headersSent) fail(res, 503, 'access_unavailable'); return null; } }
-  // origin: the configured public origin (undefined when PUBLIC_ORIGIN is invalid), for same-origin checks elsewhere.
-  return { middleware: router, guardStream, sheets, isAdmin, session, adminMutation, origin };
+  // origin: the configured public origin (undefined when PUBLIC_ORIGIN is invalid); originFor(req): the allowed
+  // origin this request came in on — for same-origin checks elsewhere.
+  return { middleware: router, guardStream, sheets, isAdmin, session, adminMutation, origin, originFor };
 }
 module.exports = { createLeaderboardAuth };
