@@ -72,8 +72,8 @@
   return rows.map(r=>!r.eliminated&&cut.has(r.talentName)?{...r,eliminated:true,pkCut:true}:r);
  }
  function pages(){
-  const live=board.live,snaps=board.snapshots,list=[{id:'live',live:true,title:'LIVE',sub:'Cộng dồn từ đầu cuộc thi',rows:withPkCut(live.rows,live.pkStage),groups:live.groups,gone:outNames(snaps[0]),pk:live.pkStage||null,rounds:live.rounds||null}];
-  snaps.forEach((s,i)=>list.push({id:s.id,title:s.name,sub:`${when(s.at)}${s.createdBy?` · ${s.createdBy}`:''}`,rows:withPkCut(s.rows,s.pkStage),groups:s.groups,gone:outNames(snaps[i+1]),pk:s.pkStage||null,rounds:s.rounds||null}));
+  const live=board.live,snaps=board.snapshots,list=[{id:'live',live:true,title:'LIVE',sub:'Cộng dồn từ đầu cuộc thi',rows:withPkCut(live.rows,live.pkStage),groups:live.groups,gone:outNames(snaps[0]),pk:live.pkStage||null,rounds:live.rounds||null,standing:live.standing||null}];
+  snaps.forEach((s,i)=>list.push({id:s.id,title:s.name,sub:`${when(s.at)}${s.createdBy?` · ${s.createdBy}`:''}`,rows:withPkCut(s.rows,s.pkStage),groups:s.groups,gone:outNames(snaps[i+1]),pk:s.pkStage||null,rounds:s.rounds||null,standing:s.standing||null}));
   return list;
  }
  // "Cuộc thi": talents out since an earlier round are gone; those out in this round show dimmed at the bottom
@@ -92,10 +92,13 @@
  // panel position, or the server's fallback by score at that moment), then score. Groups count everyone.
  const outTime=row=>{const t=Date.parse(row.eliminatedAt||'');return Number.isFinite(t)?t:-Infinity};
  const outRank=row=>Number.isInteger(row.eliminatedRank)&&row.eliminatedRank>0?row.eliminatedRank:null;
+ // HeliosControl's Top dưới (standing group 'lower', e.g. the revived who skip the solo): below Top trên, each by score
+ const lowerNames=page=>new Set((page?.standing?.rows||[]).filter(r=>r.group==='lower').map(r=>r.talentName));
+ function tiered(rows,page){const low=lowerNames(page);if(!low.size)return ranked(rows);return [...ranked(rows.filter(r=>!low.has(r.talentName))),...ranked(rows.filter(r=>low.has(r.talentName)))]}
  function placed(rows,page,group){
   if(group||mode!=='competition')return ranked(rows);
   const out=rows.filter(r=>roundOut(page,r)).sort((a,b)=>outTime(b)-outTime(a)||(outRank(a)??Infinity)-(outRank(b)??Infinity)||value(b)-value(a)||String(a.talentName).localeCompare(String(b.talentName)));
-  return [...ranked(rows.filter(r=>!roundOut(page,r))),...out];
+  return [...tiered(rows.filter(r=>!roundOut(page,r)),page),...out];
  }
  function list(title,rows,group,page){
   const wrap=el(group?'aside':'div',group?'groups':'talents');if(group)wrap.setAttribute('aria-label',title);

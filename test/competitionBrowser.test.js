@@ -293,3 +293,17 @@ test('PK stage on a phone: match cards and tables lead mid-PK, voting order whil
  delete comp.pkStage;delete comp.eliminatedLog;delete comp.eliminated;await open();
  assert.equal(await live.locator('.pk-board').count(),0);assert.equal(await live.locator('.rounds-fold').count(),0);assert.equal(await live.locator('.talents .row').count(),3);
 });
+test('Top dưới from HeliosControl (the revived who skip the solo): below Top trên, each group by score',async t=>{
+ const {app,state}=createCompetitionFixture(),server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base=`http://127.0.0.1:${server.address().port}`;
+ // LILY has the most points but was revived: she is listed under the ones still playing
+ state.db.rows('competitions')[0].standing={rows:[{talentName:'RYAN',place:1,group:'upper'},{talentName:'Chanee🌸',place:2,group:'upper'},{talentName:'LILY 🍉',place:3,group:'lower'}],safeAfter:0,cutAfter:0};
+ const browser=await chromium.launch({channel:'chrome',headless:true,args:['--proxy-server=direct://','--proxy-bypass-list=*']}),errors=[];
+ t.after(async()=>{await browser.close();server.closeAllConnections();server.close();assert.deepEqual(errors,[])});
+ const context=await browser.newContext({viewport:{width:375,height:812}});await context.addCookies([{name:'test_admin',value:'1',url:base}]);
+ const page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(`${base}/pk-battle-16-10`);const live=page.locator('.page.live');await live.locator('.talents .row').first().waitFor();
+ const names=()=>live.locator('.talents .row .who b').allTextContents();
+ const got=await names();assert.equal(got[got.length-1],'LILY 🍉','Top dưới at the bottom');assert.deepEqual(got.slice(0,2),['RYAN','Chanee🌸'],'Top trên by score');
+ // no Top dưới: plain score order again
+ state.db.rows('competitions')[0].standing=null;
+});
