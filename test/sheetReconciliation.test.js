@@ -56,7 +56,8 @@ test('night shifts after midnight belong to the previous 06:00 workday, like the
 test('sheet nicknames match profile names without emoji or decorations',()=>{
  const head=['Date','Lapin','Wina','Katie','Zelzi','Chan','Ariel','Chung','TỔNG','TOTAL'];
  const cols=Object.fromEntries(talentColumns(head,['Lapin 🐰','Wina here 🐱','🎀 Hello Katie','ᴸᵘᶜᵏʸ ZELzii','Chanana🐲✨','Aliz🤍']).map(c=>[c.name,c.index]));
- assert.deepEqual(cols,{'Lapin 🐰':1,'Wina here 🐱':2,'🎀 Hello Katie':3,'ᴸᵘᶜᵏʸ ZELzii':4,'Chanana🐲✨':5,'Aliz🤍':-1});
+ assert.deepEqual(cols,{'Lapin 🐰':1,'Wina here 🐱':2,'🎀 Hello Katie':3,'ᴸᵘᶜᵏʸ ZELzii':4,'Chanana🐲✨':5,'Aliz🤍':6},'Aliz is the Ariel column (confirmed 28/11)');
+ assert.deepEqual(talentColumns(['Date','Blue','Levi','Ryan'],['ʟᴇᴠɪ 🦁','RYAN']).map(c=>c.index),[2,3],'small capitals read as letters');
  assert.deepEqual(talentColumns(['Date','Chan'],['Chanana','Chanee']).map(c=>c.index),[-1,-1],'an ambiguous column is not guessed');
 });
 test('a stray row from another month and text in a score cell do not drop the whole sheet',()=>{
@@ -86,4 +87,14 @@ test('on the 1st the check still reads the finished month tab',async()=>{
 test('a side table after a blank row is not read as the last day (NEXAR KPI table)',()=>{
  const parsed=parseSheet([headers,[],[46296,100,200,0,300,300],[46325,null,null,0,0,0],[],[],[null,'NAME','KPI','LACK','TOTAL'],[null,'ANDEE',250000,238566,11434]],'2026-10',['Alice','Bob']);
  assert.equal(parsed.days.length,1);assert.equal(parsed.days[0].group,300);
+});
+test('a second row of a day (LIVE ĐT) lists only who played: its blanks are 0, not unfilled',()=>{
+ const head=['Date','John','Tobu','Lapin','Chung','TỔNG','TOTAL'];
+ const parsed=parseSheet([head,[],[46346,11,44701,2804,620,65601,59648],[46346,null,6014,null,null,null,6014]],'2026-11',['john💚','🫶TOBU🫶','Lapin 🐰']);
+ const day=parsed.days[0];
+ assert.equal(parsed.days.length,1);
+ assert.deepEqual([day.individual['🫶TOBU🫶'],day.individual['john💚'],day.individual['Lapin 🐰']],[50715,11,2804]);
+ assert.deepEqual(day.provided,{'john💚':true,'🫶TOBU🫶':true,'Lapin 🐰':true});
+ assert.equal(day.group,71615,'the sheet total is kept as written');
+ assert.equal(day.cells,54150,'what its cells add up to (with Chung), to point out the total cell');
 });

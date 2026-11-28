@@ -1,5 +1,6 @@
 'use strict';
-// One person = one row on the idol rankings (switch RANKING_IDENTITY, default 'old').
+// One person = one row on the idol rankings (switch RANKING_IDENTITY, default 'new'
+// since 28/11; RANKING_IDENTITY=old goes back).
 //
 // HeliosControl profiles are not only groups: an event profile (e.g. CROWN WAR II,
 // made when a competition is set up) copies members of real groups under event
@@ -20,7 +21,7 @@ const A = require('./leaderboardAggregation');
 
 const MODES = ['old', 'new'];
 function identityMode(value = process.env.RANKING_IDENTITY) {
-    return String(value || '').trim().toLowerCase() === 'new' ? 'new' : 'old';
+    return String(value || '').trim().toLowerCase() === 'old' ? 'old' : 'new';
 }
 
 // Profiles that are events, not groups. Also detected from the data: a profile a
@@ -44,7 +45,29 @@ const CONFIRMED_SAME_PERSON = Object.freeze({
     'mimiibakhitrentunghatbi': '7014456012867290138', // old TikTok of mimi🐿️ (VELIX)
     'TTS-Anthonyyyy 🦋': '7341033020629992456',       // renamed -> 🐦‍🔥🐺Z A NH (NEXAR)
     'Anthonyyyy 🦋': '7341033020629992456',
+    '🐦‍🔥🐺Z A NH': '7341033020629992456',
 });
+// Members Backstage lists in a group whose HeliosControl profile does not list them
+// (28/11): added to that profile for the idol rankings only, so their gifts in the
+// group's lives (and in events) count for them under their group. Profile id ->
+// { shown name: { id, uniqueId } }. Skipped when the profile already has the uid.
+const CONFIRMED_GROUP_MEMBERS = Object.freeze({
+    '1786863896299': { // HT - NEXAR
+        'Anthonyyyy 🦋': { id: '7341033020629992456', uniqueId: 'ch.danh50' }, // Antony (Nguyễn Chí Danh)
+        'Note': { id: '7052582517698642971' },
+        'TTS-HT Cryo': { id: '7132354712032707586' },
+    },
+});
+function withConfirmedMembers(profiles, members = CONFIRMED_GROUP_MEMBERS) {
+    return profiles.map(p => {
+        const extra = members[String(p._id)];
+        if (!extra) return p;
+        const talents = { ...(p.talents || {}) };
+        const uids = new Set(Object.values(talents).map(t => str(t && t.id)).filter(Boolean));
+        for (const [name, t] of Object.entries(extra)) if (!uids.has(str(t.id)) && !talents[name]) talents[name] = { ...t };
+        return { ...p, talents };
+    });
+}
 // Other @uniqueIds of one person -> the person's uid.
 const CONFIRMED_SAME_PERSON_UNIQUE_IDS = Object.freeze({
     'andeej.htnexar': '6775064023412671489',
@@ -67,7 +90,8 @@ function classifyProfile(profile, { eventProfileIds = EVENT_PROFILE_IDS, disband
 //   talentProfile: shown name -> profile id of the person's group (label);
 //   aliases: other names of a person -> shown name (used only when the gift's uid
 //     and @uniqueId do not decide).
-function normalizeProfiles(profiles, options = {}) {
+function normalizeProfiles(input, options = {}) {
+    const profiles = withConfirmedMembers(input, options.groupMembers);
     const info = new Map(profiles.map(p => [String(p._id), classifyProfile(p, options)]));
     const entries = [];
     profiles.forEach((profile, order) => {
@@ -147,7 +171,7 @@ function buildIndividualMaps(profiles, sessionProfileMap = {}, { mode = 'old', .
     const { uidToTalent, uidToProfile } = A.buildUidMaps(owned);
     const byId = Object.fromEntries(profiles.map(p => [String(p._id), p]));
     // Other uids / @uniqueIds of a person (only the kept entry is in the maps).
-    for (const p of profiles) {
+    for (const p of withConfirmedMembers(profiles, options.groupMembers)) {
         for (const [name, t] of Object.entries(p.talents || {})) {
             const shown = n.talentProfile[name] !== undefined ? name : n.aliases[name];
             if (!shown || n.talentProfile[shown] === undefined) continue;
@@ -214,6 +238,6 @@ async function markEventProfiles(db, profiles) {
 }
 
 module.exports = {
-    MODES, identityMode, EVENT_PROFILE_IDS, DISBANDED_PROFILE_IDS, GROUP_ACCOUNT_UIDS, CONFIRMED_SAME_PERSON,
+    MODES, identityMode, EVENT_PROFILE_IDS, DISBANDED_PROFILE_IDS, GROUP_ACCOUNT_UIDS, CONFIRMED_SAME_PERSON, CONFIRMED_GROUP_MEMBERS, withConfirmedMembers,
     CONFIRMED_SAME_PERSON_UNIQUE_IDS, classifyProfile, normalizeProfiles, buildIndividualMaps, markEventProfiles,
 };

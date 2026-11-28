@@ -109,6 +109,11 @@ async function buildReport({ db, sheets, profiles, monthly, now = Date.now(), gr
         if (kind === 'group' && result.status !== STATUS.pending) compared.add(date);
       };
       push('group', profile.name, sheetDay?.group, dbGroup, Boolean(sheetDay));
+      // The sheet's own total cell vs its talent cells: a typo there shows as a group gap.
+      const groupRow = entry.rows[entry.rows.length - 1];
+      if (sheetDay && groupRow && groupRow.date === date && groupRow.kind === 'group' && Math.abs(sheetDay.group - sheetDay.cells) > Math.max(2, parsed.names.length)) {
+        groupRow.note = [groupRow.note, `Ô tổng trên Sheet ${fmt(round(sheetDay.group))} nhưng các ô idol (+ Chung) cộng lại ${fmt(round(sheetDay.cells))}`].filter(Boolean).join('; ');
+      }
       for (const name of parsed.names) {
         const dbTalent = dayScores.individual.find(e => e.name === name && e.groupId === groupId)?.value || 0;
         push('individual', name, sheetDay?.individual[name], dbTalent, Boolean(sheetDay && sheetDay.provided[name]));

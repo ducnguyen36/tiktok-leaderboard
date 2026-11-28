@@ -8,11 +8,19 @@ const {displayMonth}=require('./monthlyWindows');
 // previous day, independent of the board's own daily reset hour.
 const WORKDAY_HOUR=6,workday=value=>dayKey(value,WORKDAY_HOUR);
 // Talent names compared by letters/digits only: "Lapin" matches "Lapin 🐰".
-const nameKey=value=>String(value||'').normalize('NFKC').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+// NFKC turns styled letters (𝒀𝒊𝒊𝒏, ᴷʰᵒ) into plain ones; small capitals (ʟᴇᴠɪ) it
+// leaves, so they are folded here.
+const SMALL_CAPS={'ᴀ':'A','ʙ':'B','ᴄ':'C','ᴅ':'D','ᴇ':'E','ꜰ':'F','ɢ':'G','ʜ':'H','ɪ':'I','ᴊ':'J','ᴋ':'K','ʟ':'L','ᴍ':'M','ɴ':'N','ᴏ':'O','ᴘ':'P','ǫ':'Q','ʀ':'R','ꜱ':'S','ᴛ':'T','ᴜ':'U','ᴠ':'V','ᴡ':'W','ʏ':'Y','ᴢ':'Z'};
+const foldSmallCaps=value=>String(value||'').replace(/[ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀꜱᴛᴜᴠᴡʏᴢ]/g,c=>SMALL_CAPS[c]);
+// Sheet columns named after another name of the talent (confirmed by the owner).
+// Talent name key -> sheet header keys.
+const SHEET_COLUMN_ALIASES=Object.freeze({ALIZ:['ARIEL']}); // Aliz🤍 (VELVET GRACE) = column Ariel, 28/11
+const nameKey=value=>foldSmallCaps(value).normalize('NFKC').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/[^A-Z0-9]/g,'');
 function talentColumns(headers,talentNames){
   const keys=headers.map(nameKey),found=talentNames.map(name=>{
     const key=nameKey(name);if(!key)return{name,index:-1};
-    const exact=keys.flatMap((h,i)=>i>0&&h===key?[i]:[]);
+    const wanted=[key,...(SHEET_COLUMN_ALIASES[key]||[])];
+    const exact=keys.flatMap((h,i)=>i>0&&wanted.includes(h)?[i]:[]);
     // Sheets often shorten a nickname ("Wina" for "Wina here 🐱", "Katie" for
     // "Hello Katie", "Zelzi" for "Lucky ZELzii").
     const loose=exact.length?exact:keys.flatMap((h,i)=>i>0&&h.length>=3&&(key.startsWith(h)||key.endsWith(h)||(h.length>=4&&key.includes(h)))?[i]:[]);
@@ -54,10 +62,16 @@ function parseSheet(values,month,talentNames){
     const cellSum=cells.reduce((n,v)=>n+v,0),tolerance=Math.max(2,cells.length);
     const addShare=shared!==0&&Math.abs(cellSum+shared-group)<=tolerance&&Math.abs(cellSum-group)>tolerance;
     const share=addShare?Math.floor(shared/talentNames.length):0;
-    const entry=days.get(date)||{date,group:0,individual:Object.fromEntries(names.map(n=>[n,0])),provided:Object.fromEntries(names.map(n=>[n,true]))};
+    // A second row of a day (another shift or account, e.g. "LIVE ĐT") may list only
+    // the talents who played: its blank cells mean 0, not "not filled".
+    const continuing=days.has(date);
+    const entry=days.get(date)||{date,group:0,cells:0,individual:Object.fromEntries(names.map(n=>[n,0])),provided:Object.fromEntries(names.map(n=>[n,true]))};
     entry.group+=group;
+    // What the row's cells add up to (with Chung when that is closer to the row total),
+    // to point out a total cell that does not match its own row.
+    entry.cells+=cells.length?cellSum+(Math.abs(cellSum+shared-group)<Math.abs(cellSum-group)?shared:0):group;
     // A text value in a score cell (not OFF) makes that talent's day unverifiable.
-    for(const c of columns){entry.individual[c.name]+=(typeof row[c.index]==='number'?row[c.index]:0)+share;entry.provided[c.name]=entry.provided[c.name]&&(typeof row[c.index]==='number'||normalize(row[c.index])==='OFF')}
+    for(const c of columns){entry.individual[c.name]+=(typeof row[c.index]==='number'?row[c.index]:0)+share;const blank=row[c.index]===undefined||row[c.index]===null||String(row[c.index]).trim()==='';entry.provided[c.name]=entry.provided[c.name]&&((continuing&&blank)||typeof row[c.index]==='number'||normalize(row[c.index])==='OFF')}
     days.set(date,entry);
   }
   if(!days.size&&outside)return{error:'date_month_mismatch',days:[]};
@@ -134,4 +148,4 @@ function createSheetReconciliation({getDb,sheets,groupRules,clock=Date.now}){
     pending=build(profiles,currentVersion).catch(()=>{result={state:'unavailable',warnings:[],sources:[]};checked=clock();version=currentVersion}).finally(()=>pending=null);return pending;
   }};
 }
-module.exports={normalize,nameKey,talentColumns,sheetDate,parseSheet,matchingProfile,discrepancy,comparableDay,createSheetReconciliation};
+module.exports={normalize,nameKey,SHEET_COLUMN_ALIASES,talentColumns,sheetDate,parseSheet,matchingProfile,discrepancy,comparableDay,createSheetReconciliation};

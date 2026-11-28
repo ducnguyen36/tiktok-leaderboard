@@ -73,9 +73,10 @@ test("mode 'old' builds exactly the maps used before", () => {
     assert.equal(im.visible(rows), rows);
     const tp = A.buildTalentToProfileMap(owned);
     assert.equal(im.groupTalentToProfile(tp), tp);
-    assert.equal(T.identityMode(''), 'old');
+    assert.equal(T.identityMode(''), 'new', 'one person one row by default since 28/11');
     assert.equal(T.identityMode('NEW'), 'new');
-    assert.equal(T.identityMode('yes'), 'old');
+    assert.equal(T.identityMode('OLD'), 'old');
+    assert.equal(T.identityMode('yes'), 'new');
 });
 
 test('regression: normal talents keep their rows, totals and group totals', () => {
@@ -204,4 +205,19 @@ test("the next ranking's daily rows use the switch; sheet checks keep 'old'", ()
     assert.equal(next.individual.find(r => r.name === 'Henry 🖤🪽').value, 100);
     assert.equal(next.individual.find(r => r.name === 'bobo🌻').groupId, 'velix');
     assert.equal(next.individual.length, old.individual.length - 12);
+});
+
+test('members Backstage lists but the group profile lacks join their group; event names lead to them', () => {
+    const nexar = { _id: '1786863896299', name: 'HT - NEXAR', uid: '7670886150074106898', talents: { 'Henry 🖤🪽': { id: '6811453679113225218' } } };
+    const crown = { _id: '1793099207175', name: 'CROWN WAR II', talents: { 'TTS-Anthonyyyy 🦋': { id: '7341033020629992456', uniqueId: 'ch.danh50' }, Henry: { id: '6811453679113225218' } } };
+    const n = T.normalizeProfiles([nexar, crown]);
+    assert.equal(String(n.talentProfile['Anthonyyyy 🦋']), '1786863896299');
+    assert.equal(String(n.talentProfile.Note), '1786863896299');
+    assert.equal(n.aliases['TTS-Anthonyyyy 🦋'], 'Anthonyyyy 🦋');
+    assert.equal(n.talentProfile['TTS-Anthonyyyy 🦋'], undefined, 'no row of its own under the event');
+    const im = T.buildIndividualMaps([nexar, crown], {}, { mode: 'new' });
+    assert.equal(im.uidToTalent['7341033020629992456'], 'Anthonyyyy 🦋');
+    assert.equal(im.uidToTalent[A.nameAliasKey('🐦‍🔥🐺Z A NH')], 'Anthonyyyy 🦋', 'the renamed account too');
+    const listed = T.withConfirmedMembers([{ ...nexar, talents: { Antony: { id: '7341033020629992456' } } }]);
+    assert.deepEqual(Object.keys(listed[0].talents).sort(), ['Antony', 'Note', 'TTS-HT Cryo'], 'a uid the profile already has is not added twice');
 });
